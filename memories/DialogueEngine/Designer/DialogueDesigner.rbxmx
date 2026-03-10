@@ -1438,10 +1438,7 @@ function Canvas:_showContextMenu(cx, cy)
 	local menu = Instance.new("Frame")
 	menu.Name = "ContextMenu"
 	menu.Size = UDim2.fromOffset(150, 64)
-	menu.Position = UDim2.fromOffset(
-		cx - self._scroll.CanvasPosition.X,
-		cy - self._scroll.CanvasPosition.Y
-	)
+	menu.Position = UDim2.fromOffset(cx, cy)
 	menu.BackgroundColor3 = T.Colors.Toolbar
 	menu.BorderSizePixel = 0
 	menu.ZIndex = 30
