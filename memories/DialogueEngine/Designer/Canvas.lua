@@ -117,12 +117,51 @@ function Canvas:_createOverlay()
 	ov.Parent = self._widget
 	self._overlay = ov
 
+	-- Clicks on overlay: complete or cancel connections
+	ov.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
+			local pos = self:_getMousePos()
+			local targetId = self:_hitTestInputDot(pos)
+			if targetId then
+				local from = self._connecting
+				self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetId })
+				self._conns:CancelDrag()
+				self._connecting = nil
+				self:_removeOverlay()
+				self:RefreshConnections()
+			else
+				self:_onMouseUp()
+			end
+		end
+	end)
+
 	-- Poll mouse position every frame
 	self._heartbeat = RunService.Heartbeat:Connect(function()
 		if self._drag or self._connecting then
 			self:_onMouseMove(self:_getMousePos())
 		end
 	end)
+end
+
+function Canvas:_hitTestInputDot(widgetPos)
+	local hitRadius = 14
+	for nodeId, w in pairs(self._widgets) do
+		local dotCenter = w:GetInputDotCenter()
+		if dotCenter then
+			local pw = self:_getPluginWidget()
+			local wAbs = pw and pw.AbsolutePosition or Vector2.new(0, 0)
+			local sAbs = self._scroll.AbsolutePosition
+			local cp = self._scroll.CanvasPosition
+			local screenX = dotCenter.X - cp.X + (sAbs.X - wAbs.X)
+			local screenY = dotCenter.Y - cp.Y + (sAbs.Y - wAbs.Y)
+			local dx = widgetPos.X - screenX
+			local dy = widgetPos.Y - screenY
+			if dx * dx + dy * dy <= hitRadius * hitRadius then
+				return nodeId
+			end
+		end
+	end
+	return nil
 end
 
 function Canvas:_removeOverlay()
@@ -217,28 +256,12 @@ function Canvas:_wireChoiceDots(w, nodeId)
 					end
 				end
 			end)
-			dot.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
-					self:_onMouseUp()
-				end
-			end)
 		end
 	end
 end
 
 function Canvas:_wireInputDot(w, targetNodeId)
-	local dot = w:GetInputDot()
-	if not dot then return end
-	dot.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
-			local from = self._connecting
-			self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetNodeId })
-			self._conns:CancelDrag()
-			self._connecting = nil
-			self:_removeOverlay()
-			self:RefreshConnections()
-		end
-	end)
+	-- Input dot clicks are now handled via overlay hit-testing
 end
 
 ------------------------------------------------------------------------
