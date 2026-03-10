@@ -87,13 +87,13 @@ function NodeWidget:_build()
 	preview.TextTruncate = Enum.TextTruncate.AtEnd
 	preview.ZIndex = 3
 
-	-- Drag handle (header + preview; below input/choice dots so they receive clicks first)
+	-- Interaction handle — covers entire node; Canvas decides drag vs connect
 	local dragH = Instance.new("Frame", frame)
 	dragH.Name = "DragHandle"
-	dragH.Size = UDim2.new(1, 0, 0, T.Sizes.HeaderHeight + 44)
+	dragH.Size = UDim2.fromScale(1, 1)
 	dragH.Position = UDim2.fromOffset(0, 0)
 	dragH.BackgroundTransparency = 1
-	dragH.ZIndex = 4
+	dragH.ZIndex = 6
 	self._dragHandle = dragH
 
 	-- Input anchor (top center)
@@ -175,6 +175,24 @@ function NodeWidget:GetChoiceDotCenter(i)
 		self._data.x + spacing * i,
 		self._data.y + self._frame.AbsoluteSize.Y
 	)
+end
+
+function NodeWidget:HitTestChoiceDot(localX, localY)
+	local choices = self._data.choices or {}
+	if #choices == 0 then return nil end
+	local frameH = self._frame.AbsoluteSize.Y
+	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
+	local hitR = Theme.Sizes.DotRadius + 4
+	for i = 1, #choices do
+		local cx = spacing * i
+		local cy = frameH - Theme.Sizes.DotRadius
+		local dx = localX - cx
+		local dy = localY - cy
+		if dx * dx + dy * dy <= hitR * hitR then
+			return i
+		end
+	end
+	return nil
 end
 
 function NodeWidget:GetHeaderFrame()

@@ -117,24 +117,6 @@ function Canvas:_createOverlay()
 	ov.Parent = self._widget
 	self._overlay = ov
 
-	-- Clicks on overlay: complete or cancel connections
-	ov.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
-			local pos = self:_getMousePos()
-			local targetId = self:_hitTestInputDot(pos)
-			if targetId then
-				local from = self._connecting
-				self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetId })
-				self._conns:CancelDrag()
-				self._connecting = nil
-				self:_removeOverlay()
-				self:RefreshConnections()
-			else
-				self:_onMouseUp()
-			end
-		end
-	end)
-
 	-- Poll mouse position every frame
 	self._heartbeat = RunService.Heartbeat:Connect(function()
 		if self._drag or self._connecting then
@@ -221,45 +203,58 @@ function Canvas:_createWidget(nodeId)
 		dragHandle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				self._state:SelectNode(nodeId)
-				self._drag = {
-					nodeId     = nodeId,
-					startMouse = self:_getMousePos(),
-					startPos   = Vector2.new(node.x, node.y),
-				}
-				self:_createOverlay()
+
+				-- Check if click is on a choice dot
+				local frameAbs = w:GetFrame().AbsolutePosition
+				local localX = input.Position.X - frameAbs.X
+				local localY = input.Position.Y - frameAbs.Y
+				local choiceIdx = w:HitTestChoiceDot(localX, localY)
+
+				if choiceIdx then
+					local fromPos = w:GetChoiceDotCenter(choiceIdx)
+					if fromPos then
+						self._connecting = { nodeId = nodeId, choiceIndex = choiceIdx }
+						self._conns:StartDrag(fromPos)
+						self:_createOverlay()
+					end
+				else
+					self._drag = {
+						nodeId     = nodeId,
+						startMouse = self:_getMousePos(),
+						startPos   = Vector2.new(node.x, node.y),
+					}
+					self:_createOverlay()
+				end
 			end
 		end)
 		dragHandle.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 and self._drag then
-				self:_onMouseUp()
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				if self._connecting then
+					-- Check if released over an input dot
+					local pos = self:_getMousePos()
+					local targetId = self:_hitTestInputDot(pos)
+					if targetId then
+						local from = self._connecting
+						self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetId })
+					end
+					self._conns:CancelDrag()
+					self._connecting = nil
+					self:_removeOverlay()
+					self:RefreshConnections()
+				elseif self._drag then
+					self:_onMouseUp()
+				end
 			end
 		end)
 	end
-
-	self:_wireChoiceDots(w, nodeId)
-	self:_wireInputDot(w, nodeId)
 end
 
 function Canvas:_wireChoiceDots(w, nodeId)
-	local node = self._state.nodes[nodeId]
-	if not node then return end
-	for i = 1, #(node.choices or {}) do
-		local dot = w:GetChoiceDot(i)
-		if dot then
-			dot.MouseButton1Click:Connect(function()
-				local fromPos = w:GetChoiceDotCenter(i)
-				if fromPos then
-					self._connecting = { nodeId = nodeId, choiceIndex = i }
-					self._conns:StartDrag(fromPos)
-					self:_createOverlay()
-				end
-			end)
-		end
-	end
+	-- Choice dot interaction is handled via dragHandle hit-testing
 end
 
 function Canvas:_wireInputDot(w, targetNodeId)
-	-- Input dot clicks are now handled via overlay hit-testing
+	-- Input dot interaction is handled via dragHandle InputEnded hit-testing
 end
 
 ------------------------------------------------------------------------
