@@ -18,8 +18,7 @@ function Canvas.new(parent, appState)
 	self._drag        = nil  -- { nodeId, startMouse: Vector2, startPos: Vector2 }
 	self._connecting  = nil  -- { nodeId, choiceIndex }
 	self._overlay     = nil
-	self._uisConn     = nil  -- UserInputService.InputEnded fallback
-	self._heartbeat   = nil  -- RunService.Heartbeat for mouse-position polling
+	self._heartbeat   = nil  -- RunService.Heartbeat for mouse + button polling
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -119,31 +118,21 @@ function Canvas:_createOverlay()
 	ov.Parent = self._widget
 	self._overlay = ov
 
-	ov.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			self:_onMouseUp()
-		end
-	end)
-
-	-- Poll mouse position every frame via GetRelativeMousePosition
-	-- (single consistent coordinate source — avoids overlay InputChanged quirks)
+	-- Poll mouse position AND button state every frame
 	self._heartbeat = RunService.Heartbeat:Connect(function()
-		if self._drag or self._connecting then
-			self:_onMouseMove(self:_getMousePos())
-		end
-	end)
+		if not (self._drag or self._connecting) then return end
 
-	-- Fallback: mouse up may not fire on overlay if released outside GUI
-	self._uisConn = UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 and (self._drag or self._connecting) then
+		if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
 			self:_onMouseUp()
+			return
 		end
+
+		self:_onMouseMove(self:_getMousePos())
 	end)
 end
 
 function Canvas:_removeOverlay()
 	if self._heartbeat then self._heartbeat:Disconnect(); self._heartbeat = nil end
-	if self._uisConn then self._uisConn:Disconnect(); self._uisConn = nil end
 	if self._overlay then self._overlay:Destroy(); self._overlay = nil end
 end
 
