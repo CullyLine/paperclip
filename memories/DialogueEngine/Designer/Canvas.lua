@@ -246,14 +246,12 @@ function Canvas:_wireChoiceDots(w, nodeId)
 	for i = 1, #(node.choices or {}) do
 		local dot = w:GetChoiceDot(i)
 		if dot then
-			dot.InputBegan:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					local fromPos = w:GetChoiceDotCenter(i)
-					if fromPos then
-						self._connecting = { nodeId = nodeId, choiceIndex = i }
-						self._conns:StartDrag(fromPos)
-						self:_createOverlay()
-					end
+			dot.MouseButton1Click:Connect(function()
+				local fromPos = w:GetChoiceDotCenter(i)
+				if fromPos then
+					self._connecting = { nodeId = nodeId, choiceIndex = i }
+					self._conns:StartDrag(fromPos)
+					self:_createOverlay()
 				end
 			end)
 		end

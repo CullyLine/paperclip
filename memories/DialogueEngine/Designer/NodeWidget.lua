@@ -113,13 +113,15 @@ end
 
 function NodeWidget:_makeDot(name, color, position, parent)
 	local T = Theme
-	local dot = Instance.new("Frame", parent)
+	local dot = Instance.new("TextButton", parent)
 	dot.Name = name
 	dot.Size = UDim2.fromOffset(T.Sizes.DotRadius * 2, T.Sizes.DotRadius * 2)
 	dot.Position = position
 	dot.BackgroundColor3 = color
 	dot.BorderSizePixel = 0
 	dot.ZIndex = 5
+	dot.Text = ""
+	dot.AutoButtonColor = false
 	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
 	return dot
 end

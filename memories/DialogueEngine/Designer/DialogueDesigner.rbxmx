@@ -965,13 +965,15 @@ end
 
 function NodeWidget:_makeDot(name, color, position, parent)
 	local T = Theme
-	local dot = Instance.new("Frame", parent)
+	local dot = Instance.new("TextButton", parent)
 	dot.Name = name
 	dot.Size = UDim2.fromOffset(T.Sizes.DotRadius * 2, T.Sizes.DotRadius * 2)
 	dot.Position = position
 	dot.BackgroundColor3 = color
 	dot.BorderSizePixel = 0
 	dot.ZIndex = 5
+	dot.Text = ""
+	dot.AutoButtonColor = false
 	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
 	return dot
 end
@@ -1433,14 +1435,12 @@ function Canvas:_wireChoiceDots(w, nodeId)
 	for i = 1, #(node.choices or {}) do
 		local dot = w:GetChoiceDot(i)
 		if dot then
-			dot.InputBegan:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					local fromPos = w:GetChoiceDotCenter(i)
-					if fromPos then
-						self._connecting = { nodeId = nodeId, choiceIndex = i }
-						self._conns:StartDrag(fromPos)
-						self:_createOverlay()
-					end
+			dot.MouseButton1Click:Connect(function()
+				local fromPos = w:GetChoiceDotCenter(i)
+				if fromPos then
+					self._connecting = { nodeId = nodeId, choiceIndex = i }
+					self._conns:StartDrag(fromPos)
+					self:_createOverlay()
 				end
 			end)
 		end
