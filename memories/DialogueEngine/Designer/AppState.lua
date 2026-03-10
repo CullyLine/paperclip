@@ -47,6 +47,8 @@ function AppState.new()
 	self._redoStack = {}
 	self._maxUndo   = 50
 
+	self.npcConfigs  = {} -- { { id = "npc_1", displayName = "Guard" }, ... }
+
 	self.nodeAdded        = Signal.new()
 	self.nodeRemoved      = Signal.new()
 	self.nodeMoved        = Signal.new()
@@ -54,6 +56,7 @@ function AppState.new()
 	self.selectionChanged = Signal.new()
 	self.treeChanged      = Signal.new()
 	self.stateLoaded      = Signal.new()
+	self.npcConfigChanged = Signal.new()
 
 	return self
 end
@@ -311,6 +314,32 @@ function AppState:GetSortedNodeIds()
 	for id in pairs(self.nodes) do table.insert(ids, id) end
 	table.sort(ids)
 	return ids
+end
+
+------------------------------------------------------------------------
+-- NPC Config (global, persisted separately)
+------------------------------------------------------------------------
+function AppState:AddNPC(displayName)
+	local id = "npc_" .. (#self.npcConfigs + 1)
+	table.insert(self.npcConfigs, { id = id, displayName = displayName })
+	self.npcConfigChanged:Fire()
+	return id
+end
+
+function AppState:RemoveNPC(idx)
+	if self.npcConfigs[idx] then
+		table.remove(self.npcConfigs, idx)
+		self.npcConfigChanged:Fire()
+	end
+end
+
+function AppState:GetNPCs()
+	return self.npcConfigs
+end
+
+function AppState:LoadNPCConfigs(list)
+	self.npcConfigs = list or {}
+	self.npcConfigChanged:Fire()
 end
 
 return AppState

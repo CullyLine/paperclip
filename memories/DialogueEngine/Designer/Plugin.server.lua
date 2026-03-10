@@ -109,6 +109,7 @@ end
 -- Assemble the UI
 ------------------------------------------------------------------------
 local toolbarUI    = Toolbar.new(root, state)
+toolbarUI:LoadNPCConfigFromStorage()
 print("[DialogueDesigner] Toolbar built")
 local canvas       = Canvas.new(root, state)
 print("[DialogueDesigner] Canvas built")

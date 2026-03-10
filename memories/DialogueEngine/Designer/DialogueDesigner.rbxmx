@@ -119,6 +119,7 @@ end
 -- Assemble the UI
 ------------------------------------------------------------------------
 local toolbarUI    = Toolbar.new(root, state)
+toolbarUI:LoadNPCConfigFromStorage()
 print("[DialogueDesigner] Toolbar built")
 local canvas       = Canvas.new(root, state)
 print("[DialogueDesigner] Canvas built")
@@ -283,6 +284,8 @@ function AppState.new()
 	self._redoStack = {}
 	self._maxUndo   = 50
 
+	self.npcConfigs  = {} -- { { id = "npc_1", displayName = "Guard" }, ... }
+
 	self.nodeAdded        = Signal.new()
 	self.nodeRemoved      = Signal.new()
 	self.nodeMoved        = Signal.new()
@@ -290,6 +293,7 @@ function AppState.new()
 	self.selectionChanged = Signal.new()
 	self.treeChanged      = Signal.new()
 	self.stateLoaded      = Signal.new()
+	self.npcConfigChanged = Signal.new()
 
 	return self
 end
@@ -547,6 +551,32 @@ function AppState:GetSortedNodeIds()
 	for id in pairs(self.nodes) do table.insert(ids, id) end
 	table.sort(ids)
 	return ids
+end
+
+------------------------------------------------------------------------
+-- NPC Config (global, persisted separately)
+------------------------------------------------------------------------
+function AppState:AddNPC(displayName)
+	local id = "npc_" .. (#self.npcConfigs + 1)
+	table.insert(self.npcConfigs, { id = id, displayName = displayName })
+	self.npcConfigChanged:Fire()
+	return id
+end
+
+function AppState:RemoveNPC(idx)
+	if self.npcConfigs[idx] then
+		table.remove(self.npcConfigs, idx)
+		self.npcConfigChanged:Fire()
+	end
+end
+
+function AppState:GetNPCs()
+	return self.npcConfigs
+end
+
+function AppState:LoadNPCConfigs(list)
+	self.npcConfigs = list or {}
+	self.npcConfigChanged:Fire()
 end
 
 return AppState
@@ -839,7 +869,7 @@ end
 ------------------------------------------------------------------------
 function Serializer.ToModuleScript(state)
 	local txt = Serializer.Export(state)
-	return 'local DialogueParser = require(script.Parent.Parent.DialogueParser)\n\nreturn DialogueParser.Parse([[\n'
+	return 'local DialogueParser = require(game:GetService("ReplicatedStorage"):WaitForChild("DialogueEngine"):WaitForChild("DialogueParser"))\n\nreturn DialogueParser.Parse([[\n'
 		.. txt .. ']])\n'
 end
 
@@ -942,8 +972,9 @@ function NodeWidget:_build()
 	-- Interaction handle — covers entire node; Canvas decides drag vs connect
 	local dragH = Instance.new("Frame", frame)
 	dragH.Name = "DragHandle"
-	dragH.Size = UDim2.fromScale(1, 1)
+	dragH.Size = UDim2.new(1, 0, 1, T.Sizes.DotRadius + 4)
 	dragH.Position = UDim2.fromOffset(0, 0)
+	dragH.ClipsDescendants = false
 	dragH.BackgroundTransparency = 1
 	dragH.ZIndex = 6
 	self._dragHandle = dragH
@@ -1022,10 +1053,12 @@ end
 function NodeWidget:GetChoiceDotCenter(i)
 	local choices = self._data.choices or {}
 	if i > #choices then return nil end
-	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
+	local T = Theme
+	local spacing = T.Sizes.NodeWidth / (#choices + 1)
+	local h = math.max(T.Sizes.NodeMinHeight, T.Sizes.HeaderHeight + 44 + (#choices > 0 and 14 or 0))
 	return Vector2.new(
 		self._data.x + spacing * i,
-		self._data.y + self._frame.AbsoluteSize.Y
+		self._data.y + h
 	)
 end
 
@@ -1034,7 +1067,7 @@ function NodeWidget:HitTestChoiceDot(localX, localY)
 	if #choices == 0 then return nil end
 	local frameH = self._frame.AbsoluteSize.Y
 	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
-	local hitR = Theme.Sizes.DotRadius + 4
+	local hitR = Theme.Sizes.DotRadius + 10
 	for i = 1, #choices do
 		local cx = spacing * i
 		local cy = frameH - Theme.Sizes.DotRadius
@@ -1121,14 +1154,16 @@ function ConnectionRenderer:_createLine(from, to, color)
 	local delta  = to - from
 	local length = math.max(delta.Magnitude, 1)
 	local angle  = math.atan2(delta.Y, delta.X)
+	local mid    = (from + to) / 2
 
 	local line = Instance.new("Frame")
 	line.Size            = UDim2.fromOffset(length, Theme.Sizes.ConnThickness)
-	line.Position        = UDim2.fromOffset(from.X, from.Y)
-	line.AnchorPoint     = Vector2.new(0, 0.5)
+	line.Position        = UDim2.fromOffset(mid.X, mid.Y)
+	line.AnchorPoint     = Vector2.new(0.5, 0.5)
 	line.Rotation        = math.deg(angle)
 	line.BackgroundColor3 = color or Theme.Colors.ConnNormal
 	line.BorderSizePixel = 0
+	line.Active          = false
 	line.ZIndex          = 1
 	line.Parent          = self._canvas
 	return line
@@ -1224,7 +1259,8 @@ function Canvas.new(parent, appState)
 	self._drag        = nil  -- { nodeId, startMouse: Vector2, startPos: Vector2 }
 	self._connecting  = nil  -- { nodeId, choiceIndex }
 	self._overlay     = nil
-	self._heartbeat   = nil  -- RunService.Heartbeat for mouse + button polling
+	self._heartbeat   = nil  -- RunService.Heartbeat for drag polling
+	self._connectHB   = nil  -- RunService.Heartbeat for connection polling
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -1266,13 +1302,13 @@ function Canvas:_build(parent)
 	-- Right-click context menu + connection tracking via scroll events
 	scroll.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			local cx, cy = self:_screenToCanvas(input.Position.X, input.Position.Y)
+			local cx, cy = self:_widgetMouseToCanvas()
 			self:_showContextMenu(cx, cy)
 		end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			self:_dismissContextMenu()
 			if self._connecting then
-				local cx, cy = self:_screenToCanvas(input.Position.X, input.Position.Y)
+				local cx, cy = self:_widgetMouseToCanvas()
 				self:_finishConnect(cx, cy)
 			elseif not self._drag then
 				self._state:SelectNode(nil)
@@ -1280,12 +1316,7 @@ function Canvas:_build(parent)
 		end
 	end)
 
-	scroll.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement and self._connecting then
-			local cx, cy = self:_screenToCanvas(input.Position.X, input.Position.Y)
-			self._conns:UpdateDrag(Vector2.new(cx, cy))
-		end
-	end)
+	-- Connection mouse tracking is handled via Heartbeat in _startConnecting
 end
 
 ------------------------------------------------------------------------
@@ -1295,6 +1326,13 @@ function Canvas:_screenToCanvas(sx, sy)
 	local abs = self._scroll.AbsolutePosition
 	local cp  = self._scroll.CanvasPosition
 	return sx - abs.X + cp.X, sy - abs.Y + cp.Y
+end
+
+function Canvas:_widgetMouseToCanvas()
+	local pos = self:_getMousePos()
+	local cp  = self._scroll.CanvasPosition
+	local T   = Theme
+	return pos.X + cp.X, pos.Y - T.Sizes.ToolbarHeight + cp.Y
 end
 
 ------------------------------------------------------------------------
@@ -1366,10 +1404,52 @@ function Canvas:_onMouseUp()
 	end
 end
 
+function Canvas:_findNearestInputDot(cx, cy, snapRadius)
+	local bestDist = snapRadius * snapRadius
+	local bestPos = nil
+	local fromId = self._connecting and self._connecting.nodeId
+	for nodeId, w in pairs(self._widgets) do
+		if nodeId ~= fromId then
+			local center = w:GetInputDotCenter()
+			if center then
+				local dx, dy = cx - center.X, cy - center.Y
+				local d2 = dx * dx + dy * dy
+				if d2 < bestDist then
+					bestDist = d2
+					bestPos = center
+				end
+			end
+		end
+	end
+	return bestPos
+end
+
+function Canvas:_startConnecting(nodeId, choiceIdx, fromPos)
+	self._connecting = { nodeId = nodeId, choiceIndex = choiceIdx }
+	self._conns:StartDrag(fromPos)
+	if self._connectHB then self._connectHB:Disconnect() end
+	self._connectHB = RunService.Heartbeat:Connect(function()
+		if not self._connecting then return end
+		local cx, cy = self:_widgetMouseToCanvas()
+		local snap = self:_findNearestInputDot(cx, cy, 20)
+		if snap then
+			self._conns:UpdateDrag(snap)
+		else
+			self._conns:UpdateDrag(Vector2.new(cx, cy))
+		end
+	end)
+end
+
+function Canvas:_stopConnecting()
+	if self._connectHB then self._connectHB:Disconnect(); self._connectHB = nil end
+	self._conns:CancelDrag()
+	self._connecting = nil
+	self:RefreshConnections()
+end
+
 function Canvas:_finishConnect(cx, cy)
 	if not self._connecting then return end
-	local hitRadius = 14
-	local cp = self._scroll.CanvasPosition
+	local hitRadius = 20
 	for nodeId, w in pairs(self._widgets) do
 		local dotCenter = w:GetInputDotCenter()
 		if dotCenter then
@@ -1382,9 +1462,7 @@ function Canvas:_finishConnect(cx, cy)
 			end
 		end
 	end
-	self._conns:CancelDrag()
-	self._connecting = nil
-	self:RefreshConnections()
+	self:_stopConnecting()
 end
 
 ------------------------------------------------------------------------
@@ -1402,8 +1480,9 @@ function Canvas:_createWidget(nodeId)
 		dragHandle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				self._state:SelectNode(nodeId)
+				local curNode = self._state.nodes[nodeId]
+				if not curNode then return end
 
-				-- Check if click is on a choice dot
 				local frameAbs = w:GetFrame().AbsolutePosition
 				local localX = input.Position.X - frameAbs.X
 				local localY = input.Position.Y - frameAbs.Y
@@ -1412,14 +1491,13 @@ function Canvas:_createWidget(nodeId)
 				if choiceIdx then
 					local fromPos = w:GetChoiceDotCenter(choiceIdx)
 					if fromPos then
-						self._connecting = { nodeId = nodeId, choiceIndex = choiceIdx }
-						self._conns:StartDrag(fromPos)
+						self:_startConnecting(nodeId, choiceIdx, fromPos)
 					end
 				else
 					self._drag = {
 						nodeId     = nodeId,
 						startMouse = self:_getMousePos(),
-						startPos   = Vector2.new(node.x, node.y),
+						startPos   = Vector2.new(curNode.x, curNode.y),
 					}
 					self:_createOverlay()
 				end
@@ -1619,6 +1697,7 @@ function Canvas:Destroy()
 	for _, w in pairs(self._widgets) do w:Destroy() end
 	self._conns:Destroy()
 	self:_removeOverlay()
+	self:_stopConnecting()
 	if self._scroll then self._scroll:Destroy() end
 end
 
@@ -1636,11 +1715,12 @@ PropertyPanel.__index = PropertyPanel
 
 function PropertyPanel.new(parent, appState)
 	local self = setmetatable({}, PropertyPanel)
-	self._state   = appState
-	self._conns   = {}
-	self._frame   = nil
-	self._scroll  = nil
-	self._nodeId  = nil
+	self._state      = appState
+	self._conns      = {}
+	self._frame      = nil
+	self._scroll     = nil
+	self._nodeId     = nil
+	self._fieldOrder = {}
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -1759,6 +1839,38 @@ local function makeSeparator(parent, yOff, text)
 end
 
 ------------------------------------------------------------------------
+-- Field navigation helpers
+------------------------------------------------------------------------
+function PropertyPanel:_registerField(box)
+	table.insert(self._fieldOrder, box)
+	table.insert(self._conns, box.FocusLost:Connect(function(enterPressed)
+		if enterPressed and not box.MultiLine then
+			self:_focusNextField(box)
+		end
+	end))
+	table.insert(self._conns, box.InputBegan:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.Tab then
+			box:ReleaseFocus()
+			self:_focusNextField(box)
+		end
+	end))
+end
+
+function PropertyPanel:_focusNextField(currentBox)
+	for i, field in ipairs(self._fieldOrder) do
+		if field == currentBox then
+			local nextField = self._fieldOrder[i + 1]
+			if nextField and nextField.Parent then
+				task.defer(function()
+					nextField:CaptureFocus()
+				end)
+			end
+			return
+		end
+	end
+end
+
+------------------------------------------------------------------------
 -- Build panel frame
 ------------------------------------------------------------------------
 function PropertyPanel:_build(parent)
@@ -1810,6 +1922,7 @@ end
 function PropertyPanel:_clearScroll()
 	for _, c in ipairs(self._conns) do c:Disconnect() end
 	self._conns = {}
+	self._fieldOrder = {}
 	for _, child in ipairs(self._scroll:GetChildren()) do
 		child:Destroy()
 	end
@@ -1829,6 +1942,7 @@ function PropertyPanel:_populateNode(nodeId)
 	makeLabel(self._scroll, "NODE ID", y); y = y + 18
 	local idField = makeField(self._scroll, y, "node_id"); y = y + T.Sizes.FieldHeight + 8
 	idField.Text = node.id
+	self:_registerField(idField)
 	table.insert(self._conns, idField.FocusLost:Connect(function()
 		local newId = idField.Text:gsub("%s", "_"):gsub("[^%w_]", "")
 		if newId == "" or newId == node.id then idField.Text = node.id; return end
@@ -1837,19 +1951,120 @@ function PropertyPanel:_populateNode(nodeId)
 		self._nodeId = newId
 	end))
 
-	-- Speaker
+	-- Speaker (dropdown with NPC configs + custom fallback)
 	makeLabel(self._scroll, "SPEAKER (optional)", y); y = y + 18
-	local speakerField = makeField(self._scroll, y, "NPC model name"); y = y + T.Sizes.FieldHeight + 8
-	speakerField.Text = node.speaker or ""
-	table.insert(self._conns, speakerField.FocusLost:Connect(function()
-		local val = speakerField.Text ~= "" and speakerField.Text or nil
-		self._state:UpdateNode(self._nodeId, { speaker = val })
-	end))
+	local npcs = self._state:GetNPCs()
+
+	if #npcs > 0 then
+		local speakerBtn = Instance.new("TextButton", self._scroll)
+		speakerBtn.Size = UDim2.new(1, -16, 0, T.Sizes.FieldHeight)
+		speakerBtn.Position = UDim2.new(0, 8, 0, y)
+		speakerBtn.BackgroundColor3 = T.Colors.Field
+		speakerBtn.TextColor3 = node.speaker and T.Colors.Text or T.Colors.TextPlaceholder
+		speakerBtn.Text = node.speaker or "Select speaker..."
+		speakerBtn.TextSize = T.Sizes.Text
+		speakerBtn.Font = T.Fonts.Default
+		speakerBtn.TextXAlignment = Enum.TextXAlignment.Left
+		speakerBtn.BorderSizePixel = 0
+		speakerBtn.AutoButtonColor = false
+		Instance.new("UICorner", speakerBtn).CornerRadius = UDim.new(0, 4)
+		Instance.new("UIStroke", speakerBtn).Color = T.Colors.FieldBorder
+		Instance.new("UIPadding", speakerBtn).PaddingLeft = UDim.new(0, 6)
+		y = y + T.Sizes.FieldHeight + 2
+
+		local dropdown = nil
+		table.insert(self._conns, speakerBtn.MouseButton1Click:Connect(function()
+			if dropdown then dropdown:Destroy(); dropdown = nil; return end
+
+			dropdown = Instance.new("Frame", self._scroll)
+			dropdown.Size = UDim2.new(1, -16, 0, (#npcs + 2) * 24 + 4)
+			dropdown.Position = UDim2.new(0, 8, 0, y)
+			dropdown.BackgroundColor3 = T.Colors.Toolbar
+			dropdown.BorderSizePixel = 0
+			dropdown.ZIndex = 20
+			Instance.new("UICorner", dropdown).CornerRadius = UDim.new(0, 4)
+			Instance.new("UIStroke", dropdown).Color = T.Colors.FieldBorder
+
+			local dy = 2
+			for _, npc in ipairs(npcs) do
+				local opt = Instance.new("TextButton", dropdown)
+				opt.Size = UDim2.new(1, -4, 0, 22)
+				opt.Position = UDim2.fromOffset(2, dy)
+				opt.BackgroundColor3 = T.Colors.BtnNormal
+				opt.TextColor3 = T.Colors.Text
+				opt.Text = npc.displayName
+				opt.TextSize = T.Sizes.SmallText
+				opt.Font = T.Fonts.Default
+				opt.BorderSizePixel = 0
+				opt.ZIndex = 21
+				Instance.new("UICorner", opt).CornerRadius = UDim.new(0, 3)
+				opt.MouseButton1Click:Connect(function()
+					self._state:UpdateNode(self._nodeId, { speaker = npc.displayName })
+					if dropdown then dropdown:Destroy(); dropdown = nil end
+				end)
+				dy = dy + 24
+			end
+
+			-- "None" option
+			local noneOpt = Instance.new("TextButton", dropdown)
+			noneOpt.Size = UDim2.new(1, -4, 0, 22)
+			noneOpt.Position = UDim2.fromOffset(2, dy)
+			noneOpt.BackgroundColor3 = T.Colors.BtnNormal
+			noneOpt.TextColor3 = T.Colors.TextDim
+			noneOpt.Text = "(none)"
+			noneOpt.TextSize = T.Sizes.SmallText
+			noneOpt.Font = T.Fonts.Default
+			noneOpt.BorderSizePixel = 0
+			noneOpt.ZIndex = 21
+			Instance.new("UICorner", noneOpt).CornerRadius = UDim.new(0, 3)
+			noneOpt.MouseButton1Click:Connect(function()
+				self._state:UpdateNode(self._nodeId, { speaker = nil })
+				if dropdown then dropdown:Destroy(); dropdown = nil end
+			end)
+			dy = dy + 24
+
+			-- "Custom..." option
+			local customOpt = Instance.new("TextButton", dropdown)
+			customOpt.Size = UDim2.new(1, -4, 0, 22)
+			customOpt.Position = UDim2.fromOffset(2, dy)
+			customOpt.BackgroundColor3 = T.Colors.BtnNormal
+			customOpt.TextColor3 = T.Colors.ConnConditional
+			customOpt.Text = "Custom..."
+			customOpt.TextSize = T.Sizes.SmallText
+			customOpt.Font = T.Fonts.Bold
+			customOpt.BorderSizePixel = 0
+			customOpt.ZIndex = 21
+			Instance.new("UICorner", customOpt).CornerRadius = UDim.new(0, 3)
+			customOpt.MouseButton1Click:Connect(function()
+				if dropdown then dropdown:Destroy(); dropdown = nil end
+				-- Replace button with a text field temporarily
+				speakerBtn.Visible = false
+				local customField = makeField(self._scroll, speakerBtn.Position.Y.Offset, "NPC name")
+				customField.Text = node.speaker or ""
+				customField:CaptureFocus()
+				customField.FocusLost:Connect(function()
+					local val = customField.Text ~= "" and customField.Text or nil
+					self._state:UpdateNode(self._nodeId, { speaker = val })
+					customField:Destroy()
+				end)
+			end)
+		end))
+
+		y = y + 6
+	else
+		local speakerField = makeField(self._scroll, y, "NPC name"); y = y + T.Sizes.FieldHeight + 8
+		speakerField.Text = node.speaker or ""
+		table.insert(self._conns, speakerField.FocusLost:Connect(function()
+			local val = speakerField.Text ~= "" and speakerField.Text or nil
+			self._state:UpdateNode(self._nodeId, { speaker = val })
+		end))
+	end
 
 	-- Text
 	makeLabel(self._scroll, "DIALOGUE TEXT", y); y = y + 18
 	local textField = makeField(self._scroll, y, "What does the NPC say?", true); y = y + 68
 	textField.Text = node.text or ""
+	self:_registerField(textField)
 	table.insert(self._conns, textField.FocusLost:Connect(function()
 		self._state:UpdateNode(self._nodeId, { text = textField.Text })
 	end))
@@ -1868,6 +2083,7 @@ function PropertyPanel:_populateNode(nodeId)
 	makeLabel(self._scroll, "AUTO-ADVANCE DELAY (seconds)", y); y = y + 18
 	local autoField = makeField(self._scroll, y, "none"); y = y + T.Sizes.FieldHeight + 8
 	autoField.Text = node.autoAdvanceDelay and tostring(node.autoAdvanceDelay) or ""
+	self:_registerField(autoField)
 	table.insert(self._conns, autoField.FocusLost:Connect(function()
 		local val = tonumber(autoField.Text)
 		self._state:UpdateNode(self._nodeId, { autoAdvanceDelay = val })
@@ -2072,9 +2288,18 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 	ctBox.ClearTextOnFocus = false
 	Instance.new("UICorner", ctBox).CornerRadius = UDim.new(0, 3)
 
+	self:_registerField(ctBox)
 	table.insert(self._conns, ctBox.FocusLost:Connect(function()
 		self._state:UpdateChoice(nodeId, choiceIdx, { text = ctBox.Text })
 	end))
+	if choice.text == "New choice" then
+		table.insert(self._conns, ctBox.Focused:Connect(function()
+			if ctBox.Text == "New choice" then
+				ctBox.CursorPosition = #ctBox.Text + 1
+				ctBox.SelectionStart = 1
+			end
+		end))
+	end
 	innerY = innerY + T.Sizes.FieldHeight + 4
 
 	-- Target node
@@ -2101,6 +2326,7 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 	tgtBox.ClearTextOnFocus = false
 	Instance.new("UICorner", tgtBox).CornerRadius = UDim.new(0, 3)
 
+	self:_registerField(tgtBox)
 	table.insert(self._conns, tgtBox.FocusLost:Connect(function()
 		local val = tgtBox.Text ~= "" and tgtBox.Text or nil
 		self._state:UpdateChoice(nodeId, choiceIdx, { targetNodeId = val })
@@ -2410,6 +2636,12 @@ function Toolbar:_build(parent)
 		self:_saveToModuleScript()
 	end)
 
+	-- NPCs
+	local npcBtn = btn(bar, "NPCs", x, 48); x = x + 54
+	npcBtn.MouseButton1Click:Connect(function()
+		self:_showNPCModal()
+	end)
+
 	-- Separator
 	x = x + 10
 
@@ -2608,41 +2840,175 @@ function Toolbar:_showExportModal()
 	hint.ZIndex = 52
 end
 
-function Toolbar:_saveToModuleScript()
-	local state = self._state
-	local treesFolder = game:GetService("ReplicatedStorage"):FindFirstChild("DialogueEngine")
-	if not treesFolder then
-		treesFolder = Instance.new("Folder")
-		treesFolder.Name = "DialogueEngine"
-		treesFolder.Parent = game:GetService("ReplicatedStorage")
+------------------------------------------------------------------------
+-- NPC Config persistence
+------------------------------------------------------------------------
+function Toolbar:LoadNPCConfigFromStorage()
+	local rs = game:GetService("ReplicatedStorage")
+	local engine = rs:FindFirstChild("DialogueEngine")
+	if not engine then return end
+	local cfg = engine:FindFirstChild("NPCConfig")
+	if not cfg or not cfg:IsA("ModuleScript") then return end
+	local ok, data = pcall(function() return require(cfg) end)
+	if ok and type(data) == "table" then
+		self._state:LoadNPCConfigs(data)
+	end
+end
+
+function Toolbar:SaveNPCConfigToStorage()
+	local rs = game:GetService("ReplicatedStorage")
+	local engine = rs:FindFirstChild("DialogueEngine")
+	if not engine then
+		engine = Instance.new("Folder")
+		engine.Name = "DialogueEngine"
+		engine.Parent = rs
 	end
 
-	local treeFolder = treesFolder:FindFirstChild("Trees")
-	if not treeFolder then
-		treeFolder = Instance.new("Folder")
-		treeFolder.Name = "Trees"
-		treeFolder.Parent = treesFolder
+	local lines = { "return {" }
+	for _, npc in ipairs(self._state.npcConfigs) do
+		table.insert(lines, string.format('\t{ id = %q, displayName = %q },', npc.id, npc.displayName))
+	end
+	table.insert(lines, "}")
+	local src = table.concat(lines, "\n")
+
+	local existing = engine:FindFirstChild("NPCConfig")
+	if existing then
+		existing.Source = src
+	else
+		local ms = Instance.new("ModuleScript")
+		ms.Name = "NPCConfig"
+		ms.Source = src
+		ms.Parent = engine
+	end
+end
+
+function Toolbar:_showNPCModal()
+	local T = Theme
+	local card = self:_makeModal("NPC Configuration", 400)
+	local state = self._state
+
+	local listFrame = Instance.new("ScrollingFrame", card)
+	listFrame.Size = UDim2.new(1, -24, 1, -100)
+	listFrame.Position = UDim2.fromOffset(12, 36)
+	listFrame.BackgroundTransparency = 1
+	listFrame.ScrollBarThickness = 6
+	listFrame.BorderSizePixel = 0
+	listFrame.ZIndex = 52
+
+	local function rebuildList()
+		for _, child in ipairs(listFrame:GetChildren()) do child:Destroy() end
+		local y = 0
+		for i, npc in ipairs(state.npcConfigs) do
+			local row = Instance.new("Frame", listFrame)
+			row.Size = UDim2.new(1, 0, 0, 28)
+			row.Position = UDim2.fromOffset(0, y)
+			row.BackgroundTransparency = 1
+			row.ZIndex = 52
+
+			local lbl = Instance.new("TextLabel", row)
+			lbl.Size = UDim2.new(1, -30, 1, 0)
+			lbl.BackgroundTransparency = 1
+			lbl.Text = npc.displayName
+			lbl.TextColor3 = T.Colors.Text
+			lbl.TextSize = T.Sizes.Text
+			lbl.Font = T.Fonts.Default
+			lbl.TextXAlignment = Enum.TextXAlignment.Left
+			lbl.ZIndex = 52
+
+			local rm = Instance.new("TextButton", row)
+			rm.Size = UDim2.fromOffset(22, 22)
+			rm.Position = UDim2.new(1, -22, 0, 3)
+			rm.BackgroundColor3 = T.Colors.BtnDanger
+			rm.TextColor3 = T.Colors.Text
+			rm.Text = "X"
+			rm.TextSize = 11
+			rm.Font = T.Fonts.Bold
+			rm.BorderSizePixel = 0
+			rm.ZIndex = 52
+			Instance.new("UICorner", rm).CornerRadius = UDim.new(0, 3)
+			rm.MouseButton1Click:Connect(function()
+				state:RemoveNPC(i)
+				self:SaveNPCConfigToStorage()
+				rebuildList()
+			end)
+
+			y = y + 32
+		end
+		listFrame.CanvasSize = UDim2.fromOffset(0, y)
+	end
+	rebuildList()
+
+	local addBox = Instance.new("TextBox", card)
+	addBox.Size = UDim2.new(1, -100, 0, 30)
+	addBox.Position = UDim2.new(0, 12, 1, -56)
+	addBox.BackgroundColor3 = T.Colors.Field
+	addBox.TextColor3 = T.Colors.Text
+	addBox.PlaceholderText = "NPC name..."
+	addBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	addBox.TextSize = T.Sizes.Text
+	addBox.Font = T.Fonts.Default
+	addBox.BorderSizePixel = 0
+	addBox.ClearTextOnFocus = false
+	addBox.ZIndex = 52
+	Instance.new("UICorner", addBox).CornerRadius = UDim.new(0, 4)
+
+	local addBtn = Instance.new("TextButton", card)
+	addBtn.Size = UDim2.fromOffset(60, 30)
+	addBtn.Position = UDim2.new(1, -76, 1, -56)
+	addBtn.BackgroundColor3 = T.Colors.Accent
+	addBtn.TextColor3 = T.Colors.TextHeader
+	addBtn.Text = "Add"
+	addBtn.TextSize = T.Sizes.Text
+	addBtn.Font = T.Fonts.Bold
+	addBtn.BorderSizePixel = 0
+	addBtn.ZIndex = 52
+	Instance.new("UICorner", addBtn).CornerRadius = UDim.new(0, 4)
+
+	addBtn.MouseButton1Click:Connect(function()
+		local name = addBox.Text
+		if name == "" then return end
+		state:AddNPC(name)
+		self:SaveNPCConfigToStorage()
+		addBox.Text = ""
+		rebuildList()
+	end)
+end
+
+function Toolbar:_saveToModuleScript()
+	local state = self._state
+	local sps = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+	if not sps then
+		warn("[DialogueDesigner] StarterPlayerScripts not found")
+		return
+	end
+
+	local treesFolder = sps:FindFirstChild("DialogueTrees")
+	if not treesFolder then
+		treesFolder = Instance.new("Folder")
+		treesFolder.Name = "DialogueTrees"
+		treesFolder.Parent = sps
 	end
 
 	local modName = state.treeId or "untitled"
-	local existing = treeFolder:FindFirstChild(modName)
+	local existing = treesFolder:FindFirstChild(modName)
 	if existing then
 		existing.Source = Serializer.ToModuleScript(state)
 	else
 		local ms = Instance.new("ModuleScript")
 		ms.Name = modName
 		ms.Source = Serializer.ToModuleScript(state)
-		ms.Parent = treeFolder
+		ms.Parent = treesFolder
 	end
 
-	-- Brief visual feedback
+	self:_ensureLoader(treesFolder)
+
 	local T = Theme
 	local toast = Instance.new("TextLabel", self._widget)
-	toast.Size = UDim2.fromOffset(200, 30)
-	toast.Position = UDim2.new(0.5, -100, 1, -60)
+	toast.Size = UDim2.fromOffset(260, 30)
+	toast.Position = UDim2.new(0.5, -130, 1, -60)
 	toast.BackgroundColor3 = T.Colors.Success
 	toast.TextColor3 = T.Colors.TextHeader
-	toast.Text = "Saved to Trees/" .. modName
+	toast.Text = "Saved to StarterPlayerScripts/DialogueTrees/" .. modName
 	toast.TextSize = T.Sizes.Text
 	toast.Font = T.Fonts.Bold
 	toast.ZIndex = 60
@@ -2650,6 +3016,31 @@ function Toolbar:_saveToModuleScript()
 	task.delay(2, function()
 		if toast.Parent then toast:Destroy() end
 	end)
+end
+
+function Toolbar:_ensureLoader(treesFolder)
+	local loaderName = "DialogueTreeLoader"
+	if treesFolder.Parent:FindFirstChild(loaderName) then return end
+
+	local loader = Instance.new("LocalScript")
+	loader.Name = loaderName
+	loader.Source = [[
+local DialogueEngine = require(game:GetService("ReplicatedStorage"):WaitForChild("DialogueEngine"):WaitForChild("DialogueEngine"))
+
+local treesFolder = script.Parent:WaitForChild("DialogueTrees")
+for _, child in ipairs(treesFolder:GetChildren()) do
+	if child:IsA("ModuleScript") then
+		local ok, treeData = pcall(require, child)
+		if ok and treeData then
+			DialogueEngine:RegisterTree(child.Name, treeData)
+			print("[DialogueTreeLoader] Registered tree: " .. child.Name)
+		else
+			warn("[DialogueTreeLoader] Failed to load tree: " .. child.Name)
+		end
+	end
+end
+]]
+	loader.Parent = treesFolder.Parent
 end
 
 function Toolbar:Destroy()

@@ -79,6 +79,12 @@ function Toolbar:_build(parent)
 		self:_saveToModuleScript()
 	end)
 
+	-- NPCs
+	local npcBtn = btn(bar, "NPCs", x, 48); x = x + 54
+	npcBtn.MouseButton1Click:Connect(function()
+		self:_showNPCModal()
+	end)
+
 	-- Separator
 	x = x + 10
 
@@ -277,41 +283,175 @@ function Toolbar:_showExportModal()
 	hint.ZIndex = 52
 end
 
-function Toolbar:_saveToModuleScript()
-	local state = self._state
-	local treesFolder = game:GetService("ReplicatedStorage"):FindFirstChild("DialogueEngine")
-	if not treesFolder then
-		treesFolder = Instance.new("Folder")
-		treesFolder.Name = "DialogueEngine"
-		treesFolder.Parent = game:GetService("ReplicatedStorage")
+------------------------------------------------------------------------
+-- NPC Config persistence
+------------------------------------------------------------------------
+function Toolbar:LoadNPCConfigFromStorage()
+	local rs = game:GetService("ReplicatedStorage")
+	local engine = rs:FindFirstChild("DialogueEngine")
+	if not engine then return end
+	local cfg = engine:FindFirstChild("NPCConfig")
+	if not cfg or not cfg:IsA("ModuleScript") then return end
+	local ok, data = pcall(function() return require(cfg) end)
+	if ok and type(data) == "table" then
+		self._state:LoadNPCConfigs(data)
+	end
+end
+
+function Toolbar:SaveNPCConfigToStorage()
+	local rs = game:GetService("ReplicatedStorage")
+	local engine = rs:FindFirstChild("DialogueEngine")
+	if not engine then
+		engine = Instance.new("Folder")
+		engine.Name = "DialogueEngine"
+		engine.Parent = rs
 	end
 
-	local treeFolder = treesFolder:FindFirstChild("Trees")
-	if not treeFolder then
-		treeFolder = Instance.new("Folder")
-		treeFolder.Name = "Trees"
-		treeFolder.Parent = treesFolder
+	local lines = { "return {" }
+	for _, npc in ipairs(self._state.npcConfigs) do
+		table.insert(lines, string.format('\t{ id = %q, displayName = %q },', npc.id, npc.displayName))
+	end
+	table.insert(lines, "}")
+	local src = table.concat(lines, "\n")
+
+	local existing = engine:FindFirstChild("NPCConfig")
+	if existing then
+		existing.Source = src
+	else
+		local ms = Instance.new("ModuleScript")
+		ms.Name = "NPCConfig"
+		ms.Source = src
+		ms.Parent = engine
+	end
+end
+
+function Toolbar:_showNPCModal()
+	local T = Theme
+	local card = self:_makeModal("NPC Configuration", 400)
+	local state = self._state
+
+	local listFrame = Instance.new("ScrollingFrame", card)
+	listFrame.Size = UDim2.new(1, -24, 1, -100)
+	listFrame.Position = UDim2.fromOffset(12, 36)
+	listFrame.BackgroundTransparency = 1
+	listFrame.ScrollBarThickness = 6
+	listFrame.BorderSizePixel = 0
+	listFrame.ZIndex = 52
+
+	local function rebuildList()
+		for _, child in ipairs(listFrame:GetChildren()) do child:Destroy() end
+		local y = 0
+		for i, npc in ipairs(state.npcConfigs) do
+			local row = Instance.new("Frame", listFrame)
+			row.Size = UDim2.new(1, 0, 0, 28)
+			row.Position = UDim2.fromOffset(0, y)
+			row.BackgroundTransparency = 1
+			row.ZIndex = 52
+
+			local lbl = Instance.new("TextLabel", row)
+			lbl.Size = UDim2.new(1, -30, 1, 0)
+			lbl.BackgroundTransparency = 1
+			lbl.Text = npc.displayName
+			lbl.TextColor3 = T.Colors.Text
+			lbl.TextSize = T.Sizes.Text
+			lbl.Font = T.Fonts.Default
+			lbl.TextXAlignment = Enum.TextXAlignment.Left
+			lbl.ZIndex = 52
+
+			local rm = Instance.new("TextButton", row)
+			rm.Size = UDim2.fromOffset(22, 22)
+			rm.Position = UDim2.new(1, -22, 0, 3)
+			rm.BackgroundColor3 = T.Colors.BtnDanger
+			rm.TextColor3 = T.Colors.Text
+			rm.Text = "X"
+			rm.TextSize = 11
+			rm.Font = T.Fonts.Bold
+			rm.BorderSizePixel = 0
+			rm.ZIndex = 52
+			Instance.new("UICorner", rm).CornerRadius = UDim.new(0, 3)
+			rm.MouseButton1Click:Connect(function()
+				state:RemoveNPC(i)
+				self:SaveNPCConfigToStorage()
+				rebuildList()
+			end)
+
+			y = y + 32
+		end
+		listFrame.CanvasSize = UDim2.fromOffset(0, y)
+	end
+	rebuildList()
+
+	local addBox = Instance.new("TextBox", card)
+	addBox.Size = UDim2.new(1, -100, 0, 30)
+	addBox.Position = UDim2.new(0, 12, 1, -56)
+	addBox.BackgroundColor3 = T.Colors.Field
+	addBox.TextColor3 = T.Colors.Text
+	addBox.PlaceholderText = "NPC name..."
+	addBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	addBox.TextSize = T.Sizes.Text
+	addBox.Font = T.Fonts.Default
+	addBox.BorderSizePixel = 0
+	addBox.ClearTextOnFocus = false
+	addBox.ZIndex = 52
+	Instance.new("UICorner", addBox).CornerRadius = UDim.new(0, 4)
+
+	local addBtn = Instance.new("TextButton", card)
+	addBtn.Size = UDim2.fromOffset(60, 30)
+	addBtn.Position = UDim2.new(1, -76, 1, -56)
+	addBtn.BackgroundColor3 = T.Colors.Accent
+	addBtn.TextColor3 = T.Colors.TextHeader
+	addBtn.Text = "Add"
+	addBtn.TextSize = T.Sizes.Text
+	addBtn.Font = T.Fonts.Bold
+	addBtn.BorderSizePixel = 0
+	addBtn.ZIndex = 52
+	Instance.new("UICorner", addBtn).CornerRadius = UDim.new(0, 4)
+
+	addBtn.MouseButton1Click:Connect(function()
+		local name = addBox.Text
+		if name == "" then return end
+		state:AddNPC(name)
+		self:SaveNPCConfigToStorage()
+		addBox.Text = ""
+		rebuildList()
+	end)
+end
+
+function Toolbar:_saveToModuleScript()
+	local state = self._state
+	local sps = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+	if not sps then
+		warn("[DialogueDesigner] StarterPlayerScripts not found")
+		return
+	end
+
+	local treesFolder = sps:FindFirstChild("DialogueTrees")
+	if not treesFolder then
+		treesFolder = Instance.new("Folder")
+		treesFolder.Name = "DialogueTrees"
+		treesFolder.Parent = sps
 	end
 
 	local modName = state.treeId or "untitled"
-	local existing = treeFolder:FindFirstChild(modName)
+	local existing = treesFolder:FindFirstChild(modName)
 	if existing then
 		existing.Source = Serializer.ToModuleScript(state)
 	else
 		local ms = Instance.new("ModuleScript")
 		ms.Name = modName
 		ms.Source = Serializer.ToModuleScript(state)
-		ms.Parent = treeFolder
+		ms.Parent = treesFolder
 	end
 
-	-- Brief visual feedback
+	self:_ensureLoader(treesFolder)
+
 	local T = Theme
 	local toast = Instance.new("TextLabel", self._widget)
-	toast.Size = UDim2.fromOffset(200, 30)
-	toast.Position = UDim2.new(0.5, -100, 1, -60)
+	toast.Size = UDim2.fromOffset(260, 30)
+	toast.Position = UDim2.new(0.5, -130, 1, -60)
 	toast.BackgroundColor3 = T.Colors.Success
 	toast.TextColor3 = T.Colors.TextHeader
-	toast.Text = "Saved to Trees/" .. modName
+	toast.Text = "Saved to StarterPlayerScripts/DialogueTrees/" .. modName
 	toast.TextSize = T.Sizes.Text
 	toast.Font = T.Fonts.Bold
 	toast.ZIndex = 60
@@ -319,6 +459,31 @@ function Toolbar:_saveToModuleScript()
 	task.delay(2, function()
 		if toast.Parent then toast:Destroy() end
 	end)
+end
+
+function Toolbar:_ensureLoader(treesFolder)
+	local loaderName = "DialogueTreeLoader"
+	if treesFolder.Parent:FindFirstChild(loaderName) then return end
+
+	local loader = Instance.new("LocalScript")
+	loader.Name = loaderName
+	loader.Source = [[
+local DialogueEngine = require(game:GetService("ReplicatedStorage"):WaitForChild("DialogueEngine"):WaitForChild("DialogueEngine"))
+
+local treesFolder = script.Parent:WaitForChild("DialogueTrees")
+for _, child in ipairs(treesFolder:GetChildren()) do
+	if child:IsA("ModuleScript") then
+		local ok, treeData = pcall(require, child)
+		if ok and treeData then
+			DialogueEngine:RegisterTree(child.Name, treeData)
+			print("[DialogueTreeLoader] Registered tree: " .. child.Name)
+		else
+			warn("[DialogueTreeLoader] Failed to load tree: " .. child.Name)
+		end
+	end
+end
+]]
+	loader.Parent = treesFolder.Parent
 end
 
 function Toolbar:Destroy()

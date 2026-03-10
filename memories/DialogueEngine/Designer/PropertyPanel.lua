@@ -5,11 +5,12 @@ PropertyPanel.__index = PropertyPanel
 
 function PropertyPanel.new(parent, appState)
 	local self = setmetatable({}, PropertyPanel)
-	self._state   = appState
-	self._conns   = {}
-	self._frame   = nil
-	self._scroll  = nil
-	self._nodeId  = nil
+	self._state      = appState
+	self._conns      = {}
+	self._frame      = nil
+	self._scroll     = nil
+	self._nodeId     = nil
+	self._fieldOrder = {}
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -128,6 +129,38 @@ local function makeSeparator(parent, yOff, text)
 end
 
 ------------------------------------------------------------------------
+-- Field navigation helpers
+------------------------------------------------------------------------
+function PropertyPanel:_registerField(box)
+	table.insert(self._fieldOrder, box)
+	table.insert(self._conns, box.FocusLost:Connect(function(enterPressed)
+		if enterPressed and not box.MultiLine then
+			self:_focusNextField(box)
+		end
+	end))
+	table.insert(self._conns, box.InputBegan:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.Tab then
+			box:ReleaseFocus()
+			self:_focusNextField(box)
+		end
+	end))
+end
+
+function PropertyPanel:_focusNextField(currentBox)
+	for i, field in ipairs(self._fieldOrder) do
+		if field == currentBox then
+			local nextField = self._fieldOrder[i + 1]
+			if nextField and nextField.Parent then
+				task.defer(function()
+					nextField:CaptureFocus()
+				end)
+			end
+			return
+		end
+	end
+end
+
+------------------------------------------------------------------------
 -- Build panel frame
 ------------------------------------------------------------------------
 function PropertyPanel:_build(parent)
@@ -179,6 +212,7 @@ end
 function PropertyPanel:_clearScroll()
 	for _, c in ipairs(self._conns) do c:Disconnect() end
 	self._conns = {}
+	self._fieldOrder = {}
 	for _, child in ipairs(self._scroll:GetChildren()) do
 		child:Destroy()
 	end
@@ -198,6 +232,7 @@ function PropertyPanel:_populateNode(nodeId)
 	makeLabel(self._scroll, "NODE ID", y); y = y + 18
 	local idField = makeField(self._scroll, y, "node_id"); y = y + T.Sizes.FieldHeight + 8
 	idField.Text = node.id
+	self:_registerField(idField)
 	table.insert(self._conns, idField.FocusLost:Connect(function()
 		local newId = idField.Text:gsub("%s", "_"):gsub("[^%w_]", "")
 		if newId == "" or newId == node.id then idField.Text = node.id; return end
@@ -206,19 +241,120 @@ function PropertyPanel:_populateNode(nodeId)
 		self._nodeId = newId
 	end))
 
-	-- Speaker
+	-- Speaker (dropdown with NPC configs + custom fallback)
 	makeLabel(self._scroll, "SPEAKER (optional)", y); y = y + 18
-	local speakerField = makeField(self._scroll, y, "NPC model name"); y = y + T.Sizes.FieldHeight + 8
-	speakerField.Text = node.speaker or ""
-	table.insert(self._conns, speakerField.FocusLost:Connect(function()
-		local val = speakerField.Text ~= "" and speakerField.Text or nil
-		self._state:UpdateNode(self._nodeId, { speaker = val })
-	end))
+	local npcs = self._state:GetNPCs()
+
+	if #npcs > 0 then
+		local speakerBtn = Instance.new("TextButton", self._scroll)
+		speakerBtn.Size = UDim2.new(1, -16, 0, T.Sizes.FieldHeight)
+		speakerBtn.Position = UDim2.new(0, 8, 0, y)
+		speakerBtn.BackgroundColor3 = T.Colors.Field
+		speakerBtn.TextColor3 = node.speaker and T.Colors.Text or T.Colors.TextPlaceholder
+		speakerBtn.Text = node.speaker or "Select speaker..."
+		speakerBtn.TextSize = T.Sizes.Text
+		speakerBtn.Font = T.Fonts.Default
+		speakerBtn.TextXAlignment = Enum.TextXAlignment.Left
+		speakerBtn.BorderSizePixel = 0
+		speakerBtn.AutoButtonColor = false
+		Instance.new("UICorner", speakerBtn).CornerRadius = UDim.new(0, 4)
+		Instance.new("UIStroke", speakerBtn).Color = T.Colors.FieldBorder
+		Instance.new("UIPadding", speakerBtn).PaddingLeft = UDim.new(0, 6)
+		y = y + T.Sizes.FieldHeight + 2
+
+		local dropdown = nil
+		table.insert(self._conns, speakerBtn.MouseButton1Click:Connect(function()
+			if dropdown then dropdown:Destroy(); dropdown = nil; return end
+
+			dropdown = Instance.new("Frame", self._scroll)
+			dropdown.Size = UDim2.new(1, -16, 0, (#npcs + 2) * 24 + 4)
+			dropdown.Position = UDim2.new(0, 8, 0, y)
+			dropdown.BackgroundColor3 = T.Colors.Toolbar
+			dropdown.BorderSizePixel = 0
+			dropdown.ZIndex = 20
+			Instance.new("UICorner", dropdown).CornerRadius = UDim.new(0, 4)
+			Instance.new("UIStroke", dropdown).Color = T.Colors.FieldBorder
+
+			local dy = 2
+			for _, npc in ipairs(npcs) do
+				local opt = Instance.new("TextButton", dropdown)
+				opt.Size = UDim2.new(1, -4, 0, 22)
+				opt.Position = UDim2.fromOffset(2, dy)
+				opt.BackgroundColor3 = T.Colors.BtnNormal
+				opt.TextColor3 = T.Colors.Text
+				opt.Text = npc.displayName
+				opt.TextSize = T.Sizes.SmallText
+				opt.Font = T.Fonts.Default
+				opt.BorderSizePixel = 0
+				opt.ZIndex = 21
+				Instance.new("UICorner", opt).CornerRadius = UDim.new(0, 3)
+				opt.MouseButton1Click:Connect(function()
+					self._state:UpdateNode(self._nodeId, { speaker = npc.displayName })
+					if dropdown then dropdown:Destroy(); dropdown = nil end
+				end)
+				dy = dy + 24
+			end
+
+			-- "None" option
+			local noneOpt = Instance.new("TextButton", dropdown)
+			noneOpt.Size = UDim2.new(1, -4, 0, 22)
+			noneOpt.Position = UDim2.fromOffset(2, dy)
+			noneOpt.BackgroundColor3 = T.Colors.BtnNormal
+			noneOpt.TextColor3 = T.Colors.TextDim
+			noneOpt.Text = "(none)"
+			noneOpt.TextSize = T.Sizes.SmallText
+			noneOpt.Font = T.Fonts.Default
+			noneOpt.BorderSizePixel = 0
+			noneOpt.ZIndex = 21
+			Instance.new("UICorner", noneOpt).CornerRadius = UDim.new(0, 3)
+			noneOpt.MouseButton1Click:Connect(function()
+				self._state:UpdateNode(self._nodeId, { speaker = nil })
+				if dropdown then dropdown:Destroy(); dropdown = nil end
+			end)
+			dy = dy + 24
+
+			-- "Custom..." option
+			local customOpt = Instance.new("TextButton", dropdown)
+			customOpt.Size = UDim2.new(1, -4, 0, 22)
+			customOpt.Position = UDim2.fromOffset(2, dy)
+			customOpt.BackgroundColor3 = T.Colors.BtnNormal
+			customOpt.TextColor3 = T.Colors.ConnConditional
+			customOpt.Text = "Custom..."
+			customOpt.TextSize = T.Sizes.SmallText
+			customOpt.Font = T.Fonts.Bold
+			customOpt.BorderSizePixel = 0
+			customOpt.ZIndex = 21
+			Instance.new("UICorner", customOpt).CornerRadius = UDim.new(0, 3)
+			customOpt.MouseButton1Click:Connect(function()
+				if dropdown then dropdown:Destroy(); dropdown = nil end
+				-- Replace button with a text field temporarily
+				speakerBtn.Visible = false
+				local customField = makeField(self._scroll, speakerBtn.Position.Y.Offset, "NPC name")
+				customField.Text = node.speaker or ""
+				customField:CaptureFocus()
+				customField.FocusLost:Connect(function()
+					local val = customField.Text ~= "" and customField.Text or nil
+					self._state:UpdateNode(self._nodeId, { speaker = val })
+					customField:Destroy()
+				end)
+			end)
+		end))
+
+		y = y + 6
+	else
+		local speakerField = makeField(self._scroll, y, "NPC name"); y = y + T.Sizes.FieldHeight + 8
+		speakerField.Text = node.speaker or ""
+		table.insert(self._conns, speakerField.FocusLost:Connect(function()
+			local val = speakerField.Text ~= "" and speakerField.Text or nil
+			self._state:UpdateNode(self._nodeId, { speaker = val })
+		end))
+	end
 
 	-- Text
 	makeLabel(self._scroll, "DIALOGUE TEXT", y); y = y + 18
 	local textField = makeField(self._scroll, y, "What does the NPC say?", true); y = y + 68
 	textField.Text = node.text or ""
+	self:_registerField(textField)
 	table.insert(self._conns, textField.FocusLost:Connect(function()
 		self._state:UpdateNode(self._nodeId, { text = textField.Text })
 	end))
@@ -237,6 +373,7 @@ function PropertyPanel:_populateNode(nodeId)
 	makeLabel(self._scroll, "AUTO-ADVANCE DELAY (seconds)", y); y = y + 18
 	local autoField = makeField(self._scroll, y, "none"); y = y + T.Sizes.FieldHeight + 8
 	autoField.Text = node.autoAdvanceDelay and tostring(node.autoAdvanceDelay) or ""
+	self:_registerField(autoField)
 	table.insert(self._conns, autoField.FocusLost:Connect(function()
 		local val = tonumber(autoField.Text)
 		self._state:UpdateNode(self._nodeId, { autoAdvanceDelay = val })
@@ -441,9 +578,18 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 	ctBox.ClearTextOnFocus = false
 	Instance.new("UICorner", ctBox).CornerRadius = UDim.new(0, 3)
 
+	self:_registerField(ctBox)
 	table.insert(self._conns, ctBox.FocusLost:Connect(function()
 		self._state:UpdateChoice(nodeId, choiceIdx, { text = ctBox.Text })
 	end))
+	if choice.text == "New choice" then
+		table.insert(self._conns, ctBox.Focused:Connect(function()
+			if ctBox.Text == "New choice" then
+				ctBox.CursorPosition = #ctBox.Text + 1
+				ctBox.SelectionStart = 1
+			end
+		end))
+	end
 	innerY = innerY + T.Sizes.FieldHeight + 4
 
 	-- Target node
@@ -470,6 +616,7 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 	tgtBox.ClearTextOnFocus = false
 	Instance.new("UICorner", tgtBox).CornerRadius = UDim.new(0, 3)
 
+	self:_registerField(tgtBox)
 	table.insert(self._conns, tgtBox.FocusLost:Connect(function()
 		local val = tgtBox.Text ~= "" and tgtBox.Text or nil
 		self._state:UpdateChoice(nodeId, choiceIdx, { targetNodeId = val })
