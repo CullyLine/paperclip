@@ -75,11 +75,9 @@ end
 -- Coordinate helpers
 ------------------------------------------------------------------------
 function Canvas:_widgetToCanvas(wx, wy)
-	local pw = self:_getPluginWidget()
-	local wAbs = pw and pw.AbsolutePosition or Vector2.new(0, 0)
-	local sAbs = self._scroll.AbsolutePosition
-	local cp   = self._scroll.CanvasPosition
-	return wx - (sAbs.X - wAbs.X) + cp.X, wy - (sAbs.Y - wAbs.Y) + cp.Y
+	local T = Theme
+	local cp = self._scroll.CanvasPosition
+	return wx + cp.X, wy - T.Sizes.ToolbarHeight + cp.Y
 end
 
 function Canvas:_screenToCanvas(sx, sy)
@@ -126,18 +124,16 @@ function Canvas:_createOverlay()
 end
 
 function Canvas:_hitTestInputDot(widgetPos)
+	local T = Theme
 	local hitRadius = 14
+	local cp = self._scroll.CanvasPosition
 	for nodeId, w in pairs(self._widgets) do
 		local dotCenter = w:GetInputDotCenter()
 		if dotCenter then
-			local pw = self:_getPluginWidget()
-			local wAbs = pw and pw.AbsolutePosition or Vector2.new(0, 0)
-			local sAbs = self._scroll.AbsolutePosition
-			local cp = self._scroll.CanvasPosition
-			local screenX = dotCenter.X - cp.X + (sAbs.X - wAbs.X)
-			local screenY = dotCenter.Y - cp.Y + (sAbs.Y - wAbs.Y)
-			local dx = widgetPos.X - screenX
-			local dy = widgetPos.Y - screenY
+			local widgetX = dotCenter.X - cp.X
+			local widgetY = dotCenter.Y - cp.Y + T.Sizes.ToolbarHeight
+			local dx = widgetPos.X - widgetX
+			local dy = widgetPos.Y - widgetY
 			if dx * dx + dy * dy <= hitRadius * hitRadius then
 				return nodeId
 			end
