@@ -1,7 +1,6 @@
 local Theme                = require(script.Parent.DesignerTheme)
 local NodeWidget           = require(script.Parent.NodeWidget)
 local ConnectionRenderer   = require(script.Parent.ConnectionRenderer)
-local UserInputService     = game:GetService("UserInputService")
 local RunService           = game:GetService("RunService")
 
 local Canvas = {}
@@ -118,16 +117,11 @@ function Canvas:_createOverlay()
 	ov.Parent = self._widget
 	self._overlay = ov
 
-	-- Poll mouse position AND button state every frame
+	-- Poll mouse position every frame
 	self._heartbeat = RunService.Heartbeat:Connect(function()
-		if not (self._drag or self._connecting) then return end
-
-		if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-			self:_onMouseUp()
-			return
+		if self._drag or self._connecting then
+			self:_onMouseMove(self:_getMousePos())
 		end
-
-		self:_onMouseMove(self:_getMousePos())
 	end)
 end
 
@@ -196,6 +190,11 @@ function Canvas:_createWidget(nodeId)
 				self:_createOverlay()
 			end
 		end)
+		dragHandle.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 and self._drag then
+				self:_onMouseUp()
+			end
+		end)
 	end
 
 	self:_wireChoiceDots(w, nodeId)
@@ -216,6 +215,11 @@ function Canvas:_wireChoiceDots(w, nodeId)
 						self._conns:StartDrag(fromPos)
 						self:_createOverlay()
 					end
+				end
+			end)
+			dot.InputEnded:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
+					self:_onMouseUp()
 				end
 			end)
 		end
