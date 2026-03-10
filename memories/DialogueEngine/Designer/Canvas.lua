@@ -76,6 +76,14 @@ end
 ------------------------------------------------------------------------
 -- Coordinate helpers
 ------------------------------------------------------------------------
+function Canvas:_widgetToCanvas(wx, wy)
+	local pw = self:_getPluginWidget()
+	local wAbs = pw and pw.AbsolutePosition or Vector2.new(0, 0)
+	local sAbs = self._scroll.AbsolutePosition
+	local cp   = self._scroll.CanvasPosition
+	return wx - (sAbs.X - wAbs.X) + cp.X, wy - (sAbs.Y - wAbs.Y) + cp.Y
+end
+
 function Canvas:_screenToCanvas(sx, sy)
 	local abs = self._scroll.AbsolutePosition
 	local cp  = self._scroll.CanvasPosition
@@ -85,6 +93,20 @@ end
 ------------------------------------------------------------------------
 -- Drag overlay — captures all mouse input during a drag
 ------------------------------------------------------------------------
+function Canvas:_getPluginWidget()
+	local pw = self._widget.Parent
+	if pw and pw:IsA("DockWidgetPluginGui") then return pw end
+	return nil
+end
+
+function Canvas:_getMousePos()
+	local pw = self:_getPluginWidget()
+	if pw then
+		return pw:GetRelativeMousePosition()
+	end
+	return Vector2.new(0, 0)
+end
+
 function Canvas:_createOverlay()
 	if self._overlay then return end
 	local ov = Instance.new("Frame")
@@ -97,34 +119,24 @@ function Canvas:_createOverlay()
 	ov.Parent = self._widget
 	self._overlay = ov
 
-	ov.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			self:_onMouseMove(input.Position.X, input.Position.Y)
-		end
-	end)
 	ov.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			self:_onMouseUp(input.Position.X, input.Position.Y)
+			self:_onMouseUp()
 		end
 	end)
 
-	-- Heartbeat fallback: poll mouse position via the DockWidgetPluginGui
-	-- in case overlay InputChanged doesn't fire (known Studio quirk)
-	local pluginWidget = self._widget.Parent
-	if pluginWidget and pluginWidget:IsA("DockWidgetPluginGui") then
-		self._heartbeat = RunService.Heartbeat:Connect(function()
-			if self._drag or self._connecting then
-				local rel = pluginWidget:GetRelativeMousePosition()
-				local abs = pluginWidget.AbsolutePosition
-				self:_onMouseMove(rel.X + abs.X, rel.Y + abs.Y)
-			end
-		end)
-	end
+	-- Poll mouse position every frame via GetRelativeMousePosition
+	-- (single consistent coordinate source — avoids overlay InputChanged quirks)
+	self._heartbeat = RunService.Heartbeat:Connect(function()
+		if self._drag or self._connecting then
+			self:_onMouseMove(self:_getMousePos())
+		end
+	end)
 
 	-- Fallback: mouse up may not fire on overlay if released outside GUI
 	self._uisConn = UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 and (self._drag or self._connecting) then
-			self:_onMouseUp(0, 0)
+			self:_onMouseUp()
 		end
 	end)
 end
@@ -138,11 +150,11 @@ end
 ------------------------------------------------------------------------
 -- Mouse handlers (routed through overlay during drags)
 ------------------------------------------------------------------------
-function Canvas:_onMouseMove(sx, sy)
+function Canvas:_onMouseMove(pos)
 	if self._drag then
 		local d = self._drag
-		local dx = sx - d.startMouse.X
-		local dy = sy - d.startMouse.Y
+		local dx = pos.X - d.startMouse.X
+		local dy = pos.Y - d.startMouse.Y
 		local nx = d.startPos.X + dx
 		local ny = d.startPos.Y + dy
 		self._state:MoveNode(d.nodeId, nx, ny)
@@ -152,12 +164,12 @@ function Canvas:_onMouseMove(sx, sy)
 	end
 
 	if self._connecting then
-		local cx, cy = self:_screenToCanvas(sx, sy)
+		local cx, cy = self:_widgetToCanvas(pos.X, pos.Y)
 		self._conns:UpdateDrag(Vector2.new(cx, cy))
 	end
 end
 
-function Canvas:_onMouseUp(sx, sy)
+function Canvas:_onMouseUp()
 	if self._drag then
 		local d = self._drag
 		self._drag = nil
@@ -189,7 +201,7 @@ function Canvas:_createWidget(nodeId)
 				self._state:SelectNode(nodeId)
 				self._drag = {
 					nodeId     = nodeId,
-					startMouse = Vector2.new(input.Position.X, input.Position.Y),
+					startMouse = self:_getMousePos(),
 					startPos   = Vector2.new(node.x, node.y),
 				}
 				self:_createOverlay()
