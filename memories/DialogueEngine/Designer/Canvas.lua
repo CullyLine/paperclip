@@ -237,8 +237,9 @@ function Canvas:_createWidget(nodeId)
 	if dragHandle then
 		dragHandle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				self._state:SelectNode(nodeId)
-				local curNode = self._state.nodes[nodeId]
+				local currentId = w:GetNodeId()
+				self._state:SelectNode(currentId)
+				local curNode = self._state.nodes[currentId]
 				if not curNode then return end
 
 				local frameAbs = w:GetFrame().AbsolutePosition
@@ -249,11 +250,11 @@ function Canvas:_createWidget(nodeId)
 				if choiceIdx then
 					local fromPos = w:GetChoiceDotCenter(choiceIdx)
 					if fromPos then
-						self:_startConnecting(nodeId, choiceIdx, fromPos)
+						self:_startConnecting(currentId, choiceIdx, fromPos)
 					end
 				else
 					self._drag = {
-						nodeId     = nodeId,
+						nodeId     = currentId,
 						startMouse = self:_getMousePos(),
 						startPos   = Vector2.new(curNode.x, curNode.y),
 					}
@@ -426,6 +427,7 @@ function Canvas:_bindState()
 			if id ~= nodeData.id and not self._state.nodes[id] then
 				self._widgets[id] = nil
 				self._widgets[nodeData.id] = widget
+				widget:UpdateData(nodeData)
 				break
 			end
 		end

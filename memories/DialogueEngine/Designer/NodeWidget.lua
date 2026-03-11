@@ -90,8 +90,9 @@ function NodeWidget:_build()
 	-- Interaction handle — covers entire node; Canvas decides drag vs connect
 	local dragH = Instance.new("Frame", frame)
 	dragH.Name = "DragHandle"
-	dragH.Size = UDim2.fromScale(1, 1)
+	dragH.Size = UDim2.new(1, 0, 1, T.Sizes.DotRadius + 4)
 	dragH.Position = UDim2.fromOffset(0, 0)
+	dragH.ClipsDescendants = false
 	dragH.BackgroundTransparency = 1
 	dragH.ZIndex = 6
 	self._dragHandle = dragH
@@ -159,6 +160,7 @@ end
 ------------------------------------------------------------------------
 -- Public API
 ------------------------------------------------------------------------
+function NodeWidget:GetNodeId() return self._data.id end
 function NodeWidget:GetFrame() return self._frame end
 function NodeWidget:GetInputDot() return self._inputDot end
 function NodeWidget:GetChoiceDot(i) return self._choiceDots[i] end
@@ -170,10 +172,12 @@ end
 function NodeWidget:GetChoiceDotCenter(i)
 	local choices = self._data.choices or {}
 	if i > #choices then return nil end
-	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
+	local T = Theme
+	local spacing = T.Sizes.NodeWidth / (#choices + 1)
+	local h = math.max(T.Sizes.NodeMinHeight, T.Sizes.HeaderHeight + 44 + (#choices > 0 and 14 or 0))
 	return Vector2.new(
 		self._data.x + spacing * i,
-		self._data.y + self._frame.AbsoluteSize.Y
+		self._data.y + h
 	)
 end
 
@@ -182,7 +186,7 @@ function NodeWidget:HitTestChoiceDot(localX, localY)
 	if #choices == 0 then return nil end
 	local frameH = self._frame.AbsoluteSize.Y
 	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
-	local hitR = Theme.Sizes.DotRadius + 4
+	local hitR = Theme.Sizes.DotRadius + 10
 	for i = 1, #choices do
 		local cx = spacing * i
 		local cy = frameH - Theme.Sizes.DotRadius
