@@ -1,0 +1,2853 @@
+<roblox version="4">
+	<External>null</External>
+	<External>nil</External>
+		<Item class="Script" referent="RBX8">
+			<Properties>
+				<string name="Name">DialogueDesigner</string>
+				<ProtectedString name="Source"><![CDATA[------------------------------------------------------------------------
+-- DialogueDesigner — Roblox Studio Plugin
+-- Visual node-graph editor for the DialoguePro system.
+--
+-- Install: Place this folder's contents as a Script + ModuleScript
+-- hierarchy inside your Plugins folder. See INSTALL.md for details.
+------------------------------------------------------------------------
+local Theme          = require(script.DesignerTheme)
+local AppState       = require(script.AppState)
+local Canvas         = require(script.Canvas)
+local PropertyPanel  = require(script.PropertyPanel)
+local Toolbar        = require(script.Toolbar)
+
+------------------------------------------------------------------------
+-- Plugin toolbar button
+------------------------------------------------------------------------
+local toolbar = plugin:CreateToolbar("Dialogue Designer")
+local toggleBtn = toolbar:CreateButton(
+	"DesignerToggle",
+	"Open the Dialogue Designer",
+	"rbxassetid://6031075938",
+	"Dialogue Designer"
+)
+
+------------------------------------------------------------------------
+-- DockWidget
+------------------------------------------------------------------------
+local widgetInfo = DockWidgetPluginGuiInfo.new(
+	Enum.InitialDockState.Float,
+	false,  -- initially disabled
+	false,  -- don't override saved state
+	900, 560,  -- default float size
+	700, 440   -- minimum size
+)
+
+local widget = plugin:CreateDockWidgetPluginGui("DialogueDesigner", widgetInfo)
+widget.Title = "Dialogue Designer — 3/12 5:10"
+widget.Name  = "DialogueDesigner"
+widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+------------------------------------------------------------------------
+-- Root layout container
+------------------------------------------------------------------------
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.Size = UDim2.fromScale(1, 1)
+root.Position = UDim2.fromOffset(0, 0)
+root.AnchorPoint = Vector2.new(0, 0)
+root.BackgroundTransparency = 1
+root.Parent = widget
+
+------------------------------------------------------------------------
+-- State
+------------------------------------------------------------------------
+local state = AppState.new()
+
+------------------------------------------------------------------------
+-- Status bar (bottom strip)
+------------------------------------------------------------------------
+local function buildStatusBar(parent)
+	local T = Theme
+	local bar = Instance.new("Frame")
+	bar.Name = "StatusBar"
+	bar.Size = UDim2.new(1, 0, 0, T.Sizes.StatusHeight)
+	bar.Position = UDim2.new(0, 0, 1, -T.Sizes.StatusHeight)
+	bar.BackgroundColor3 = T.Colors.StatusBar
+	bar.BorderSizePixel = 0
+	bar.ZIndex = 10
+	bar.Parent = parent
+
+	local lbl = Instance.new("TextLabel", bar)
+	lbl.Name = "Label"
+	lbl.Size = UDim2.new(1, -12, 1, 0)
+	lbl.Position = UDim2.fromOffset(6, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.TextHeader
+	lbl.TextSize = T.Sizes.SmallText
+	lbl.Font = T.Fonts.Default
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	local function refresh()
+		local n = state:GetNodeCount()
+		local start = state.startNodeId or "(none)"
+		lbl.Text = string.format("Tree: %s  |  Nodes: %d  |  Start: %s", state.treeId, n, start)
+	end
+
+	state.treeChanged:Connect(refresh)
+	state.nodeAdded:Connect(refresh)
+	state.nodeRemoved:Connect(refresh)
+	state.stateLoaded:Connect(refresh)
+	refresh()
+end
+
+------------------------------------------------------------------------
+-- Assemble the UI
+------------------------------------------------------------------------
+local toolbarUI    = Toolbar.new(root, state)
+local canvas       = Canvas.new(root, state)
+local propPanel    = PropertyPanel.new(root, state)
+buildStatusBar(root)
+
+------------------------------------------------------------------------
+-- Toggle button
+------------------------------------------------------------------------
+toggleBtn.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+end)
+
+widget:GetPropertyChangedSignal("Enabled"):Connect(function()
+	toggleBtn:SetActive(widget.Enabled)
+end)
+
+------------------------------------------------------------------------
+-- Cleanup on unload
+------------------------------------------------------------------------
+plugin.Unloading:Connect(function()
+	canvas:Destroy()
+	propPanel:Destroy()
+	toolbarUI:Destroy()
+end)
+]]></ProtectedString>
+			</Properties>
+		<Item class="ModuleScript" referent="RBX0">
+			<Properties>
+				<string name="Name">DesignerTheme</string>
+				<ProtectedString name="Source"><![CDATA[local Theme = {}
+
+Theme.Colors = {
+	Background      = Color3.fromRGB(30, 30, 30),
+	Canvas          = Color3.fromRGB(22, 22, 26),
+	GridDot         = Color3.fromRGB(44, 44, 48),
+
+	NodeBg          = Color3.fromRGB(42, 42, 46),
+	NodeBorder      = Color3.fromRGB(62, 62, 68),
+	NodeSelected    = Color3.fromRGB(0, 120, 215),
+	HeaderNormal    = Color3.fromRGB(55, 55, 62),
+	HeaderStart     = Color3.fromRGB(40, 130, 55),
+	HeaderEnd       = Color3.fromRGB(170, 45, 45),
+
+	Text            = Color3.fromRGB(220, 220, 225),
+	TextDim         = Color3.fromRGB(130, 130, 140),
+	TextHeader      = Color3.fromRGB(255, 255, 255),
+	TextPlaceholder = Color3.fromRGB(80, 80, 85),
+
+	ConnNormal      = Color3.fromRGB(160, 160, 170),
+	ConnConditional = Color3.fromRGB(230, 185, 50),
+	ConnAction      = Color3.fromRGB(50, 170, 220),
+	ConnDragging    = Color3.fromRGB(100, 200, 255),
+
+	ChoiceDot       = Color3.fromRGB(90, 180, 255),
+	InputDot        = Color3.fromRGB(90, 220, 110),
+
+	Toolbar         = Color3.fromRGB(38, 38, 42),
+	BtnNormal       = Color3.fromRGB(52, 52, 58),
+	BtnHover        = Color3.fromRGB(68, 68, 76),
+	BtnPress        = Color3.fromRGB(0, 100, 180),
+	BtnDanger       = Color3.fromRGB(180, 50, 50),
+
+	Panel           = Color3.fromRGB(32, 32, 36),
+	Field           = Color3.fromRGB(48, 48, 54),
+	FieldBorder     = Color3.fromRGB(62, 62, 68),
+
+	StatusBar       = Color3.fromRGB(0, 120, 215),
+	Accent          = Color3.fromRGB(0, 120, 215),
+	Danger          = Color3.fromRGB(200, 55, 55),
+	Success         = Color3.fromRGB(55, 175, 75),
+}
+
+Theme.Fonts = {
+	Default = Enum.Font.SourceSans,
+	Bold    = Enum.Font.SourceSansBold,
+	Mono    = Enum.Font.Code,
+}
+
+Theme.Sizes = {
+	NodeWidth       = 200,
+	NodeMinHeight   = 80,
+	HeaderHeight    = 26,
+	NodeCorner      = UDim.new(0, 6),
+	DotRadius       = 6,
+	ConnThickness   = 2,
+
+	ToolbarHeight   = 34,
+	BtnHeight       = 26,
+	BtnPadding      = 4,
+
+	PanelWidth      = 280,
+	FieldHeight     = 26,
+	FieldPadding    = 6,
+
+	StatusHeight    = 22,
+
+	Text            = 14,
+	HeaderText      = 13,
+	SmallText       = 12,
+
+	CanvasSize      = 6000,
+	GridSpacing     = 60,
+}
+
+return Theme
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX1">
+			<Properties>
+				<string name="Name">AppState</string>
+				<ProtectedString name="Source"><![CDATA[------------------------------------------------------------------------
+-- Signal: lightweight event emitter
+------------------------------------------------------------------------
+local Signal = {}
+Signal.__index = Signal
+
+function Signal.new()
+	local self = setmetatable({ _listeners = {} }, Signal)
+	return self
+end
+
+function Signal:Connect(fn)
+	local conn = { _fn = fn, Connected = true }
+	function conn:Disconnect()
+		conn.Connected = false
+	end
+	table.insert(self._listeners, conn)
+	return conn
+end
+
+function Signal:Fire(...)
+	for i = #self._listeners, 1, -1 do
+		local c = self._listeners[i]
+		if c.Connected then
+			c._fn(...)
+		else
+			table.remove(self._listeners, i)
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- AppState: single source of truth for the designer
+------------------------------------------------------------------------
+local AppState = {}
+AppState.__index = AppState
+
+function AppState.new()
+	local self = setmetatable({}, AppState)
+
+	self.treeId      = "untitled"
+	self.startNodeId = nil
+	self.nodes       = {} -- [nodeId] → { id, x, y, speaker, text, isEndNode, autoAdvanceDelay, actions{}, choices{} }
+	self.selectedId  = nil
+
+	self._undoStack = {}
+	self._redoStack = {}
+	self._maxUndo   = 50
+
+	self.nodeAdded        = Signal.new()
+	self.nodeRemoved      = Signal.new()
+	self.nodeMoved        = Signal.new()
+	self.nodeUpdated       = Signal.new()
+	self.selectionChanged = Signal.new()
+	self.treeChanged      = Signal.new()
+	self.stateLoaded      = Signal.new()
+
+	return self
+end
+
+------------------------------------------------------------------------
+-- Snapshot helpers (deep-copy for undo)
+------------------------------------------------------------------------
+local function deepCopyActions(actions)
+	if not actions then return {} end
+	local out = {}
+	for _, a in ipairs(actions) do
+		table.insert(out, { type = a.type, key = a.key, value = a.value })
+	end
+	return out
+end
+
+local function deepCopyConditions(cond)
+	if not cond then return {} end
+	local out = {}
+	for k, v in pairs(cond) do out[k] = v end
+	return out
+end
+
+local function deepCopyChoices(choices)
+	if not choices then return {} end
+	local out = {}
+	for _, c in ipairs(choices) do
+		table.insert(out, {
+			text                = c.text,
+			targetNodeId        = c.targetNodeId,
+			conditions          = deepCopyConditions(c.conditions),
+			hideWhenUnavailable = c.hideWhenUnavailable,
+			actions             = deepCopyActions(c.actions),
+		})
+	end
+	return out
+end
+
+local function deepCopyNode(n)
+	return {
+		id                = n.id,
+		x                 = n.x,
+		y                 = n.y,
+		speaker           = n.speaker,
+		text              = n.text,
+		isEndNode         = n.isEndNode,
+		autoAdvanceDelay  = n.autoAdvanceDelay,
+		actions           = deepCopyActions(n.actions),
+		choices           = deepCopyChoices(n.choices),
+	}
+end
+
+function AppState:_snapshot()
+	local data = { treeId = self.treeId, startNodeId = self.startNodeId, nodes = {} }
+	for id, n in pairs(self.nodes) do
+		data.nodes[id] = deepCopyNode(n)
+	end
+	return data
+end
+
+function AppState:_restore(data)
+	self.treeId      = data.treeId
+	self.startNodeId = data.startNodeId
+	self.nodes       = data.nodes
+	self.selectedId  = nil
+end
+
+function AppState:_pushUndo()
+	table.insert(self._undoStack, self:_snapshot())
+	if #self._undoStack > self._maxUndo then
+		table.remove(self._undoStack, 1)
+	end
+	self._redoStack = {}
+end
+
+function AppState:Undo()
+	if #self._undoStack == 0 then return end
+	table.insert(self._redoStack, self:_snapshot())
+	self:_restore(table.remove(self._undoStack))
+	self.stateLoaded:Fire()
+end
+
+function AppState:Redo()
+	if #self._redoStack == 0 then return end
+	table.insert(self._undoStack, self:_snapshot())
+	self:_restore(table.remove(self._redoStack))
+	self.stateLoaded:Fire()
+end
+
+------------------------------------------------------------------------
+-- Node CRUD
+------------------------------------------------------------------------
+function AppState:AddNode(nodeId, x, y)
+	self:_pushUndo()
+	local node = {
+		id               = nodeId,
+		x                = x or 100,
+		y                = y or 100,
+		speaker          = nil,
+		text             = "",
+		isEndNode        = false,
+		autoAdvanceDelay = nil,
+		actions          = {},
+		choices          = {},
+	}
+	self.nodes[nodeId] = node
+	if not self.startNodeId then
+		self.startNodeId = nodeId
+	end
+	self.nodeAdded:Fire(nodeId, node)
+	self.treeChanged:Fire()
+	return node
+end
+
+function AppState:RemoveNode(nodeId)
+	if not self.nodes[nodeId] then return end
+	self:_pushUndo()
+	for _, n in pairs(self.nodes) do
+		for _, c in ipairs(n.choices or {}) do
+			if c.targetNodeId == nodeId then c.targetNodeId = nil end
+		end
+	end
+	self.nodes[nodeId] = nil
+	if self.startNodeId == nodeId then
+		self.startNodeId = next(self.nodes)
+	end
+	if self.selectedId == nodeId then
+		self.selectedId = nil
+		self.selectionChanged:Fire(nil)
+	end
+	self.nodeRemoved:Fire(nodeId)
+	self.treeChanged:Fire()
+end
+
+function AppState:MoveNode(nodeId, x, y)
+	local n = self.nodes[nodeId]
+	if not n then return end
+	n.x, n.y = x, y
+	self.nodeMoved:Fire(nodeId, x, y)
+end
+
+function AppState:CommitMove()
+	self:_pushUndo()
+end
+
+function AppState:UpdateNode(nodeId, changes)
+	local node = self.nodes[nodeId]
+	if not node then return end
+	self:_pushUndo()
+
+	local oldId = nodeId
+	for k, v in pairs(changes) do
+		node[k] = v
+	end
+
+	if changes.id and changes.id ~= oldId then
+		self.nodes[oldId] = nil
+		self.nodes[changes.id] = node
+		for _, n in pairs(self.nodes) do
+			for _, c in ipairs(n.choices or {}) do
+				if c.targetNodeId == oldId then c.targetNodeId = changes.id end
+			end
+		end
+		if self.startNodeId == oldId then self.startNodeId = changes.id end
+		if self.selectedId  == oldId then self.selectedId  = changes.id end
+	end
+
+	self.nodeUpdated:Fire(changes.id or oldId, node)
+	self.treeChanged:Fire()
+end
+
+function AppState:SelectNode(nodeId)
+	if self.selectedId == nodeId then return end
+	self.selectedId = nodeId
+	self.selectionChanged:Fire(nodeId)
+end
+
+function AppState:SetStartNode(nodeId)
+	if not self.nodes[nodeId] then return end
+	self:_pushUndo()
+	self.startNodeId = nodeId
+	self.treeChanged:Fire()
+end
+
+function AppState:SetTreeId(id)
+	self:_pushUndo()
+	self.treeId = id
+	self.treeChanged:Fire()
+end
+
+------------------------------------------------------------------------
+-- Choice CRUD
+------------------------------------------------------------------------
+function AppState:AddChoice(nodeId)
+	local node = self.nodes[nodeId]
+	if not node then return end
+	self:_pushUndo()
+	table.insert(node.choices, {
+		text                = "New choice",
+		targetNodeId        = nil,
+		conditions          = {},
+		hideWhenUnavailable = false,
+		actions             = {},
+	})
+	self.nodeUpdated:Fire(nodeId, node)
+	self.treeChanged:Fire()
+end
+
+function AppState:RemoveChoice(nodeId, idx)
+	local node = self.nodes[nodeId]
+	if not node or not node.choices[idx] then return end
+	self:_pushUndo()
+	table.remove(node.choices, idx)
+	self.nodeUpdated:Fire(nodeId, node)
+	self.treeChanged:Fire()
+end
+
+function AppState:UpdateChoice(nodeId, idx, changes)
+	local node = self.nodes[nodeId]
+	if not node or not node.choices[idx] then return end
+	self:_pushUndo()
+	for k, v in pairs(changes) do
+		node.choices[idx][k] = v
+	end
+	self.nodeUpdated:Fire(nodeId, node)
+	self.treeChanged:Fire()
+end
+
+------------------------------------------------------------------------
+-- Bulk operations
+------------------------------------------------------------------------
+function AppState:Clear()
+	self:_pushUndo()
+	self.nodes       = {}
+	self.startNodeId = nil
+	self.selectedId  = nil
+	self.treeId      = "untitled"
+	self.stateLoaded:Fire()
+end
+
+function AppState:LoadData(data)
+	self:_pushUndo()
+	self:_restore(data)
+	self.stateLoaded:Fire()
+end
+
+function AppState:GetNodeCount()
+	local c = 0
+	for _ in pairs(self.nodes) do c = c + 1 end
+	return c
+end
+
+function AppState:GetSortedNodeIds()
+	local ids = {}
+	for id in pairs(self.nodes) do table.insert(ids, id) end
+	table.sort(ids)
+	return ids
+end
+
+return AppState
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX2">
+			<Properties>
+				<string name="Name">Serializer</string>
+				<ProtectedString name="Source"><![CDATA[local Serializer = {}
+
+local function trim(s)
+	return s:match("^%s*(.-)%s*$") or ""
+end
+
+local function fmtVal(v)
+	if type(v) == "boolean" then return tostring(v) end
+	return tostring(v)
+end
+
+local function parseVal(raw)
+	if raw == "true"  then return true  end
+	if raw == "false" then return false end
+	local n = tonumber(raw)
+	if n then return n end
+	return raw
+end
+
+local function fmtActions(actions)
+	if not actions then return "" end
+	local parts = {}
+	for _, a in ipairs(actions) do
+		if a.type == "set" then
+			table.insert(parts, " [set " .. a.key .. " " .. fmtVal(a.value) .. "]")
+		elseif a.type == "call" then
+			table.insert(parts, " [call " .. a.key .. "]")
+		end
+	end
+	return table.concat(parts)
+end
+
+local function extractActions(text)
+	local actions = {}
+	for key, val in text:gmatch("%[set%s+(%S+)%s+(%S+)%]") do
+		table.insert(actions, { type = "set", key = key, value = parseVal(val) })
+	end
+	text = text:gsub("%[set%s+%S+%s+%S+%]", "")
+	for name in text:gmatch("%[call%s+(%S+)%]") do
+		table.insert(actions, { type = "call", key = name })
+	end
+	text = text:gsub("%[call%s+%S+%]", "")
+	return actions, text
+end
+
+------------------------------------------------------------------------
+-- Export: state → text format
+------------------------------------------------------------------------
+function Serializer.Export(state)
+	local lines = {}
+
+	for id, node in pairs(state.nodes) do
+		table.insert(lines, string.format("-- pos: %s %d %d", id, math.floor(node.x or 0), math.floor(node.y or 0)))
+	end
+	table.insert(lines, "")
+
+	table.insert(lines, "=== " .. (state.treeId or "untitled"))
+	if state.startNodeId then
+		table.insert(lines, "start: " .. state.startNodeId)
+	end
+	table.insert(lines, "")
+
+	local ordered = {}
+	for id in pairs(state.nodes) do
+		if id ~= state.startNodeId then table.insert(ordered, id) end
+	end
+	table.sort(ordered)
+	if state.startNodeId and state.nodes[state.startNodeId] then
+		table.insert(ordered, 1, state.startNodeId)
+	end
+
+	for _, nodeId in ipairs(ordered) do
+		local node = state.nodes[nodeId]
+		local header = "# " .. nodeId
+		if node.isEndNode then header = header .. " [end]" end
+		if node.autoAdvanceDelay then header = header .. " [auto " .. node.autoAdvanceDelay .. "]" end
+		header = header .. fmtActions(node.actions)
+		table.insert(lines, header)
+
+		if node.speaker and node.speaker ~= "" then
+			table.insert(lines, "@ " .. node.speaker)
+		end
+		if node.text and node.text ~= "" then
+			for textLine in (node.text .. "\n"):gmatch("(.-)\n") do
+				table.insert(lines, textLine)
+			end
+		end
+
+		for _, choice in ipairs(node.choices or {}) do
+			local cl = "> " .. (choice.text or "...")
+			if choice.targetNodeId and choice.targetNodeId ~= "" then
+				cl = cl .. " -> " .. choice.targetNodeId
+			end
+			if choice.conditions then
+				for k, v in pairs(choice.conditions) do
+					cl = cl .. " [if " .. k .. " " .. fmtVal(v) .. "]"
+				end
+			end
+			if choice.hideWhenUnavailable then cl = cl .. " [hide]" end
+			cl = cl .. fmtActions(choice.actions)
+			table.insert(lines, cl)
+		end
+		table.insert(lines, "")
+	end
+
+	return table.concat(lines, "\n")
+end
+
+------------------------------------------------------------------------
+-- Import: text format → state data table
+------------------------------------------------------------------------
+function Serializer.Import(source)
+	local positions = {}
+	local treeId = "untitled"
+	local startNodeId = nil
+	local nodes = {}
+	local curId, curNode = nil, nil
+
+	local function finish()
+		if curId and curNode then
+			curNode.text = trim(curNode.text or "")
+			if curNode._choices and #curNode._choices > 0 then
+				curNode.choices = curNode._choices
+			else
+				curNode.choices = {}
+			end
+			curNode._choices = nil
+			local pos = positions[curId]
+			if pos then curNode.x, curNode.y = pos.x, pos.y end
+			nodes[curId] = curNode
+		end
+		curId, curNode = nil, nil
+	end
+
+	for rawLine in (source .. "\n"):gmatch("(.-)\n") do
+		local line = trim(rawLine)
+
+		local posId, px, py = line:match("^%-%-%s*pos:%s*(%S+)%s+(-?%d+)%s+(-?%d+)")
+		if posId then
+			positions[posId] = { x = tonumber(px), y = tonumber(py) }
+			continue
+		end
+
+		if line == "" or line:sub(1, 2) == "--" then continue end
+
+		local treeMatch = line:match("^===%s*(.+)$")
+		if treeMatch then treeId = trim(treeMatch); continue end
+
+		local startMatch = line:match("^start:%s*(.+)$")
+		if startMatch then startNodeId = trim(startMatch); continue end
+
+		local nodeMatch = line:match("^#%s*(.+)$")
+		if nodeMatch then
+			finish()
+			local isEnd = nodeMatch:match("%[end%]") ~= nil
+			local autoDelay = tonumber(nodeMatch:match("%[auto%s+(%d+%.?%d*)%]"))
+			local nodeActions, remaining = extractActions(nodeMatch)
+			local nodeName = trim(remaining:gsub("%[end%]", ""):gsub("%[auto%s+%d+%.?%d*%]", ""))
+			curId = nodeName
+			curNode = {
+				id = nodeName, x = 0, y = 0,
+				text = "", _choices = {},
+				isEndNode = isEnd,
+				autoAdvanceDelay = autoDelay,
+				actions = #nodeActions > 0 and nodeActions or {},
+			}
+			continue
+		end
+
+		if not curNode then continue end
+
+		local speakerMatch = line:match("^@%s*(.+)$")
+		if speakerMatch then curNode.speaker = trim(speakerMatch); continue end
+
+		local choiceMatch = line:match("^>%s*(.+)$")
+		if choiceMatch then
+			local hide = choiceMatch:match("%[hide%]") ~= nil
+			choiceMatch = choiceMatch:gsub("%[hide%]", "")
+
+			local ifKey, ifVal = choiceMatch:match("%[if%s+(%S+)%s+(%S+)%]")
+			local conditions = {}
+			if ifKey then
+				conditions[ifKey] = parseVal(ifVal)
+				choiceMatch = choiceMatch:gsub("%[if%s+%S+%s+%S+%]", "")
+			end
+
+			local choiceActions
+			choiceActions, choiceMatch = extractActions(choiceMatch)
+			choiceMatch = choiceMatch:gsub("%s+%-%-.*$", "")
+
+			local cText, cTarget = choiceMatch:match("^(.-)%s*%->%s*(.+)$")
+			if cText and cTarget then
+				table.insert(curNode._choices, {
+					text                = trim(cText),
+					targetNodeId        = trim(cTarget),
+					conditions          = conditions,
+					hideWhenUnavailable = hide,
+					actions             = #choiceActions > 0 and choiceActions or {},
+				})
+			end
+			continue
+		end
+
+		if curNode.text == "" then
+			curNode.text = line
+		else
+			curNode.text = curNode.text .. "\n" .. line
+		end
+	end
+
+	finish()
+
+	if not startNodeId then
+		for id in pairs(nodes) do startNodeId = id; break end
+	end
+
+	local hasPos = false
+	for _ in pairs(positions) do hasPos = true; break end
+	if not hasPos then
+		Serializer.AutoLayout(nodes, startNodeId)
+	end
+
+	return { treeId = treeId, startNodeId = startNodeId, nodes = nodes }
+end
+
+------------------------------------------------------------------------
+-- Auto-layout: BFS tree arrangement
+------------------------------------------------------------------------
+function Serializer.AutoLayout(nodes, startNodeId)
+	local centerX = 3000
+	local centerY = 3000
+	local xGap    = 300
+	local yGap    = 160
+	local visited = {}
+	local levels  = {}
+
+	local function bfs()
+		if not startNodeId or not nodes[startNodeId] then return end
+		local queue = { { id = startNodeId, level = 0 } }
+		visited[startNodeId] = true
+		while #queue > 0 do
+			local item = table.remove(queue, 1)
+			if not levels[item.level] then levels[item.level] = {} end
+			table.insert(levels[item.level], item.id)
+			local node = nodes[item.id]
+			if node and node.choices then
+				for _, c in ipairs(node.choices) do
+					if c.targetNodeId and nodes[c.targetNodeId] and not visited[c.targetNodeId] then
+						visited[c.targetNodeId] = true
+						table.insert(queue, { id = c.targetNodeId, level = item.level + 1 })
+					end
+				end
+			end
+		end
+	end
+	bfs()
+
+	for level, ids in pairs(levels) do
+		local totalH = (#ids - 1) * yGap
+		for i, id in ipairs(ids) do
+			local node = nodes[id]
+			if node then
+				node.x = centerX + level * xGap
+				node.y = centerY - totalH / 2 + (i - 1) * yGap
+			end
+		end
+	end
+
+	local idx = 0
+	for id, node in pairs(nodes) do
+		if not visited[id] then
+			node.x = centerX - xGap
+			node.y = centerY + idx * yGap
+			idx = idx + 1
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- ModuleScript source generation
+------------------------------------------------------------------------
+function Serializer.ToModuleScript(state)
+	local txt = Serializer.Export(state)
+	return 'local DialogueParser = require(script.Parent.Parent.DialogueParser)\n\nreturn DialogueParser.Parse([[\n'
+		.. txt .. ']])\n'
+end
+
+return Serializer
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX3">
+			<Properties>
+				<string name="Name">NodeWidget</string>
+				<ProtectedString name="Source"><![CDATA[local Theme = require(script.Parent.DesignerTheme)
+
+local NodeWidget = {}
+NodeWidget.__index = NodeWidget
+
+function NodeWidget.new(nodeData, canvasFrame, appState)
+	local self = setmetatable({}, NodeWidget)
+	self._data       = nodeData
+	self._canvas     = canvasFrame
+	self._state      = appState
+	self._choiceDots = {}
+	self._frame      = nil
+	self._inputDot   = nil
+	self._dragHandle = nil
+	self:_build()
+	return self
+end
+
+------------------------------------------------------------------------
+-- Build the visual node card
+------------------------------------------------------------------------
+function NodeWidget:_build()
+	local T = Theme
+	local d = self._data
+
+	local frame = Instance.new("Frame")
+	frame.Name = "Node_" .. d.id
+	frame.Size = UDim2.fromOffset(T.Sizes.NodeWidth, T.Sizes.NodeMinHeight)
+	frame.Position = UDim2.fromOffset(d.x, d.y)
+	frame.BackgroundColor3 = T.Colors.NodeBg
+	frame.BorderSizePixel = 0
+	frame.ZIndex = 2
+	frame.Parent = self._canvas
+	self._frame = frame
+
+	Instance.new("UICorner", frame).CornerRadius = T.Sizes.NodeCorner
+
+	local stroke = Instance.new("UIStroke", frame)
+	stroke.Name = "Border"
+	stroke.Thickness = 1
+	stroke.Color = T.Colors.NodeBorder
+
+	-- Header
+	local header = Instance.new("Frame", frame)
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, T.Sizes.HeaderHeight)
+	header.BackgroundColor3 = self:_headerColor()
+	header.BorderSizePixel = 0
+	header.ZIndex = 3
+
+	Instance.new("UICorner", header).CornerRadius = T.Sizes.NodeCorner
+
+	local hFill = Instance.new("Frame", header)
+	hFill.Name = "Fill"
+	hFill.Size = UDim2.new(1, 0, 0, T.Sizes.NodeCorner.Offset)
+	hFill.Position = UDim2.new(0, 0, 1, -T.Sizes.NodeCorner.Offset)
+	hFill.BackgroundColor3 = header.BackgroundColor3
+	hFill.BorderSizePixel = 0
+	hFill.ZIndex = 3
+
+	local label = Instance.new("TextLabel", header)
+	label.Name = "Label"
+	label.Size = UDim2.new(1, -10, 1, 0)
+	label.Position = UDim2.fromOffset(5, 0)
+	label.BackgroundTransparency = 1
+	label.Text = d.id
+	label.TextColor3 = T.Colors.TextHeader
+	label.TextSize = T.Sizes.HeaderText
+	label.Font = T.Fonts.Bold
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextTruncate = Enum.TextTruncate.AtEnd
+	label.ZIndex = 4
+
+	-- Text preview
+	local preview = Instance.new("TextLabel", frame)
+	preview.Name = "Preview"
+	preview.Size = UDim2.new(1, -14, 0, 36)
+	preview.Position = UDim2.new(0, 7, 0, T.Sizes.HeaderHeight + 4)
+	preview.BackgroundTransparency = 1
+	preview.TextColor3 = d.text ~= "" and T.Colors.TextDim or T.Colors.TextPlaceholder
+	preview.Text = d.text ~= "" and d.text:sub(1, 80) or "(empty)"
+	preview.TextSize = T.Sizes.SmallText
+	preview.Font = T.Fonts.Default
+	preview.TextXAlignment = Enum.TextXAlignment.Left
+	preview.TextYAlignment = Enum.TextYAlignment.Top
+	preview.TextWrapped = true
+	preview.TextTruncate = Enum.TextTruncate.AtEnd
+	preview.ZIndex = 3
+
+	-- Drag handle (header + preview; below input/choice dots so they receive clicks first)
+	local dragH = Instance.new("TextButton", frame)
+	dragH.Name = "DragHandle"
+	dragH.Size = UDim2.new(1, 0, 0, T.Sizes.HeaderHeight + 44)
+	dragH.Position = UDim2.fromOffset(0, 0)
+	dragH.BackgroundTransparency = 1
+	dragH.Text = ""
+	dragH.AutoButtonColor = false
+	dragH.Active = true
+	dragH.ZIndex = 4
+	self._dragHandle = dragH
+
+	-- Input anchor (top center)
+	self._inputDot = self:_makeDot("InputDot", T.Colors.InputDot,
+		UDim2.new(0.5, -T.Sizes.DotRadius, 0, -T.Sizes.DotRadius), frame)
+
+	self:_buildChoiceDots()
+	self:_resize()
+
+	-- Click to select
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self._state:SelectNode(d.id)
+		end
+	end)
+end
+
+function NodeWidget:_makeDot(name, color, position, parent)
+	local T = Theme
+	local dot = Instance.new("TextButton", parent)
+	dot.Name = name
+	dot.Size = UDim2.fromOffset(T.Sizes.DotRadius * 2, T.Sizes.DotRadius * 2)
+	dot.Position = position
+	dot.BackgroundColor3 = color
+	dot.BorderSizePixel = 0
+	dot.Text = ""
+	dot.AutoButtonColor = false
+	dot.Active = true
+	dot.ZIndex = 5
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+	return dot
+end
+
+function NodeWidget:_headerColor()
+	local T = Theme
+	if self._state.startNodeId == self._data.id then return T.Colors.HeaderStart end
+	if self._data.isEndNode then return T.Colors.HeaderEnd end
+	return T.Colors.HeaderNormal
+end
+
+function NodeWidget:_buildChoiceDots()
+	for _, dot in ipairs(self._choiceDots) do dot:Destroy() end
+	self._choiceDots = {}
+
+	local choices = self._data.choices or {}
+	if #choices == 0 then return end
+
+	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
+	for i = 1, #choices do
+		local dot = self:_makeDot("CDot_" .. i, Theme.Colors.ChoiceDot,
+			UDim2.new(0, spacing * i - Theme.Sizes.DotRadius, 1, -Theme.Sizes.DotRadius),
+			self._frame)
+		table.insert(self._choiceDots, dot)
+	end
+end
+
+function NodeWidget:_resize()
+	local T = Theme
+	local nChoices = #(self._data.choices or {})
+	local h = T.Sizes.HeaderHeight + 44 + (nChoices > 0 and 14 or 0)
+	self._frame.Size = UDim2.fromOffset(T.Sizes.NodeWidth, math.max(T.Sizes.NodeMinHeight, h))
+end
+
+------------------------------------------------------------------------
+-- Public API
+------------------------------------------------------------------------
+function NodeWidget:GetFrame() return self._frame end
+function NodeWidget:GetInputDot() return self._inputDot end
+function NodeWidget:GetChoiceDot(i) return self._choiceDots[i] end
+
+function NodeWidget:GetInputDotCenter()
+	return Vector2.new(self._data.x + Theme.Sizes.NodeWidth / 2, self._data.y)
+end
+
+function NodeWidget:GetChoiceDotCenter(i)
+	local choices = self._data.choices or {}
+	if i > #choices then return nil end
+	local spacing = Theme.Sizes.NodeWidth / (#choices + 1)
+	local frameH = self._frame.Size.Y.Offset
+	return Vector2.new(
+		self._data.x + spacing * i,
+		self._data.y + frameH
+	)
+end
+
+function NodeWidget:GetHeaderFrame()
+	return self._frame and self._frame:FindFirstChild("Header")
+end
+
+function NodeWidget:GetDragHandleFrame()
+	return self._dragHandle
+end
+
+function NodeWidget:UpdateData(nodeData)
+	self._data = nodeData
+	self._frame.Name = "Node_" .. nodeData.id
+	self._frame.Position = UDim2.fromOffset(nodeData.x, nodeData.y)
+
+	local header = self._frame:FindFirstChild("Header")
+	if header then
+		local c = self:_headerColor()
+		header.BackgroundColor3 = c
+		local fill = header:FindFirstChild("Fill")
+		if fill then fill.BackgroundColor3 = c end
+		local lbl = header:FindFirstChild("Label")
+		if lbl then lbl.Text = nodeData.id end
+	end
+
+	local preview = self._frame:FindFirstChild("Preview")
+	if preview then
+		preview.Text = nodeData.text ~= "" and nodeData.text:sub(1, 80) or "(empty)"
+		preview.TextColor3 = nodeData.text ~= "" and Theme.Colors.TextDim or Theme.Colors.TextPlaceholder
+	end
+
+	self:_buildChoiceDots()
+	self:_resize()
+end
+
+function NodeWidget:SetSelected(selected)
+	local s = self._frame:FindFirstChild("Border")
+	if s then
+		s.Color = selected and Theme.Colors.NodeSelected or Theme.Colors.NodeBorder
+		s.Thickness = selected and 2 or 1
+	end
+end
+
+function NodeWidget:SetPosition(x, y)
+	self._frame.Position = UDim2.fromOffset(x, y)
+end
+
+function NodeWidget:SetConnecting(active)
+	local dot = self._inputDot
+	if not dot then return end
+	local T = Theme
+	if active then
+		dot.Size = UDim2.fromOffset(T.Sizes.DotRadius * 4, T.Sizes.DotRadius * 4)
+		dot.Position = UDim2.new(0.5, -T.Sizes.DotRadius * 2, 0, -T.Sizes.DotRadius * 2)
+		local glow = dot:FindFirstChild("Glow") or Instance.new("UIStroke", dot)
+		glow.Name = "Glow"
+		glow.Color = T.Colors.InputDot
+		glow.Thickness = 2
+		glow.Transparency = 0.3
+	else
+		dot.Size = UDim2.fromOffset(T.Sizes.DotRadius * 2, T.Sizes.DotRadius * 2)
+		dot.Position = UDim2.new(0.5, -T.Sizes.DotRadius, 0, -T.Sizes.DotRadius)
+		local glow = dot:FindFirstChild("Glow")
+		if glow then glow:Destroy() end
+	end
+end
+
+function NodeWidget:Destroy()
+	if self._frame then self._frame:Destroy(); self._frame = nil end
+end
+
+return NodeWidget
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX4">
+			<Properties>
+				<string name="Name">ConnectionRenderer</string>
+				<ProtectedString name="Source"><![CDATA[local Theme = require(script.Parent.DesignerTheme)
+
+local ConnectionRenderer = {}
+ConnectionRenderer.__index = ConnectionRenderer
+
+local STEP = 4
+local THICK = Theme.Sizes.ConnThickness
+
+function ConnectionRenderer.new(canvasFrame, scrollFrame)
+	local self = setmetatable({}, ConnectionRenderer)
+	self._canvas   = canvasFrame
+	self._scroll   = scrollFrame
+	self._lines    = {}   -- flat list of frame instances
+	self._dragParts = {}
+	self._dragFrom  = nil
+	return self
+end
+
+------------------------------------------------------------------------
+-- Get canvas-space center of a dot element using its frame hierarchy
+------------------------------------------------------------------------
+function ConnectionRenderer:_dotCanvasCenter(dot)
+	local x = 0
+	local y = 0
+	local obj = dot
+	while obj and obj ~= self._canvas do
+		local pos = obj.Position
+		local parentSz = obj.Parent and obj.Parent.AbsoluteSize or Vector2.new(0, 0)
+		x = x + pos.X.Scale * parentSz.X + pos.X.Offset
+		y = y + pos.Y.Scale * parentSz.Y + pos.Y.Offset
+		obj = obj.Parent
+	end
+	x = x + dot.Size.X.Offset / 2
+	y = y + dot.Size.Y.Offset / 2
+	return Vector2.new(x, y)
+end
+
+------------------------------------------------------------------------
+-- Draw a dotted/segmented line from A to B (no rotation, no anchor)
+------------------------------------------------------------------------
+function ConnectionRenderer:_drawSegments(from, to, color, list)
+	local dx = to.X - from.X
+	local dy = to.Y - from.Y
+	local dist = math.sqrt(dx * dx + dy * dy)
+	if dist < 1 then return end
+	local steps = math.max(math.floor(dist / STEP), 1)
+	local sx = dx / steps
+	local sy = dy / steps
+	for s = 0, steps do
+		local px = from.X + sx * s
+		local py = from.Y + sy * s
+		local seg = Instance.new("Frame")
+		seg.Size = UDim2.fromOffset(STEP, THICK)
+		seg.Position = UDim2.fromOffset(px, py)
+		seg.BackgroundColor3 = color
+		seg.BorderSizePixel = 0
+		seg.ZIndex = 1
+		seg.Parent = self._canvas
+		table.insert(list, seg)
+	end
+end
+
+function ConnectionRenderer:_lineColor(choice)
+	if choice.actions and #choice.actions > 0 then
+		return Theme.Colors.ConnAction
+	end
+	if choice.conditions and next(choice.conditions) then
+		return Theme.Colors.ConnConditional
+	end
+	return Theme.Colors.ConnNormal
+end
+
+------------------------------------------------------------------------
+-- Render all connections
+------------------------------------------------------------------------
+function ConnectionRenderer:RenderAll(nodeWidgets, state)
+	self:Clear()
+	for nodeId, node in pairs(state.nodes) do
+		local fromW = nodeWidgets[nodeId]
+		if not fromW or not node.choices then continue end
+		for i, choice in ipairs(node.choices) do
+			if not choice.targetNodeId then continue end
+			local toW = nodeWidgets[choice.targetNodeId]
+			if not toW then continue end
+			local fromDot = fromW:GetChoiceDot(i)
+			local toDot   = toW:GetInputDot()
+			if not fromDot or not toDot then continue end
+			local fp = self:_dotCanvasCenter(fromDot)
+			local tp = self:_dotCanvasCenter(toDot)
+			self:_drawSegments(fp, tp, self:_lineColor(choice), self._lines)
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Drag line
+------------------------------------------------------------------------
+function ConnectionRenderer:StartDrag(fromPos)
+	self:CancelDrag()
+	self._dragFrom = fromPos
+end
+
+function ConnectionRenderer:UpdateDrag(toPos)
+	for _, p in ipairs(self._dragParts) do p:Destroy() end
+	self._dragParts = {}
+	if self._dragFrom then
+		self:_drawSegments(self._dragFrom, toPos, Theme.Colors.ConnDragging, self._dragParts)
+	end
+end
+
+function ConnectionRenderer:CancelDrag()
+	for _, p in ipairs(self._dragParts) do p:Destroy() end
+	self._dragParts = {}
+	self._dragFrom  = nil
+end
+
+------------------------------------------------------------------------
+-- Cleanup
+------------------------------------------------------------------------
+function ConnectionRenderer:Clear()
+	for _, f in ipairs(self._lines) do f:Destroy() end
+	self._lines = {}
+end
+
+function ConnectionRenderer:Destroy()
+	self:Clear()
+	self:CancelDrag()
+end
+
+return ConnectionRenderer
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX5">
+			<Properties>
+				<string name="Name">Canvas</string>
+				<ProtectedString name="Source"><![CDATA[local Theme                = require(script.Parent.DesignerTheme)
+local NodeWidget           = require(script.Parent.NodeWidget)
+local ConnectionRenderer   = require(script.Parent.ConnectionRenderer)
+local UserInputService     = game:GetService("UserInputService")
+
+local Canvas = {}
+Canvas.__index = Canvas
+
+function Canvas.new(parent, appState)
+	local self = setmetatable({}, Canvas)
+	self._state       = appState
+	self._widgets     = {}   -- [nodeId] → NodeWidget
+	self._conns       = nil  -- ConnectionRenderer
+	self._scroll      = nil
+	self._inner       = nil
+	self._widget      = parent
+	self._drag        = nil  -- { nodeId, startMouse: Vector2, startPos: Vector2 }
+	self._connecting  = nil  -- { nodeId, choiceIndex }
+	self._overlay     = nil
+	self._uisConn    = nil  -- UserInputService.InputEnded fallback
+	self._lastMouseScreen = nil
+	self:_build(parent)
+	self:_bindState()
+	return self
+end
+
+------------------------------------------------------------------------
+-- Build the scrollable canvas
+------------------------------------------------------------------------
+function Canvas:_build(parent)
+	local T = Theme
+	local CS = T.Sizes.CanvasSize
+
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Name = "Canvas"
+	scroll.Size = UDim2.new(1, -T.Sizes.PanelWidth, 1, -T.Sizes.ToolbarHeight - T.Sizes.StatusHeight)
+	scroll.Position = UDim2.fromOffset(0, T.Sizes.ToolbarHeight)
+	scroll.BackgroundColor3 = T.Colors.Canvas
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 8
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 65)
+	scroll.CanvasSize = UDim2.fromOffset(CS, CS)
+	scroll.ScrollingDirection = Enum.ScrollingDirection.XY
+	scroll.CanvasPosition = Vector2.new(CS / 2 - 300, CS / 2 - 200)
+	scroll.ZIndex = 1
+	scroll.Parent = parent
+	self._scroll = scroll
+
+	local inner = Instance.new("Frame", scroll)
+	inner.Name = "Inner"
+	inner.Size = UDim2.fromOffset(CS, CS)
+	inner.BackgroundTransparency = 1
+	inner.ZIndex = 1
+	self._inner = inner
+
+	self:_drawGrid()
+
+	self._conns = ConnectionRenderer.new(inner, scroll)
+
+	-- Right-click context menu
+	scroll.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			local cx, cy = self:_screenToCanvas(input.Position.X, input.Position.Y)
+			self:_showContextMenu(cx, cy)
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self:_dismissContextMenu()
+			if not self._drag and not self._connecting then
+				self._state:SelectNode(nil)
+			end
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- Coordinate helpers
+------------------------------------------------------------------------
+function Canvas:_screenToCanvas(sx, sy)
+	local abs = self._scroll.AbsolutePosition
+	local cp  = self._scroll.CanvasPosition
+	return sx - abs.X + cp.X, sy - abs.Y + cp.Y
+end
+
+------------------------------------------------------------------------
+-- Drag overlay — captures all mouse input during a drag
+------------------------------------------------------------------------
+function Canvas:_createOverlay()
+	if self._overlay then return end
+	local ov = Instance.new("TextButton")
+	ov.Name = "DragOverlay"
+	ov.Size = UDim2.fromScale(1, 1)
+	ov.BackgroundTransparency = 1
+	ov.Text = ""
+	ov.Active = true
+	ov.ZIndex = 40
+	ov.Parent = self._widget
+	self._overlay = ov
+
+	ov.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			self:_onMouseMove(input.Position.X, input.Position.Y)
+		end
+	end)
+	ov.MouseButton1Up:Connect(function()
+		self:_onMouseUp()
+	end)
+	self._uisConn = UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and (self._drag or self._connecting) then
+			self:_onMouseUp()
+		end
+	end)
+end
+
+function Canvas:_removeOverlay()
+	if self._uisConn then self._uisConn:Disconnect(); self._uisConn = nil end
+	if self._overlay then self._overlay:Destroy(); self._overlay = nil end
+end
+
+------------------------------------------------------------------------
+-- Mouse handlers (routed through overlay during drags)
+------------------------------------------------------------------------
+function Canvas:_onMouseMove(sx, sy)
+	self._lastMouseScreen = Vector2.new(sx, sy)
+
+	if self._drag then
+		local d = self._drag
+		local dx = sx - d.startMouse.X
+		local dy = sy - d.startMouse.Y
+		local nx = d.startPos.X + dx
+		local ny = d.startPos.Y + dy
+		self._state:MoveNode(d.nodeId, nx, ny)
+		local w = self._widgets[d.nodeId]
+		if w then w:SetPosition(nx, ny) end
+		self._conns:RenderAll(self._widgets, self._state)
+	end
+
+	if self._connecting then
+		local cx, cy = self:_screenToCanvas(sx, sy)
+		local snapId = self:_hitTestInputDot(sx, sy)
+		if snapId then
+			local w = self._widgets[snapId]
+			if w then
+				local dot = w:GetInputDot()
+				if dot then
+					local snapPos = self._conns:_dotCanvasCenter(dot)
+					self._conns:UpdateDrag(snapPos)
+				else
+					self._conns:UpdateDrag(Vector2.new(cx, cy))
+				end
+			else
+				self._conns:UpdateDrag(Vector2.new(cx, cy))
+			end
+		else
+			self._conns:UpdateDrag(Vector2.new(cx, cy))
+		end
+	end
+end
+
+function Canvas:_onMouseUp()
+	if self._drag then
+		local d = self._drag
+		self._drag = nil
+		self._state:CommitMove()
+		self:_removeOverlay()
+		return
+	end
+
+	if self._connecting then
+		local hitId = nil
+		if self._lastMouseScreen then
+			hitId = self:_hitTestInputDot(self._lastMouseScreen.X, self._lastMouseScreen.Y)
+		end
+		if hitId then
+			local from = self._connecting
+			self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = hitId })
+		end
+		self._conns:CancelDrag()
+		self:_setInputDotsHighlight(false)
+		self._connecting = nil
+		self:_removeOverlay()
+		self:RefreshConnections()
+	end
+end
+
+function Canvas:_setInputDotsHighlight(active, excludeNodeId)
+	for id, w in pairs(self._widgets) do
+		if id ~= excludeNodeId then
+			w:SetConnecting(active)
+		end
+	end
+end
+
+function Canvas:_hitTestInputDot(screenX, screenY)
+	local hitRadius = 20
+	local bestId = nil
+	local bestDist = hitRadius
+	for nodeId, w in pairs(self._widgets) do
+		local dot = w:GetInputDot()
+		if not dot then continue end
+		local dAbs = dot.AbsolutePosition
+		local dSz  = dot.AbsoluteSize
+		local cx = dAbs.X + dSz.X / 2
+		local cy = dAbs.Y + dSz.Y / 2
+		local dx = screenX - cx
+		local dy = screenY - cy
+		local dist = math.sqrt(dx * dx + dy * dy)
+		if dist < bestDist then
+			bestDist = dist
+			bestId = nodeId
+		end
+	end
+	return bestId
+end
+
+------------------------------------------------------------------------
+-- Node widget creation + input wiring
+------------------------------------------------------------------------
+function Canvas:_createWidget(nodeId)
+	local node = self._state.nodes[nodeId]
+	if not node then return end
+
+	local w = NodeWidget.new(node, self._inner, self._state)
+	self._widgets[nodeId] = w
+
+	local dragHandle = w:GetDragHandleFrame()
+	if dragHandle then
+		dragHandle.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				self._state:SelectNode(nodeId)
+				self._drag = {
+					nodeId     = nodeId,
+					startMouse = Vector2.new(input.Position.X, input.Position.Y),
+					startPos   = Vector2.new(node.x, node.y),
+				}
+				self:_createOverlay()
+			end
+		end)
+	end
+
+	self:_wireChoiceDots(w, nodeId)
+	self:_wireInputDot(w, nodeId)
+end
+
+function Canvas:_wireChoiceDots(w, nodeId)
+	local node = self._state.nodes[nodeId]
+	if not node then return end
+	for i = 1, #(node.choices or {}) do
+		local dot = w:GetChoiceDot(i)
+		if dot then
+			dot.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					local fromPos = self._conns:_dotCanvasCenter(dot)
+					self._connecting = { nodeId = nodeId, choiceIndex = i }
+					self._conns:StartDrag(fromPos)
+					self:_setInputDotsHighlight(true, nodeId)
+					self:_createOverlay()
+				end
+			end)
+		end
+	end
+end
+
+function Canvas:_wireInputDot(w, targetNodeId)
+	local dot = w:GetInputDot()
+	if not dot then return end
+	dot.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
+			local from = self._connecting
+			self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetNodeId })
+			self._conns:CancelDrag()
+			self._connecting = nil
+			self:_removeOverlay()
+			self:RefreshConnections()
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- Context menu
+------------------------------------------------------------------------
+function Canvas:_dismissContextMenu()
+	local old = self._scroll:FindFirstChild("ContextMenu")
+	if old then old:Destroy() end
+end
+
+function Canvas:_showContextMenu(cx, cy)
+	self:_dismissContextMenu()
+	local T = Theme
+
+	local menu = Instance.new("Frame")
+	menu.Name = "ContextMenu"
+	menu.Size = UDim2.fromOffset(150, 64)
+	menu.Position = UDim2.fromOffset(cx, cy)
+	menu.BackgroundColor3 = T.Colors.Toolbar
+	menu.BorderSizePixel = 0
+	menu.ZIndex = 30
+	menu.Parent = self._scroll
+	Instance.new("UICorner", menu).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIStroke", menu).Color = T.Colors.FieldBorder
+
+	local function menuBtn(text, yOff, isEnd)
+		local b = Instance.new("TextButton", menu)
+		b.Size = UDim2.new(1, -8, 0, 24)
+		b.Position = UDim2.fromOffset(4, yOff)
+		b.BackgroundColor3 = T.Colors.BtnNormal
+		b.TextColor3 = T.Colors.Text
+		b.Text = text
+		b.TextSize = T.Sizes.SmallText
+		b.Font = T.Fonts.Default
+		b.BorderSizePixel = 0
+		b.ZIndex = 31
+		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 3)
+		b.MouseButton1Click:Connect(function()
+			menu:Destroy()
+			self:_addNodeAt(cx, cy, isEnd)
+		end)
+	end
+
+	menuBtn("+ Add Node", 4, false)
+	menuBtn("+ Add End Node", 32, true)
+
+	task.delay(6, function()
+		if menu.Parent then menu:Destroy() end
+	end)
+end
+
+function Canvas:_addNodeAt(cx, cy, isEnd)
+	local count = self._state:GetNodeCount()
+	local id = "node_" .. (count + 1)
+	while self._state.nodes[id] do
+		count = count + 1
+		id = "node_" .. (count + 1)
+	end
+	local node = self._state:AddNode(id, cx, cy)
+	if isEnd then
+		self._state:UpdateNode(id, { isEndNode = true })
+	end
+	self._state:SelectNode(id)
+end
+
+------------------------------------------------------------------------
+-- Grid
+------------------------------------------------------------------------
+function Canvas:_drawGrid()
+	local T = Theme
+	local CS = T.Sizes.CanvasSize
+	local sp = T.Sizes.GridSpacing
+	local center = CS / 2
+	local range = 1200
+
+	local grid = Instance.new("Frame", self._inner)
+	grid.Name = "Grid"
+	grid.Size = UDim2.fromScale(1, 1)
+	grid.BackgroundTransparency = 1
+	grid.ZIndex = 0
+
+	for x = center - range, center + range, sp do
+		for y = center - range, center + range, sp do
+			local dot = Instance.new("Frame", grid)
+			dot.Size = UDim2.fromOffset(2, 2)
+			dot.Position = UDim2.fromOffset(x, y)
+			dot.BackgroundColor3 = T.Colors.GridDot
+			dot.BorderSizePixel = 0
+			dot.ZIndex = 0
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Refresh connections (deferred to ensure AbsolutePosition is computed)
+------------------------------------------------------------------------
+function Canvas:RefreshConnections()
+	task.defer(function()
+		self._conns:RenderAll(self._widgets, self._state)
+	end)
+end
+
+------------------------------------------------------------------------
+-- Full rebuild (after undo/redo/import)
+------------------------------------------------------------------------
+function Canvas:_rebuildAll()
+	for _, w in pairs(self._widgets) do w:Destroy() end
+	self._widgets = {}
+	self._conns:Clear()
+	for nodeId in pairs(self._state.nodes) do
+		self:_createWidget(nodeId)
+	end
+	self:RefreshConnections()
+
+	if self._state.selectedId then
+		local w = self._widgets[self._state.selectedId]
+		if w then w:SetSelected(true) end
+	end
+end
+
+------------------------------------------------------------------------
+-- State binding
+------------------------------------------------------------------------
+function Canvas:_bindState()
+	local s = self._state
+
+	s.nodeAdded:Connect(function(nodeId)
+		self:_createWidget(nodeId)
+		self:RefreshConnections()
+	end)
+
+	s.nodeRemoved:Connect(function(nodeId)
+		local w = self._widgets[nodeId]
+		if w then w:Destroy(); self._widgets[nodeId] = nil end
+		self:RefreshConnections()
+	end)
+
+	s.nodeMoved:Connect(function()
+		self:RefreshConnections()
+	end)
+
+	s.nodeUpdated:Connect(function(nodeId, nodeData)
+		local w = self._widgets[nodeId]
+		if w then
+			w:UpdateData(nodeData)
+			self:_wireChoiceDots(w, nodeId)
+			self:_wireInputDot(w, nodeId)
+		end
+		-- Handle renames: widget might be under old key
+		for id, widget in pairs(self._widgets) do
+			if id ~= nodeData.id and not self._state.nodes[id] then
+				self._widgets[id] = nil
+				self._widgets[nodeData.id] = widget
+				break
+			end
+		end
+		self:RefreshConnections()
+	end)
+
+	s.selectionChanged:Connect(function(selectedId)
+		for id, w in pairs(self._widgets) do
+			w:SetSelected(id == selectedId)
+		end
+	end)
+
+	s.stateLoaded:Connect(function()
+		self:_rebuildAll()
+	end)
+
+	s.treeChanged:Connect(function()
+		for id, w in pairs(self._widgets) do
+			local node = s.nodes[id]
+			if node then
+				w:UpdateData(node)
+				self:_wireChoiceDots(w, id)
+				self:_wireInputDot(w, id)
+			end
+		end
+		self:RefreshConnections()
+	end)
+end
+
+function Canvas:Destroy()
+	for _, w in pairs(self._widgets) do w:Destroy() end
+	self._conns:Destroy()
+	self:_removeOverlay()
+	if self._scroll then self._scroll:Destroy() end
+end
+
+return Canvas
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX6">
+			<Properties>
+				<string name="Name">PropertyPanel</string>
+				<ProtectedString name="Source"><![CDATA[local Theme = require(script.Parent.DesignerTheme)
+
+local PropertyPanel = {}
+PropertyPanel.__index = PropertyPanel
+
+function PropertyPanel.new(parent, appState)
+	local self = setmetatable({}, PropertyPanel)
+	self._state   = appState
+	self._conns   = {}
+	self._frame   = nil
+	self._scroll  = nil
+	self._nodeId  = nil
+	self:_build(parent)
+	self:_bindState()
+	return self
+end
+
+------------------------------------------------------------------------
+-- UI helpers
+------------------------------------------------------------------------
+local function makeLabel(parent, text, yOff)
+	local T = Theme
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -16, 0, 18)
+	lbl.Position = UDim2.new(0, 8, 0, yOff)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = text
+	lbl.TextColor3 = T.Colors.TextDim
+	lbl.TextSize = T.Sizes.SmallText
+	lbl.Font = T.Fonts.Bold
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = parent
+	return lbl
+end
+
+local function makeField(parent, yOff, placeholder, multiline)
+	local T = Theme
+	local h = multiline and 60 or T.Sizes.FieldHeight
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(1, -16, 0, h)
+	box.Position = UDim2.new(0, 8, 0, yOff)
+	box.BackgroundColor3 = T.Colors.Field
+	box.BorderSizePixel = 0
+	box.TextColor3 = T.Colors.Text
+	box.PlaceholderText = placeholder or ""
+	box.PlaceholderColor3 = T.Colors.TextPlaceholder
+	box.TextSize = T.Sizes.Text
+	box.Font = T.Fonts.Default
+	box.Text = ""
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.ClearTextOnFocus = false
+	box.TextWrapped = multiline or false
+	box.MultiLine = multiline or false
+	box.Active = true
+	box.Parent = parent
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIStroke", box).Color = T.Colors.FieldBorder
+	return box
+end
+
+local function makeCheckbox(parent, text, yOff)
+	local T = Theme
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -16, 0, 22)
+	row.Position = UDim2.new(0, 8, 0, yOff)
+	row.BackgroundTransparency = 1
+	row.Parent = parent
+
+	local box = Instance.new("TextButton", row)
+	box.Name = "Check"
+	box.Size = UDim2.fromOffset(18, 18)
+	box.Position = UDim2.fromOffset(0, 2)
+	box.BackgroundColor3 = T.Colors.Field
+	box.Text = ""
+	box.BorderSizePixel = 0
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 3)
+	Instance.new("UIStroke", box).Color = T.Colors.FieldBorder
+
+	local tick = Instance.new("TextLabel", box)
+	tick.Name = "Tick"
+	tick.Size = UDim2.fromScale(1, 1)
+	tick.BackgroundTransparency = 1
+	tick.Text = ""
+	tick.TextColor3 = T.Colors.Text
+	tick.TextSize = 14
+	tick.Font = T.Fonts.Bold
+
+	local lbl = Instance.new("TextLabel", row)
+	lbl.Size = UDim2.new(1, -24, 1, 0)
+	lbl.Position = UDim2.fromOffset(24, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = text
+	lbl.TextColor3 = T.Colors.Text
+	lbl.TextSize = T.Sizes.Text
+	lbl.Font = T.Fonts.Default
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	return row, box, tick
+end
+
+local function makeButton(parent, text, yOff, color)
+	local T = Theme
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -16, 0, T.Sizes.BtnHeight)
+	btn.Position = UDim2.new(0, 8, 0, yOff)
+	btn.BackgroundColor3 = color or T.Colors.BtnNormal
+	btn.TextColor3 = T.Colors.Text
+	btn.Text = text
+	btn.TextSize = T.Sizes.Text
+	btn.Font = T.Fonts.Default
+	btn.BorderSizePixel = 0
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+	return btn
+end
+
+local function makeSeparator(parent, yOff, text)
+	local T = Theme
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -16, 0, 22)
+	lbl.Position = UDim2.new(0, 8, 0, yOff)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = "── " .. text .. " ──"
+	lbl.TextColor3 = T.Colors.Accent
+	lbl.TextSize = T.Sizes.SmallText
+	lbl.Font = T.Fonts.Bold
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = parent
+	return lbl
+end
+
+------------------------------------------------------------------------
+-- Build panel frame
+------------------------------------------------------------------------
+function PropertyPanel:_build(parent)
+	local T = Theme
+
+	local panel = Instance.new("Frame")
+	panel.Name = "PropertyPanel"
+	panel.Size = UDim2.new(0, T.Sizes.PanelWidth, 1, -T.Sizes.ToolbarHeight - T.Sizes.StatusHeight)
+	panel.AnchorPoint = Vector2.new(1, 0)
+	panel.Position = UDim2.new(1, 0, 0, T.Sizes.ToolbarHeight)
+	panel.BackgroundColor3 = T.Colors.Panel
+	panel.BorderSizePixel = 0
+	panel.ZIndex = 5
+	panel.Parent = parent
+	self._frame = panel
+
+	local scroll = Instance.new("ScrollingFrame", panel)
+	scroll.Name = "Scroll"
+	scroll.Size = UDim2.fromScale(1, 1)
+	scroll.BackgroundTransparency = 1
+	scroll.ScrollBarThickness = 6
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(70, 70, 70)
+	scroll.CanvasSize = UDim2.fromOffset(0, 0)
+	scroll.BorderSizePixel = 0
+	self._scroll = scroll
+
+	self:_showEmpty()
+end
+
+------------------------------------------------------------------------
+-- Empty state / populated state
+------------------------------------------------------------------------
+function PropertyPanel:_showEmpty()
+	self._nodeId = nil
+	self:_clearScroll()
+	local T = Theme
+	local lbl = Instance.new("TextLabel", self._scroll)
+	lbl.Size = UDim2.new(1, 0, 0, 40)
+	lbl.Position = UDim2.fromOffset(0, 20)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = "Select a node to edit"
+	lbl.TextColor3 = T.Colors.TextDim
+	lbl.TextSize = T.Sizes.Text
+	lbl.Font = T.Fonts.Default
+	local w = math.max(200, T.Sizes.PanelWidth - 24)
+	self._scroll.CanvasSize = UDim2.fromOffset(w, 60)
+end
+
+function PropertyPanel:_clearScroll()
+	for _, c in ipairs(self._conns) do c:Disconnect() end
+	self._conns = {}
+	for _, child in ipairs(self._scroll:GetChildren()) do
+		child:Destroy()
+	end
+end
+
+function PropertyPanel:_populateNode(nodeId)
+	self._nodeId = nodeId
+	self:_clearScroll()
+
+	local node = self._state.nodes[nodeId]
+	if not node then self:_showEmpty(); return end
+
+	local T = Theme
+	local y = 8
+
+	-- Node ID
+	makeLabel(self._scroll, "NODE ID", y); y = y + 18
+	local idField = makeField(self._scroll, y, "node_id"); y = y + T.Sizes.FieldHeight + 8
+	idField.Text = node.id
+	table.insert(self._conns, idField.FocusLost:Connect(function()
+		local newId = idField.Text:gsub("%s", "_"):gsub("[^%w_]", "")
+		if newId == "" or newId == node.id then idField.Text = node.id; return end
+		if self._state.nodes[newId] then idField.Text = node.id; return end
+		self._state:UpdateNode(nodeId, { id = newId })
+		self._nodeId = newId
+	end))
+
+	-- Speaker
+	makeLabel(self._scroll, "SPEAKER (optional)", y); y = y + 18
+
+	local btnW = 30
+	local contentW = T.Sizes.PanelWidth - 16 - 6
+	local speakerField = Instance.new("TextBox", self._scroll)
+	speakerField.Size = UDim2.fromOffset(contentW - btnW - 4, T.Sizes.FieldHeight)
+	speakerField.Position = UDim2.fromOffset(8, y)
+	speakerField.BackgroundColor3 = T.Colors.Field
+	speakerField.BorderSizePixel = 0
+	speakerField.TextColor3 = T.Colors.Text
+	speakerField.PlaceholderText = "NPC model name"
+	speakerField.PlaceholderColor3 = T.Colors.TextPlaceholder
+	speakerField.TextSize = T.Sizes.Text
+	speakerField.Font = T.Fonts.Default
+	speakerField.TextXAlignment = Enum.TextXAlignment.Left
+	speakerField.ClearTextOnFocus = false
+	speakerField.Text = node.speaker or ""
+	speakerField.Active = true
+	Instance.new("UICorner", speakerField).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIStroke", speakerField).Color = T.Colors.FieldBorder
+
+	local dropBtn = Instance.new("TextButton", self._scroll)
+	dropBtn.Size = UDim2.fromOffset(btnW, T.Sizes.FieldHeight)
+	dropBtn.Position = UDim2.fromOffset(8 + contentW - btnW, y)
+	dropBtn.BackgroundColor3 = T.Colors.Accent
+	dropBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	dropBtn.Text = "v"
+	dropBtn.TextSize = T.Sizes.Text
+	dropBtn.Font = T.Fonts.Bold
+	dropBtn.BorderSizePixel = 0
+	dropBtn.AutoButtonColor = true
+	Instance.new("UICorner", dropBtn).CornerRadius = UDim.new(0, 4)
+
+	y = y + T.Sizes.FieldHeight + 4
+
+	local dropList = Instance.new("ScrollingFrame", self._scroll)
+	dropList.Name = "SpeakerDropdown"
+	dropList.Size = UDim2.new(1, -16, 0, 0)
+	dropList.Position = UDim2.new(0, 8, 0, y)
+	dropList.BackgroundColor3 = Color3.fromRGB(38, 38, 42)
+	dropList.BorderSizePixel = 0
+	dropList.Visible = false
+	dropList.ZIndex = 10
+	dropList.ScrollBarThickness = 4
+	dropList.ScrollBarImageColor3 = Color3.fromRGB(70, 70, 70)
+	Instance.new("UICorner", dropList).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIStroke", dropList).Color = T.Colors.Accent
+
+	local function refreshDropdown()
+		for _, child in ipairs(dropList:GetChildren()) do
+			if child:IsA("TextButton") then child:Destroy() end
+		end
+		local names = {}
+		for _, obj in ipairs(game.Workspace:GetDescendants()) do
+			if obj:IsA("Model") and obj:FindFirstChildWhichIsA("Humanoid") then
+				if not table.find(names, obj.Name) then
+					table.insert(names, obj.Name)
+				end
+			end
+		end
+		table.sort(names)
+
+		if #names == 0 then
+			table.insert(names, "(no NPC models found)")
+		end
+
+		local itemH = 22
+		for i, name in ipairs(names) do
+			local item = Instance.new("TextButton", dropList)
+			item.Size = UDim2.new(1, -4, 0, itemH)
+			item.Position = UDim2.fromOffset(0, (i - 1) * itemH)
+			item.BackgroundColor3 = Color3.fromRGB(38, 38, 42)
+			item.BackgroundTransparency = 0
+			item.TextColor3 = T.Colors.Text
+			item.Text = "  " .. name
+			item.TextSize = T.Sizes.SmallText
+			item.Font = T.Fonts.Default
+			item.TextXAlignment = Enum.TextXAlignment.Left
+			item.BorderSizePixel = 0
+			item.ZIndex = 11
+
+			item.MouseEnter:Connect(function()
+				item.BackgroundColor3 = T.Colors.Accent
+			end)
+			item.MouseLeave:Connect(function()
+				item.BackgroundColor3 = Color3.fromRGB(38, 38, 42)
+			end)
+
+			if name ~= "(no NPC models found)" then
+				table.insert(self._conns, item.MouseButton1Click:Connect(function()
+					speakerField.Text = name
+					local val = name ~= "" and name or nil
+					self._state:UpdateNode(self._nodeId, { speaker = val })
+					dropList.Visible = false
+					dropBtn.Text = "v"
+				end))
+			end
+		end
+
+		local totalH = math.min(#names * itemH, 6 * itemH)
+		dropList.Size = UDim2.new(1, -16, 0, totalH)
+		dropList.CanvasSize = UDim2.fromOffset(0, #names * itemH)
+	end
+
+	table.insert(self._conns, dropBtn.MouseButton1Click:Connect(function()
+		if dropList.Visible then
+			dropList.Visible = false
+			dropBtn.Text = "v"
+		else
+			refreshDropdown()
+			dropList.Visible = true
+			dropBtn.Text = "^"
+		end
+	end))
+
+	table.insert(self._conns, speakerField.FocusLost:Connect(function()
+		local val = speakerField.Text ~= "" and speakerField.Text or nil
+		self._state:UpdateNode(self._nodeId, { speaker = val })
+	end))
+
+	y = y + 4
+
+	-- Text
+	makeLabel(self._scroll, "DIALOGUE TEXT", y); y = y + 18
+	local textField = makeField(self._scroll, y, "What does the NPC say?", true); y = y + 68
+	textField.Text = node.text or ""
+	table.insert(self._conns, textField.FocusLost:Connect(function()
+		self._state:UpdateNode(self._nodeId, { text = textField.Text })
+	end))
+
+	-- End Node checkbox
+	local _, endCheck, endTick = makeCheckbox(self._scroll, "End node (closes dialogue)", y); y = y + 28
+	endTick.Text = node.isEndNode and "✓" or ""
+	table.insert(self._conns, endCheck.MouseButton1Click:Connect(function()
+		local newVal = not node.isEndNode
+		self._state:UpdateNode(self._nodeId, { isEndNode = newVal })
+		endTick.Text = newVal and "✓" or ""
+		node = self._state.nodes[self._nodeId]
+	end))
+
+	-- Auto-advance delay
+	makeLabel(self._scroll, "AUTO-ADVANCE DELAY (seconds)", y); y = y + 18
+	local autoField = makeField(self._scroll, y, "none"); y = y + T.Sizes.FieldHeight + 8
+	autoField.Text = node.autoAdvanceDelay and tostring(node.autoAdvanceDelay) or ""
+	table.insert(self._conns, autoField.FocusLost:Connect(function()
+		local val = tonumber(autoField.Text)
+		self._state:UpdateNode(self._nodeId, { autoAdvanceDelay = val })
+	end))
+
+	-- Node actions
+	makeSeparator(self._scroll, y, "Node Actions"); y = y + 26
+	y = self:_buildActionList(node.actions, y, function(actions)
+		self._state:UpdateNode(self._nodeId, { actions = actions })
+	end)
+
+	-- Choices
+	makeSeparator(self._scroll, y, "Choices"); y = y + 26
+
+	for i, choice in ipairs(node.choices or {}) do
+		y = self:_buildChoiceEditor(i, choice, y)
+	end
+
+	local addChoiceBtn = makeButton(self._scroll, "+ Add Choice", y, T.Colors.Accent); y = y + T.Sizes.BtnHeight + 8
+	table.insert(self._conns, addChoiceBtn.MouseButton1Click:Connect(function()
+		self._state:AddChoice(self._nodeId)
+	end))
+
+	-- Set as start node
+	makeSeparator(self._scroll, y, "Node"); y = y + 26
+	local startBtn = makeButton(self._scroll, "Set as Start Node", y, T.Colors.BtnNormal); y = y + T.Sizes.BtnHeight + 6
+	table.insert(self._conns, startBtn.MouseButton1Click:Connect(function()
+		self._state:SetStartNode(self._nodeId)
+	end))
+
+	local delBtn = makeButton(self._scroll, "Delete Node", y, T.Colors.BtnDanger); y = y + T.Sizes.BtnHeight + 16
+	table.insert(self._conns, delBtn.MouseButton1Click:Connect(function()
+		self._state:RemoveNode(self._nodeId)
+	end))
+
+	local w = math.max(200, T.Sizes.PanelWidth - 24)
+	self._scroll.CanvasSize = UDim2.fromOffset(w, y)
+end
+
+------------------------------------------------------------------------
+-- Action list builder (reused for node-level and choice-level actions)
+------------------------------------------------------------------------
+function PropertyPanel:_buildActionList(actions, y, onChange)
+	local T = Theme
+	actions = actions or {}
+
+	for i, action in ipairs(actions) do
+		local row = Instance.new("Frame", self._scroll)
+		row.Size = UDim2.new(1, -16, 0, T.Sizes.FieldHeight)
+		row.Position = UDim2.new(0, 8, 0, y)
+		row.BackgroundTransparency = 1
+
+		local typeBtn = Instance.new("TextButton", row)
+		typeBtn.Size = UDim2.fromOffset(40, T.Sizes.FieldHeight)
+		typeBtn.BackgroundColor3 = action.type == "call" and T.Colors.ConnAction or T.Colors.ConnConditional
+		typeBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+		typeBtn.Text = action.type
+		typeBtn.TextSize = T.Sizes.SmallText
+		typeBtn.Font = T.Fonts.Bold
+		typeBtn.BorderSizePixel = 0
+		Instance.new("UICorner", typeBtn).CornerRadius = UDim.new(0, 3)
+
+		table.insert(self._conns, typeBtn.MouseButton1Click:Connect(function()
+			action.type = action.type == "set" and "call" or "set"
+			if action.type == "call" then action.value = nil end
+			onChange(actions)
+			self:_populateNode(self._nodeId)
+		end))
+
+		local keyBox = Instance.new("TextBox", row)
+		keyBox.Size = UDim2.new(0.5, -30, 1, 0)
+		keyBox.Position = UDim2.fromOffset(44, 0)
+		keyBox.BackgroundColor3 = T.Colors.Field
+		keyBox.TextColor3 = T.Colors.Text
+		keyBox.PlaceholderText = "key"
+		keyBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+		keyBox.Text = action.key or ""
+		keyBox.TextSize = T.Sizes.SmallText
+		keyBox.Font = T.Fonts.Mono
+		keyBox.BorderSizePixel = 0
+		keyBox.ClearTextOnFocus = false
+		keyBox.Active = true
+		Instance.new("UICorner", keyBox).CornerRadius = UDim.new(0, 3)
+
+		table.insert(self._conns, keyBox.FocusLost:Connect(function()
+			action.key = keyBox.Text
+			onChange(actions)
+		end))
+
+		if action.type == "set" then
+			local valBox = Instance.new("TextBox", row)
+			valBox.Size = UDim2.new(0.3, -10, 1, 0)
+			valBox.Position = UDim2.new(0.5, 18, 0, 0)
+			valBox.BackgroundColor3 = T.Colors.Field
+			valBox.TextColor3 = T.Colors.Text
+			valBox.PlaceholderText = "value"
+			valBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+			valBox.Text = action.value ~= nil and tostring(action.value) or ""
+			valBox.TextSize = T.Sizes.SmallText
+			valBox.Font = T.Fonts.Mono
+			valBox.BorderSizePixel = 0
+			valBox.ClearTextOnFocus = false
+			valBox.Active = true
+			Instance.new("UICorner", valBox).CornerRadius = UDim.new(0, 3)
+
+			table.insert(self._conns, valBox.FocusLost:Connect(function()
+				local raw = valBox.Text
+				if raw == "true" then action.value = true
+				elseif raw == "false" then action.value = false
+				else action.value = tonumber(raw) or raw end
+				onChange(actions)
+			end))
+		end
+
+		local rmBtn = Instance.new("TextButton", row)
+		rmBtn.Size = UDim2.fromOffset(20, T.Sizes.FieldHeight)
+		rmBtn.Position = UDim2.new(1, -20, 0, 0)
+		rmBtn.BackgroundColor3 = T.Colors.BtnDanger
+		rmBtn.TextColor3 = T.Colors.Text
+		rmBtn.Text = "X"
+		rmBtn.TextSize = T.Sizes.SmallText
+		rmBtn.Font = T.Fonts.Bold
+		rmBtn.BorderSizePixel = 0
+		Instance.new("UICorner", rmBtn).CornerRadius = UDim.new(0, 3)
+
+		table.insert(self._conns, rmBtn.MouseButton1Click:Connect(function()
+			table.remove(actions, i)
+			onChange(actions)
+			self:_populateNode(self._nodeId)
+		end))
+
+		y = y + T.Sizes.FieldHeight + 4
+	end
+
+	local addBtn = makeButton(self._scroll, "+ Action", y, T.Colors.BtnNormal)
+	addBtn.Size = UDim2.new(0.4, 0, 0, 22)
+	addBtn.Position = UDim2.new(0, 8, 0, y)
+	addBtn.TextSize = T.Sizes.SmallText
+	table.insert(self._conns, addBtn.MouseButton1Click:Connect(function()
+		table.insert(actions, { type = "set", key = "", value = true })
+		onChange(actions)
+		self:_populateNode(self._nodeId)
+	end))
+
+	return y + 28
+end
+
+------------------------------------------------------------------------
+-- Choice editor (one per choice)
+------------------------------------------------------------------------
+function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
+	local T = Theme
+	local nodeId = self._nodeId
+
+	local container = Instance.new("Frame", self._scroll)
+	container.Size = UDim2.new(1, -16, 0, 10) -- resized below
+	container.Position = UDim2.new(0, 8, 0, y)
+	container.BackgroundColor3 = Color3.fromRGB(38, 38, 42)
+	container.BorderSizePixel = 0
+	Instance.new("UICorner", container).CornerRadius = UDim.new(0, 4)
+
+	local innerY = 6
+
+	-- Choice header
+	local hdr = Instance.new("TextLabel", container)
+	hdr.Size = UDim2.new(1, -30, 0, 16)
+	hdr.Position = UDim2.fromOffset(6, innerY)
+	hdr.BackgroundTransparency = 1
+	hdr.Text = "Choice " .. choiceIdx
+	hdr.TextColor3 = T.Colors.ChoiceDot
+	hdr.TextSize = T.Sizes.SmallText
+	hdr.Font = T.Fonts.Bold
+	hdr.TextXAlignment = Enum.TextXAlignment.Left
+
+	local rmChoice = Instance.new("TextButton", container)
+	rmChoice.Size = UDim2.fromOffset(20, 16)
+	rmChoice.Position = UDim2.new(1, -26, 0, innerY)
+	rmChoice.BackgroundColor3 = T.Colors.BtnDanger
+	rmChoice.TextColor3 = T.Colors.Text
+	rmChoice.Text = "X"
+	rmChoice.TextSize = 11
+	rmChoice.Font = T.Fonts.Bold
+	rmChoice.BorderSizePixel = 0
+	Instance.new("UICorner", rmChoice).CornerRadius = UDim.new(0, 3)
+
+	table.insert(self._conns, rmChoice.MouseButton1Click:Connect(function()
+		self._state:RemoveChoice(nodeId, choiceIdx)
+	end))
+
+	innerY = innerY + 20
+
+	-- Choice text
+	local ctBox = Instance.new("TextBox", container)
+	ctBox.Size = UDim2.new(1, -12, 0, T.Sizes.FieldHeight)
+	ctBox.Position = UDim2.fromOffset(6, innerY)
+	ctBox.BackgroundColor3 = T.Colors.Field
+	ctBox.TextColor3 = T.Colors.Text
+	ctBox.PlaceholderText = "Choice text"
+	ctBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	ctBox.Text = choice.text or ""
+	ctBox.TextSize = T.Sizes.SmallText
+	ctBox.Font = T.Fonts.Default
+	ctBox.BorderSizePixel = 0
+	ctBox.ClearTextOnFocus = false
+	ctBox.Active = true
+	Instance.new("UICorner", ctBox).CornerRadius = UDim.new(0, 3)
+
+	table.insert(self._conns, ctBox.FocusLost:Connect(function()
+		self._state:UpdateChoice(nodeId, choiceIdx, { text = ctBox.Text })
+	end))
+	innerY = innerY + T.Sizes.FieldHeight + 4
+
+	-- Target node
+	local tgtLabel = Instance.new("TextLabel", container)
+	tgtLabel.Size = UDim2.fromOffset(14, 16)
+	tgtLabel.Position = UDim2.fromOffset(6, innerY + 4)
+	tgtLabel.BackgroundTransparency = 1
+	tgtLabel.Text = "→"
+	tgtLabel.TextColor3 = T.Colors.TextDim
+	tgtLabel.TextSize = T.Sizes.Text
+	tgtLabel.Font = T.Fonts.Bold
+
+	local tgtBox = Instance.new("TextBox", container)
+	tgtBox.Size = UDim2.new(1, -32, 0, T.Sizes.FieldHeight)
+	tgtBox.Position = UDim2.fromOffset(22, innerY)
+	tgtBox.BackgroundColor3 = T.Colors.Field
+	tgtBox.TextColor3 = T.Colors.Text
+	tgtBox.PlaceholderText = "target_node"
+	tgtBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	tgtBox.Text = choice.targetNodeId or ""
+	tgtBox.TextSize = T.Sizes.SmallText
+	tgtBox.Font = T.Fonts.Mono
+	tgtBox.BorderSizePixel = 0
+	tgtBox.ClearTextOnFocus = false
+	tgtBox.Active = true
+	Instance.new("UICorner", tgtBox).CornerRadius = UDim.new(0, 3)
+
+	table.insert(self._conns, tgtBox.FocusLost:Connect(function()
+		local val = tgtBox.Text ~= "" and tgtBox.Text or nil
+		self._state:UpdateChoice(nodeId, choiceIdx, { targetNodeId = val })
+	end))
+	innerY = innerY + T.Sizes.FieldHeight + 4
+
+	-- Condition (single key=value for simplicity)
+	local condKey = ""
+	local condVal = ""
+	if choice.conditions then
+		for k, v in pairs(choice.conditions) do
+			condKey = k; condVal = tostring(v); break
+		end
+	end
+
+	local condLabel = Instance.new("TextLabel", container)
+	condLabel.Size = UDim2.fromOffset(60, 16)
+	condLabel.Position = UDim2.fromOffset(6, innerY + 4)
+	condLabel.BackgroundTransparency = 1
+	condLabel.Text = "if"
+	condLabel.TextColor3 = T.Colors.ConnConditional
+	condLabel.TextSize = T.Sizes.SmallText
+	condLabel.Font = T.Fonts.Bold
+	condLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local ckBox = Instance.new("TextBox", container)
+	ckBox.Size = UDim2.new(0.4, -12, 0, 22)
+	ckBox.Position = UDim2.fromOffset(22, innerY)
+	ckBox.BackgroundColor3 = T.Colors.Field
+	ckBox.TextColor3 = T.Colors.Text
+	ckBox.PlaceholderText = "key"
+	ckBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	ckBox.Text = condKey
+	ckBox.TextSize = T.Sizes.SmallText
+	ckBox.Font = T.Fonts.Mono
+	ckBox.BorderSizePixel = 0
+	ckBox.ClearTextOnFocus = false
+	ckBox.Active = true
+	Instance.new("UICorner", ckBox).CornerRadius = UDim.new(0, 3)
+
+	local cvBox = Instance.new("TextBox", container)
+	cvBox.Size = UDim2.new(0.4, -12, 0, 22)
+	cvBox.Position = UDim2.new(0.45, 6, 0, innerY)
+	cvBox.BackgroundColor3 = T.Colors.Field
+	cvBox.TextColor3 = T.Colors.Text
+	cvBox.PlaceholderText = "value"
+	cvBox.PlaceholderColor3 = T.Colors.TextPlaceholder
+	cvBox.Text = condVal
+	cvBox.TextSize = T.Sizes.SmallText
+	cvBox.Font = T.Fonts.Mono
+	cvBox.BorderSizePixel = 0
+	cvBox.ClearTextOnFocus = false
+	cvBox.Active = true
+	Instance.new("UICorner", cvBox).CornerRadius = UDim.new(0, 3)
+
+	local function updateCond()
+		local k = ckBox.Text
+		local v = cvBox.Text
+		local cond = {}
+		if k ~= "" and v ~= "" then
+			local parsed = v
+			if parsed == "true" then parsed = true
+			elseif parsed == "false" then parsed = false
+			else parsed = tonumber(parsed) or parsed end
+			cond[k] = parsed
+		end
+		self._state:UpdateChoice(nodeId, choiceIdx, { conditions = cond })
+	end
+	table.insert(self._conns, ckBox.FocusLost:Connect(updateCond))
+	table.insert(self._conns, cvBox.FocusLost:Connect(updateCond))
+
+	innerY = innerY + 26
+
+	-- Hide when unavailable
+	local hideRow = Instance.new("Frame", container)
+	hideRow.Size = UDim2.new(1, -12, 0, 20)
+	hideRow.Position = UDim2.fromOffset(6, innerY)
+	hideRow.BackgroundTransparency = 1
+
+	local hideBox = Instance.new("TextButton", hideRow)
+	hideBox.Size = UDim2.fromOffset(16, 16)
+	hideBox.Position = UDim2.fromOffset(0, 2)
+	hideBox.BackgroundColor3 = T.Colors.Field
+	hideBox.Text = ""
+	hideBox.BorderSizePixel = 0
+	Instance.new("UICorner", hideBox).CornerRadius = UDim.new(0, 3)
+	Instance.new("UIStroke", hideBox).Color = T.Colors.FieldBorder
+
+	local hideTick = Instance.new("TextLabel", hideBox)
+	hideTick.Size = UDim2.fromScale(1, 1)
+	hideTick.BackgroundTransparency = 1
+	hideTick.Text = choice.hideWhenUnavailable and "✓" or ""
+	hideTick.TextColor3 = T.Colors.Text
+	hideTick.TextSize = 12
+	hideTick.Font = T.Fonts.Bold
+
+	local hideLbl = Instance.new("TextLabel", hideRow)
+	hideLbl.Size = UDim2.new(1, -22, 1, 0)
+	hideLbl.Position = UDim2.fromOffset(22, 0)
+	hideLbl.BackgroundTransparency = 1
+	hideLbl.Text = "Hide when unavailable"
+	hideLbl.TextColor3 = T.Colors.TextDim
+	hideLbl.TextSize = T.Sizes.SmallText
+	hideLbl.Font = T.Fonts.Default
+	hideLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	table.insert(self._conns, hideBox.MouseButton1Click:Connect(function()
+		local newVal = not choice.hideWhenUnavailable
+		self._state:UpdateChoice(nodeId, choiceIdx, { hideWhenUnavailable = newVal })
+		hideTick.Text = newVal and "✓" or ""
+		choice.hideWhenUnavailable = newVal
+	end))
+
+	innerY = innerY + 24
+
+	-- Choice-level actions
+	local actLabel = Instance.new("TextLabel", container)
+	actLabel.Size = UDim2.new(1, -12, 0, 16)
+	actLabel.Position = UDim2.fromOffset(6, innerY)
+	actLabel.BackgroundTransparency = 1
+	actLabel.Text = "Actions:"
+	actLabel.TextColor3 = T.Colors.ConnAction
+	actLabel.TextSize = T.Sizes.SmallText
+	actLabel.Font = T.Fonts.Bold
+	actLabel.TextXAlignment = Enum.TextXAlignment.Left
+	innerY = innerY + 18
+
+	local choiceActions = choice.actions or {}
+	for ai, action in ipairs(choiceActions) do
+		local aRow = Instance.new("Frame", container)
+		aRow.Size = UDim2.new(1, -12, 0, 22)
+		aRow.Position = UDim2.fromOffset(6, innerY)
+		aRow.BackgroundTransparency = 1
+
+		local summary = action.type .. " " .. (action.key or "")
+		if action.type == "set" and action.value ~= nil then
+			summary = summary .. " " .. tostring(action.value)
+		end
+
+		local aLbl = Instance.new("TextLabel", aRow)
+		aLbl.Size = UDim2.new(1, -24, 1, 0)
+		aLbl.BackgroundTransparency = 1
+		aLbl.Text = summary
+		aLbl.TextColor3 = T.Colors.Text
+		aLbl.TextSize = T.Sizes.SmallText
+		aLbl.Font = T.Fonts.Mono
+		aLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+		local aRm = Instance.new("TextButton", aRow)
+		aRm.Size = UDim2.fromOffset(18, 18)
+		aRm.Position = UDim2.new(1, -18, 0, 2)
+		aRm.BackgroundColor3 = T.Colors.BtnDanger
+		aRm.TextColor3 = T.Colors.Text
+		aRm.Text = "X"
+		aRm.TextSize = 10
+		aRm.Font = T.Fonts.Bold
+		aRm.BorderSizePixel = 0
+		Instance.new("UICorner", aRm).CornerRadius = UDim.new(0, 3)
+
+		table.insert(self._conns, aRm.MouseButton1Click:Connect(function()
+			table.remove(choiceActions, ai)
+			self._state:UpdateChoice(nodeId, choiceIdx, { actions = choiceActions })
+		end))
+
+		innerY = innerY + 24
+	end
+
+	local addCA = Instance.new("TextButton", container)
+	addCA.Size = UDim2.new(0.5, -6, 0, 20)
+	addCA.Position = UDim2.fromOffset(6, innerY)
+	addCA.BackgroundColor3 = T.Colors.BtnNormal
+	addCA.TextColor3 = T.Colors.Text
+	addCA.Text = "+ Action"
+	addCA.TextSize = T.Sizes.SmallText
+	addCA.Font = T.Fonts.Default
+	addCA.BorderSizePixel = 0
+	Instance.new("UICorner", addCA).CornerRadius = UDim.new(0, 3)
+
+	table.insert(self._conns, addCA.MouseButton1Click:Connect(function()
+		table.insert(choiceActions, { type = "set", key = "", value = true })
+		self._state:UpdateChoice(nodeId, choiceIdx, { actions = choiceActions })
+	end))
+
+	innerY = innerY + 28
+
+	container.Size = UDim2.new(1, -16, 0, innerY)
+	return y + innerY + 6
+end
+
+------------------------------------------------------------------------
+-- State binding
+------------------------------------------------------------------------
+function PropertyPanel:_bindState()
+	self._state.selectionChanged:Connect(function(nodeId)
+		if nodeId then
+			self:_populateNode(nodeId)
+		else
+			self:_showEmpty()
+		end
+	end)
+
+	self._state.nodeUpdated:Connect(function(nodeId)
+		if nodeId == self._nodeId then
+			self:_populateNode(nodeId)
+		end
+	end)
+
+	self._state.nodeRemoved:Connect(function(nodeId)
+		if nodeId == self._nodeId then
+			self:_showEmpty()
+		end
+	end)
+
+	self._state.stateLoaded:Connect(function()
+		self:_showEmpty()
+	end)
+end
+
+function PropertyPanel:Destroy()
+	self:_clearScroll()
+	if self._frame then self._frame:Destroy() end
+end
+
+return PropertyPanel
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX7">
+			<Properties>
+				<string name="Name">Toolbar</string>
+				<ProtectedString name="Source"><![CDATA[local Theme      = require(script.Parent.DesignerTheme)
+local Serializer = require(script.Parent.Serializer)
+
+local Toolbar = {}
+Toolbar.__index = Toolbar
+
+function Toolbar.new(parent, appState)
+	local self = setmetatable({}, Toolbar)
+	self._state  = appState
+	self._frame  = nil
+	self._modal  = nil
+	self._widget = parent
+	self:_build(parent)
+	return self
+end
+
+------------------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------------------
+local function btn(parent, text, xOff, width, color)
+	local T = Theme
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(width or 60, T.Sizes.BtnHeight)
+	b.Position = UDim2.fromOffset(xOff, (T.Sizes.ToolbarHeight - T.Sizes.BtnHeight) / 2)
+	b.BackgroundColor3 = color or T.Colors.BtnNormal
+	b.TextColor3 = T.Colors.Text
+	b.Text = text
+	b.TextSize = T.Sizes.SmallText
+	b.Font = T.Fonts.Bold
+	b.BorderSizePixel = 0
+	b.AutoButtonColor = true
+	b.ZIndex = 11
+	b.Parent = parent
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+
+	b.MouseEnter:Connect(function() b.BackgroundColor3 = T.Colors.BtnHover end)
+	b.MouseLeave:Connect(function() b.BackgroundColor3 = color or T.Colors.BtnNormal end)
+
+	return b
+end
+
+------------------------------------------------------------------------
+-- Build
+------------------------------------------------------------------------
+function Toolbar:_build(parent)
+	local T = Theme
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Toolbar"
+	bar.Size = UDim2.new(1, 0, 0, T.Sizes.ToolbarHeight)
+	bar.BackgroundColor3 = T.Colors.Toolbar
+	bar.BorderSizePixel = 0
+	bar.ZIndex = 10
+	bar.Parent = parent
+	self._frame = bar
+
+	local x = 6
+
+	-- New
+	local newBtn = btn(bar, "New", x, 48); x = x + 54
+	newBtn.MouseButton1Click:Connect(function()
+		self._state:Clear()
+	end)
+
+	-- Import
+	local impBtn = btn(bar, "Import", x, 60); x = x + 66
+	impBtn.MouseButton1Click:Connect(function()
+		self:_showImportModal()
+	end)
+
+	-- Export
+	local expBtn = btn(bar, "Export", x, 60); x = x + 66
+	expBtn.MouseButton1Click:Connect(function()
+		self:_showExportModal()
+	end)
+
+	-- Save to ModuleScript
+	local saveBtn = btn(bar, "Save", x, 50, T.Colors.Accent); x = x + 56
+	saveBtn.MouseButton1Click:Connect(function()
+		self:_saveToModuleScript()
+	end)
+
+	-- Separator
+	x = x + 10
+
+	-- Undo
+	local undoBtn = btn(bar, "Undo", x, 48); x = x + 54
+	undoBtn.MouseButton1Click:Connect(function()
+		self._state:Undo()
+	end)
+
+	-- Redo
+	local redoBtn = btn(bar, "Redo", x, 48); x = x + 54
+	redoBtn.MouseButton1Click:Connect(function()
+		self._state:Redo()
+	end)
+
+	x = x + 10
+
+	-- Auto-Layout
+	local layoutBtn = btn(bar, "Auto-Layout", x, 80); x = x + 86
+	layoutBtn.MouseButton1Click:Connect(function()
+		self._state:_pushUndo()
+		Serializer.AutoLayout(self._state.nodes, self._state.startNodeId)
+		self._state.stateLoaded:Fire()
+	end)
+
+	-- Tree ID field (right-aligned)
+	local idLabel = Instance.new("TextLabel", bar)
+	idLabel.Size = UDim2.fromOffset(40, T.Sizes.BtnHeight)
+	idLabel.Position = UDim2.new(1, -220, 0, (T.Sizes.ToolbarHeight - T.Sizes.BtnHeight) / 2)
+	idLabel.BackgroundTransparency = 1
+	idLabel.Text = "Tree:"
+	idLabel.TextColor3 = T.Colors.TextDim
+	idLabel.TextSize = T.Sizes.SmallText
+	idLabel.Font = T.Fonts.Bold
+	idLabel.TextXAlignment = Enum.TextXAlignment.Right
+	idLabel.ZIndex = 11
+
+	local idBox = Instance.new("TextBox", bar)
+	idBox.Size = UDim2.fromOffset(120, T.Sizes.BtnHeight)
+	idBox.Position = UDim2.new(1, -175, 0, (T.Sizes.ToolbarHeight - T.Sizes.BtnHeight) / 2)
+	idBox.BackgroundColor3 = T.Colors.Field
+	idBox.TextColor3 = T.Colors.Text
+	idBox.Text = self._state.treeId
+	idBox.TextSize = T.Sizes.SmallText
+	idBox.Font = T.Fonts.Mono
+	idBox.BorderSizePixel = 0
+	idBox.ClearTextOnFocus = false
+	idBox.ZIndex = 11
+	Instance.new("UICorner", idBox).CornerRadius = UDim.new(0, 4)
+
+	idBox.FocusLost:Connect(function()
+		if idBox.Text ~= "" then
+			self._state:SetTreeId(idBox.Text)
+		else
+			idBox.Text = self._state.treeId
+		end
+	end)
+
+	self._state.treeChanged:Connect(function()
+		idBox.Text = self._state.treeId
+	end)
+	self._state.stateLoaded:Connect(function()
+		idBox.Text = self._state.treeId
+	end)
+end
+
+------------------------------------------------------------------------
+-- Modals
+------------------------------------------------------------------------
+function Toolbar:_closeModal()
+	if self._modal then self._modal:Destroy(); self._modal = nil end
+end
+
+function Toolbar:_makeModal(title, height)
+	self:_closeModal()
+	local T = Theme
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	bg.BackgroundTransparency = 0.4
+	bg.ZIndex = 50
+	bg.Parent = self._widget
+	self._modal = bg
+
+	local card = Instance.new("Frame", bg)
+	card.Size = UDim2.fromOffset(500, height or 360)
+	card.Position = UDim2.fromScale(0.5, 0.5)
+	card.AnchorPoint = Vector2.new(0.5, 0.5)
+	card.BackgroundColor3 = T.Colors.Panel
+	card.BorderSizePixel = 0
+	card.ZIndex = 51
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+	Instance.new("UIStroke", card).Color = T.Colors.FieldBorder
+
+	local titleLbl = Instance.new("TextLabel", card)
+	titleLbl.Size = UDim2.new(1, 0, 0, 30)
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Text = title
+	titleLbl.TextColor3 = T.Colors.Text
+	titleLbl.TextSize = 16
+	titleLbl.Font = T.Fonts.Bold
+	titleLbl.ZIndex = 52
+
+	local closeBtn = Instance.new("TextButton", card)
+	closeBtn.Size = UDim2.fromOffset(28, 28)
+	closeBtn.Position = UDim2.new(1, -32, 0, 2)
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = T.Colors.TextDim
+	closeBtn.TextSize = 18
+	closeBtn.Font = T.Fonts.Bold
+	closeBtn.ZIndex = 52
+	closeBtn.MouseButton1Click:Connect(function() self:_closeModal() end)
+
+	return card
+end
+
+function Toolbar:_showImportModal()
+	local T = Theme
+	local card = self:_makeModal("Import Dialogue Tree", 380)
+
+	local box = Instance.new("TextBox", card)
+	box.Size = UDim2.new(1, -24, 1, -80)
+	box.Position = UDim2.fromOffset(12, 36)
+	box.BackgroundColor3 = T.Colors.Field
+	box.TextColor3 = T.Colors.Text
+	box.PlaceholderText = "Paste your dialogue text here..."
+	box.PlaceholderColor3 = T.Colors.TextPlaceholder
+	box.TextSize = T.Sizes.SmallText
+	box.Font = T.Fonts.Mono
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.TextYAlignment = Enum.TextYAlignment.Top
+	box.MultiLine = true
+	box.TextWrapped = true
+	box.ClearTextOnFocus = false
+	box.BorderSizePixel = 0
+	box.ZIndex = 52
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIPadding", box).PaddingLeft = UDim.new(0, 6)
+
+	local importBtn = Instance.new("TextButton", card)
+	importBtn.Size = UDim2.fromOffset(120, 30)
+	importBtn.Position = UDim2.new(0.5, -60, 1, -42)
+	importBtn.BackgroundColor3 = T.Colors.Accent
+	importBtn.TextColor3 = T.Colors.TextHeader
+	importBtn.Text = "Import"
+	importBtn.TextSize = T.Sizes.Text
+	importBtn.Font = T.Fonts.Bold
+	importBtn.BorderSizePixel = 0
+	importBtn.ZIndex = 52
+	Instance.new("UICorner", importBtn).CornerRadius = UDim.new(0, 4)
+
+	importBtn.MouseButton1Click:Connect(function()
+		local source = box.Text
+		if source == "" then return end
+		local data = Serializer.Import(source)
+		self._state:LoadData(data)
+		self:_closeModal()
+	end)
+end
+
+function Toolbar:_showExportModal()
+	local T = Theme
+	local card = self:_makeModal("Export Dialogue Tree", 380)
+
+	local exported = Serializer.Export(self._state)
+
+	local box = Instance.new("TextBox", card)
+	box.Size = UDim2.new(1, -24, 1, -80)
+	box.Position = UDim2.fromOffset(12, 36)
+	box.BackgroundColor3 = T.Colors.Field
+	box.TextColor3 = T.Colors.Text
+	box.Text = exported
+	box.TextSize = T.Sizes.SmallText
+	box.Font = T.Fonts.Mono
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.TextYAlignment = Enum.TextYAlignment.Top
+	box.MultiLine = true
+	box.TextWrapped = true
+	box.TextEditable = false
+	box.ClearTextOnFocus = false
+	box.BorderSizePixel = 0
+	box.ZIndex = 52
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	Instance.new("UIPadding", box).PaddingLeft = UDim.new(0, 6)
+
+	local hint = Instance.new("TextLabel", card)
+	hint.Size = UDim2.new(1, 0, 0, 24)
+	hint.Position = UDim2.new(0, 0, 1, -36)
+	hint.BackgroundTransparency = 1
+	hint.Text = "Select all text above and copy (Ctrl+A, Ctrl+C)"
+	hint.TextColor3 = T.Colors.TextDim
+	hint.TextSize = T.Sizes.SmallText
+	hint.Font = T.Fonts.Default
+	hint.ZIndex = 52
+end
+
+function Toolbar:_saveToModuleScript()
+	local state = self._state
+	local treesFolder = game:GetService("ReplicatedStorage"):FindFirstChild("DialoguePro")
+	if not treesFolder then
+		treesFolder = Instance.new("Folder")
+		treesFolder.Name = "DialoguePro"
+		treesFolder.Parent = game:GetService("ReplicatedStorage")
+	end
+
+	local treeFolder = treesFolder:FindFirstChild("Trees")
+	if not treeFolder then
+		treeFolder = Instance.new("Folder")
+		treeFolder.Name = "Trees"
+		treeFolder.Parent = treesFolder
+	end
+
+	local modName = state.treeId or "untitled"
+	local existing = treeFolder:FindFirstChild(modName)
+	if existing then
+		existing.Source = Serializer.ToModuleScript(state)
+	else
+		local ms = Instance.new("ModuleScript")
+		ms.Name = modName
+		ms.Source = Serializer.ToModuleScript(state)
+		ms.Parent = treeFolder
+	end
+
+	-- Brief visual feedback
+	local T = Theme
+	local toast = Instance.new("TextLabel", self._widget)
+	toast.Size = UDim2.fromOffset(200, 30)
+	toast.Position = UDim2.new(0.5, -100, 1, -60)
+	toast.BackgroundColor3 = T.Colors.Success
+	toast.TextColor3 = T.Colors.TextHeader
+	toast.Text = "Saved to Trees/" .. modName
+	toast.TextSize = T.Sizes.Text
+	toast.Font = T.Fonts.Bold
+	toast.ZIndex = 60
+	Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 6)
+	task.delay(2, function()
+		if toast.Parent then toast:Destroy() end
+	end)
+end
+
+function Toolbar:Destroy()
+	self:_closeModal()
+	if self._frame then self._frame:Destroy() end
+end
+
+return Toolbar
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		</Item>
+</roblox>

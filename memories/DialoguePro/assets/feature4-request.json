@@ -1,0 +1,4 @@
+{
+  "model": "grok-imagine-image",
+  "prompt": "Promotional graphic for a Roblox dialogue engine showing a code editor on the left with simple readable text format dialogue script (using # for nodes and > for choices), and on the right side the corresponding visual node graph representation of the same dialogue tree. An arrow connects the two showing bidirectional conversion. Dark background, modern developer tool aesthetic. Title text 'Two Ways to Write Dialogue' at top. Wide 16:9 aspect ratio."
+}
