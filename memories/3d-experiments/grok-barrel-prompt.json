@@ -1,0 +1,6 @@
+{
+  "model": "grok-imagine-image",
+  "prompt": "A medieval wooden barrel with iron bands, slightly weathered, front-facing view, centered, single object, white background, product photography style, detailed wood grain texture",
+  "response_format": "url",
+  "n": 1
+}

@@ -281,7 +281,7 @@ end
 ------------------------------------------------------------------------
 function Serializer.ToModuleScript(state)
 	local txt = Serializer.Export(state)
-	return 'local DialogueParser = require(game:GetService("ReplicatedStorage"):WaitForChild("DialogueEngine"):WaitForChild("DialogueParser"))\n\nreturn DialogueParser.Parse([[\n'
+	return 'local DialogueParser = require(script.Parent.Parent.DialogueParser)\n\nreturn DialogueParser.Parse([[\n'
 		.. txt .. ']])\n'
 end
 

@@ -16,16 +16,14 @@ function ConnectionRenderer:_createLine(from, to, color)
 	local delta  = to - from
 	local length = math.max(delta.Magnitude, 1)
 	local angle  = math.atan2(delta.Y, delta.X)
-	local mid    = (from + to) / 2
 
 	local line = Instance.new("Frame")
 	line.Size            = UDim2.fromOffset(length, Theme.Sizes.ConnThickness)
-	line.Position        = UDim2.fromOffset(mid.X, mid.Y)
-	line.AnchorPoint     = Vector2.new(0.5, 0.5)
+	line.Position        = UDim2.fromOffset(from.X, from.Y)
+	line.AnchorPoint     = Vector2.new(0, 0.5)
 	line.Rotation        = math.deg(angle)
 	line.BackgroundColor3 = color or Theme.Colors.ConnNormal
 	line.BorderSizePixel = 0
-	line.Active          = false
 	line.ZIndex          = 1
 	line.Parent          = self._canvas
 	return line

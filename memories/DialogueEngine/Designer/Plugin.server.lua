@@ -5,24 +5,11 @@
 -- Install: Place this folder's contents as a Script + ModuleScript
 -- hierarchy inside your Plugins folder. See INSTALL.md for details.
 ------------------------------------------------------------------------
-print("[DialogueDesigner] Loading modules...")
-local ok1, Theme          = pcall(require, script.Parent.DesignerTheme)
-print("[DialogueDesigner] DesignerTheme:", ok1)
-local ok2, AppState       = pcall(require, script.Parent.AppState)
-print("[DialogueDesigner] AppState:", ok2)
-local ok3, Canvas         = pcall(require, script.Parent.Canvas)
-print("[DialogueDesigner] Canvas:", ok3, not ok3 and Canvas or "")
-local ok4, PropertyPanel  = pcall(require, script.Parent.PropertyPanel)
-print("[DialogueDesigner] PropertyPanel:", ok4, not ok4 and PropertyPanel or "")
-local ok5, Toolbar        = pcall(require, script.Parent.Toolbar)
-print("[DialogueDesigner] Toolbar:", ok5, not ok5 and Toolbar or "")
-
-if not (ok1 and ok2 and ok3 and ok4 and ok5) then
-	warn("[DialogueDesigner] Module load failed — aborting")
-	return
-end
-
-print("[DialogueDesigner] All modules loaded, building UI...")
+local Theme          = require(script.Parent.DesignerTheme)
+local AppState       = require(script.Parent.AppState)
+local Canvas         = require(script.Parent.Canvas)
+local PropertyPanel  = require(script.Parent.PropertyPanel)
+local Toolbar        = require(script.Parent.Toolbar)
 
 ------------------------------------------------------------------------
 -- Plugin toolbar button
@@ -49,7 +36,6 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 local widget = plugin:CreateDockWidgetPluginGui("DialogueDesigner", widgetInfo)
 widget.Title = "Dialogue Designer"
 widget.Name  = "DialogueDesigner"
-widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 ------------------------------------------------------------------------
 -- Root layout container
@@ -66,7 +52,6 @@ root.Parent = widget
 -- State
 ------------------------------------------------------------------------
 local state = AppState.new()
-print("[DialogueDesigner] State created, assembling UI...")
 
 ------------------------------------------------------------------------
 -- Status bar (bottom strip)
@@ -109,14 +94,9 @@ end
 -- Assemble the UI
 ------------------------------------------------------------------------
 local toolbarUI    = Toolbar.new(root, state)
-toolbarUI:LoadNPCConfigFromStorage()
-print("[DialogueDesigner] Toolbar built")
 local canvas       = Canvas.new(root, state)
-print("[DialogueDesigner] Canvas built")
 local propPanel    = PropertyPanel.new(root, state)
-print("[DialogueDesigner] PropertyPanel built")
 buildStatusBar(root)
-print("[DialogueDesigner] StatusBar built — fully loaded!")
 
 ------------------------------------------------------------------------
 -- Toggle button

@@ -1,0 +1,2331 @@
+<roblox version="4">
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Folder" referent="RBX9">
+		<Properties>
+			<string name="Name">DialogueEngine</string>
+		</Properties>
+		<Item class="Script" referent="RBX0">
+			<Properties>
+				<string name="Name">README</string>
+				<bool name="Disabled">true</bool>
+				<ProtectedString name="Source"><![CDATA[--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    DIALOGUE ENGINE                          ║
+    ║              Text-based dialogue system for Roblox          ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    SETUP
+    ─────
+    1. Drag the entire "DialogueEngine" folder into ReplicatedStorage.
+
+    QUICK START
+    ───────────
+    1. Look at the "VerySimpleExampleDialog" LocalScript in the Example folder.
+       It walks you through everything step by step.
+
+    2. Drag "VerySimpleExampleDialog" into StarterPlayerScripts to try it out.
+       It's disabled by default — enable it once it's in StarterPlayerScripts.
+
+    3. Note: the example won't do anything on its own. It needs NPC models
+       in Workspace with matching names (like "Guard", "Shopkeeper", etc.)
+       with a Head part. The script creates ProximityPrompts automatically.
+       The example script explains all of this.
+
+    VISUAL DESIGNER (FREE PLUGIN)
+    ──────────────────────────────
+    Don't want to type out dialogue by hand? Get the free
+    "Dialogue Engine Visual Designer" plugin from the Creator Store.
+    It gives you a node-based visual editor for creating and editing
+    dialogue trees, then exports them in the correct format.
+
+    WHAT'S INCLUDED
+    ────────────────
+    DialogueEngine     — Main API (require this to start)
+    DialogueParser     — Converts text format into dialogue trees
+    DialogueRunner     — Manages traversal, conditions, branching
+    DialogueUI         — Full ScreenGui with typewriter, choices, portraits
+    Theme              — Customizable look and feel
+    Types              — Type definitions
+
+    Example/
+      VerySimpleExampleDialog — Step-by-step beginner examples
+]]]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX1">
+			<Properties>
+				<string name="Name">DialogueEngine</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    DialogueEngine.lua
+    Main facade module. RegisterTree, Start, Skip, Close, SetTheme, SaveState, LoadState.
+]]
+
+local DialogueRunner = require(script.Parent.DialogueRunner)
+local DialogueUI = require(script.Parent.DialogueUI)
+
+local DialogueEngine = {}
+DialogueEngine.__index = DialogueEngine
+
+local instance = nil
+
+function DialogueEngine.new(themeOverrides: { [string]: any }?)
+    if instance then
+        instance:Close()
+    end
+
+    local self = setmetatable({}, DialogueEngine)
+    self._runner = DialogueRunner.new()
+    self._ui = DialogueUI.new(themeOverrides)
+    self._baseThemeOverrides = themeOverrides
+    self._currentTreeId = nil
+    self._currentNodeId = nil
+    self._callbacks = nil
+    self._active = false
+    self._variableResolvers = {}
+    self._flags = {}
+    self._actions = {}
+    self:_initBuiltInCondition()
+    self:RegisterVariable(function(varName)
+        return self._flags[varName]
+    end)
+    instance = self
+    return self
+end
+
+function DialogueEngine:RegisterTree(treeId: string, dialogueData: any)
+    self._runner:RegisterTree(treeId, dialogueData)
+end
+
+function DialogueEngine:RegisterCondition(callback: (key: string, value: any) -> boolean)
+    self._runner:RegisterConditionCallback(callback)
+end
+
+function DialogueEngine:_initBuiltInCondition()
+    self._runner:RegisterConditionCallback(function(key: string, value: any): boolean
+        local flagValue = self._flags[key]
+        if flagValue == nil then return false end
+        if type(value) == "number" then
+            return (tonumber(flagValue) or 0) >= value
+        end
+        return flagValue == value
+    end)
+end
+
+function DialogueEngine:RegisterVariable(resolver: (variableName: string) -> any?)
+    table.insert(self._variableResolvers, resolver)
+end
+
+function DialogueEngine:SetFlag(key: string, value: any)
+    self._flags[key] = value
+end
+
+function DialogueEngine:GetFlag(key: string): any
+    return self._flags[key]
+end
+
+function DialogueEngine:GetFlags(): { [string]: any }
+    return self._flags
+end
+
+function DialogueEngine:RegisterAction(name: string, callback: () -> ())
+    self._actions[name] = callback
+end
+
+function DialogueEngine:_processActions(actions: { any }?)
+    if not actions then return end
+    for _, action in ipairs(actions) do
+        if action.type == "set" then
+            self._flags[action.key] = action.value
+        elseif action.type == "call" then
+            local fn = self._actions[action.key]
+            if fn then
+                fn()
+            else
+                warn("[DialogueEngine] Action not found: " .. tostring(action.key))
+            end
+        end
+    end
+end
+
+function DialogueEngine:_resolveVariables(text: string): string
+    return text:gsub("{([%w_%.]+)}", function(varName)
+        for _, resolver in ipairs(self._variableResolvers) do
+            local value = resolver(varName)
+            if value ~= nil then
+                return tostring(value)
+            end
+        end
+        return "{" .. varName .. "}"
+    end)
+end
+
+function DialogueEngine:Start(treeId: string, npcModelOrCallbacks: (Model | any)?, callbacks: any?)
+    if self._active and self._currentTreeId == treeId then
+        self:Advance()
+        return
+    end
+
+    local npcModel: Model? = nil
+    local cbs: any
+
+    if typeof(npcModelOrCallbacks) == "Instance" then
+        npcModel = npcModelOrCallbacks
+        cbs = callbacks or {}
+    else
+        cbs = npcModelOrCallbacks or {}
+    end
+
+    local startNode, startNodeId = self._runner:GetStartNode(treeId)
+    if not startNode then
+        warn("[DialogueEngine] Tree not found: " .. treeId)
+        return
+    end
+
+    self._currentTreeId = treeId
+    self._npcModel = npcModel
+    self._callbacks = cbs
+    self._active = true
+
+    if cbs.theme then
+        self._ui:SetTheme(cbs.theme)
+    end
+
+    self:_displayNode(startNodeId)
+end
+
+function DialogueEngine:StartFromState(treeId: string, savedState: any, npcModelOrCallbacks: (Model | any)?, callbacks: any?)
+    local npcModel: Model? = nil
+    local cbs: any
+
+    if typeof(npcModelOrCallbacks) == "Instance" then
+        npcModel = npcModelOrCallbacks
+        cbs = callbacks or {}
+    else
+        cbs = npcModelOrCallbacks or {}
+    end
+
+    local nodeId = self._runner:LoadState(treeId, savedState)
+    if not nodeId then
+        warn("[DialogueEngine] Could not load state for tree: " .. treeId)
+        self:Start(treeId, npcModel, cbs)
+        return
+    end
+
+    self._currentTreeId = treeId
+    self._npcModel = npcModel
+    self._callbacks = cbs
+    self._active = true
+
+    if cbs.theme then
+        self._ui:SetTheme(cbs.theme)
+    end
+
+    self:_displayNode(nodeId)
+end
+
+function DialogueEngine:_displayNode(nodeId: string)
+    if not self._active then return end
+
+    local node = self._runner:GetNode(self._currentTreeId, nodeId)
+    if not node then
+        warn("[DialogueEngine] Node not found: " .. nodeId)
+        self:Close()
+        return
+    end
+
+    self._currentNodeId = nodeId
+    self._runner:MarkVisited(self._currentTreeId, nodeId)
+
+    self:_processActions(node.actions)
+
+    if self._callbacks.onNodeEnter then
+        self._callbacks.onNodeEnter(nodeId)
+    end
+
+    local resolvedNode = {}
+    for k, v in pairs(node) do
+        resolvedNode[k] = v
+    end
+    resolvedNode.text = self:_resolveVariables(node.text)
+
+    local choices = self._runner:GetAvailableChoices(self._currentTreeId, nodeId)
+    for _, choice in ipairs(choices) do
+        choice.text = self:_resolveVariables(choice.text)
+    end
+
+    self._ui:DisplayNode(resolvedNode, choices, self._npcModel, function(choiceIndex)
+        local choice = node.choices[choiceIndex]
+        if choice then
+            self:_processActions(choice.actions)
+        end
+
+        if self._callbacks.onChoice then
+            self._callbacks.onChoice(nodeId, choiceIndex)
+        end
+
+        if choice and choice.targetNodeId then
+            self:_displayNode(choice.targetNodeId)
+        else
+            self:_endDialogue()
+        end
+    end, function()
+        self:_endDialogue()
+    end, function()
+        self:Close()
+    end)
+end
+
+function DialogueEngine:_endDialogue()
+    if self._callbacks and self._callbacks.onEnd then
+        self._callbacks.onEnd()
+    end
+    self:Close()
+end
+
+function DialogueEngine:Skip()
+    if self._ui then
+        self._ui:SkipTypewriter()
+    end
+end
+
+function DialogueEngine:Advance()
+    if self._ui then
+        self._ui:Advance()
+    end
+end
+
+function DialogueEngine:IsActive(): boolean
+    return self._active
+end
+
+function DialogueEngine:Close()
+    local hadPerNpcTheme = self._callbacks and self._callbacks.theme ~= nil
+    self._active = false
+    self._currentTreeId = nil
+    self._currentNodeId = nil
+    self._npcModel = nil
+    self._callbacks = nil
+    if self._ui then
+        self._ui:Hide(function()
+            if hadPerNpcTheme and self._ui then
+                self._ui:SetTheme(self._baseThemeOverrides)
+            end
+        end)
+    end
+end
+
+function DialogueEngine:SetTheme(themeOverrides: { [string]: any })
+    if self._ui then
+        self._ui:SetTheme(themeOverrides)
+    end
+end
+
+function DialogueEngine:SaveState(treeId: string?): any?
+    local tId = treeId or self._currentTreeId
+    local nId = self._currentNodeId
+    if not tId then return nil end
+    if not nId then
+        local _, startId = self._runner:GetStartNode(tId)
+        nId = startId
+    end
+    return self._runner:SaveState(tId, nId)
+end
+
+function DialogueEngine:LoadState(treeId: string, savedState: any): boolean
+    local nodeId = self._runner:LoadState(treeId, savedState)
+    return nodeId ~= nil
+end
+
+function DialogueEngine:GetVisitedNodes(treeId: string): { [string]: boolean }
+    return self._runner:GetVisitedNodes(treeId)
+end
+
+function DialogueEngine:Destroy()
+    self._active = false
+    if self._ui then
+        self._ui:Destroy()
+        self._ui = nil
+    end
+    if instance == self then
+        instance = nil
+    end
+end
+
+return DialogueEngine
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX2">
+			<Properties>
+				<string name="Name">DialogueParser</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    DialogueParser.lua
+    Converts a simple text format into a dialogue tree table.
+
+    FORMAT GUIDE:
+    ─────────────────────────────────────────────────
+    === my_tree_id
+    start: greeting
+
+    # greeting
+    Hello! Welcome to my shop!
+    What can I do for you today?
+    > I need a weapon. -> weapon_shop
+    > Tell me about town. -> town_info
+    > Goodbye. -> farewell
+    > Secret option -> secret [if hasKey true] [hide]
+
+    # weapon_shop
+    @ A Different Speaker
+    I've got swords and axes!
+    > Buy sword -> bought_sword [if gold 500] [set gold -500] [call playCashSound]
+    > Too expensive. -> farewell
+
+    # bought_sword [end] [set hasSword true]
+    Enjoy your new sword!
+
+    # farewell [end]
+    See you later!
+
+    -- QUEST EXAMPLE:
+    # quest_giver
+    Go talk to the elder in the village.
+    > I'll do it! -> quest_accepted [set talkToElder true] [call startQuestMusic]
+    > No thanks. -> farewell
+
+    # quest_accepted [end] [call showQuestMarker]
+    Hurry back when you've spoken to her!
+
+    # quest_return [set questComplete true]
+    You spoke with the elder! Here's your reward.
+    > Thanks! -> farewell [call giveReward]
+    ─────────────────────────────────────────────────
+
+    LINE TYPES:
+      === tree_id          → Sets the tree's ID
+      start: node_name     → Sets which node the dialogue begins at
+      # node_name          → Starts a new node (add [end] to mark it as an end node)
+      # node_name [auto 3] → Auto-advance after typewriter + 3 seconds (no-choice nodes only)
+      @ Speaker Name       → Overrides the speaker name for this node
+      > Choice text -> target_node
+                           → Adds a choice. Append [if key value] for conditions,
+                             [hide] to hide when the condition isn't met
+      [set key value]      → Sets a flag when the node is entered or choice is clicked
+      [call actionName]    → Fires a registered action when the node is entered or choice is clicked
+      -- comment           → Ignored
+      {variableName}       → Replaced at runtime with the value from a registered resolver
+      [pause N]            → Pauses typewriter for N seconds mid-text
+      [speed N]            → Changes typewriter speed to N seconds per character
+      (anything else)      → Dialogue text (multiple lines get joined with spaces)
+]]
+
+local DialogueParser = {}
+
+local function trim(s: string): string
+    return s:match("^%s*(.-)%s*$") or ""
+end
+
+local function parseConditionValue(raw: string): any
+    if raw == "true" then return true end
+    if raw == "false" then return false end
+    local num = tonumber(raw)
+    if num then return num end
+    return raw
+end
+
+local function parseActions(text: string): ({ any }?, string)
+    local actions = {}
+
+    for key, val in text:gmatch("%[set%s+(%S+)%s+(%S+)%]") do
+        table.insert(actions, { type = "set", key = key, value = parseConditionValue(val) })
+    end
+    text = text:gsub("%[set%s+%S+%s+%S+%]", "")
+
+    for name in text:gmatch("%[call%s+(%S+)%]") do
+        table.insert(actions, { type = "call", key = name })
+    end
+    text = text:gsub("%[call%s+%S+%]", "")
+
+    if #actions == 0 then
+        return nil, text
+    end
+    return actions, text
+end
+
+function DialogueParser.Parse(source: string): any
+    local treeId = "untitled"
+    local startNodeId = nil
+    local nodes = {}
+
+    local currentNodeId = nil
+    local currentNode = nil
+
+    local lines = {}
+    for line in (source .. "\n"):gmatch("(.-)\n") do
+        table.insert(lines, line)
+    end
+
+    local function finishNode()
+        if currentNodeId and currentNode then
+            currentNode.text = trim(currentNode.text)
+            if currentNode._choices and #currentNode._choices > 0 then
+                currentNode.choices = currentNode._choices
+            end
+            currentNode._choices = nil
+            nodes[currentNodeId] = currentNode
+        end
+        currentNodeId = nil
+        currentNode = nil
+    end
+
+    for _, rawLine in ipairs(lines) do
+        local line = trim(rawLine)
+
+        if line == "" or line:sub(1, 2) == "--" then
+            continue
+        end
+
+        -- === tree_id
+        local treeMatch = line:match("^===%s*(.+)$")
+        if treeMatch then
+            treeId = trim(treeMatch)
+            continue
+        end
+
+        -- start: node_name
+        local startMatch = line:match("^start:%s*(.+)$")
+        if startMatch then
+            startNodeId = trim(startMatch)
+            continue
+        end
+
+        -- # node_name [end] [auto N] [set key value] [call name]
+        local nodeMatch = line:match("^#%s*(.+)$")
+        if nodeMatch then
+            finishNode()
+            local isEnd = nodeMatch:match("%[end%]") ~= nil
+            local autoDelay = tonumber(nodeMatch:match("%[auto%s+(%d+%.?%d*)%]"))
+            local nodeActions, remaining = parseActions(nodeMatch)
+            local nodeName = trim(remaining:gsub("%[end%]", ""):gsub("%[auto%s+%d+%.?%d*%]", ""))
+            currentNodeId = nodeName
+            currentNode = {
+                text = "",
+                _choices = {},
+                isEndNode = isEnd or nil,
+                autoAdvanceDelay = autoDelay,
+                actions = nodeActions,
+            }
+            continue
+        end
+
+        if not currentNode then continue end
+
+        -- @ Speaker Name
+        local speakerMatch = line:match("^@%s*(.+)$")
+        if speakerMatch then
+            currentNode.speaker = trim(speakerMatch)
+            continue
+        end
+
+        -- > Choice text -> target [if key value] [hide] [set key value] [call name]
+        local choiceMatch = line:match("^>%s*(.+)$")
+        if choiceMatch then
+            local choiceText, targetNodeId
+            local conditionKey, conditionValue
+            local hideWhenUnavailable = false
+
+            local hasHide = choiceMatch:match("%[hide%]") ~= nil
+            if hasHide then
+                hideWhenUnavailable = true
+                choiceMatch = choiceMatch:gsub("%[hide%]", "")
+            end
+
+            local ifKey, ifVal = choiceMatch:match("%[if%s+(%S+)%s+(%S+)%]")
+            if ifKey then
+                conditionKey = ifKey
+                conditionValue = parseConditionValue(ifVal)
+                choiceMatch = choiceMatch:gsub("%[if%s+%S+%s+%S+%]", "")
+            end
+
+            local choiceActions
+            choiceActions, choiceMatch = parseActions(choiceMatch)
+
+            choiceMatch = choiceMatch:gsub("%s+%-%-.*$", "")
+
+            choiceText, targetNodeId = choiceMatch:match("^(.-)%s*%->%s*(.+)$")
+            if choiceText and targetNodeId then
+                choiceText = trim(choiceText)
+                targetNodeId = trim(targetNodeId)
+
+                local choice: any = {
+                    text = choiceText,
+                    targetNodeId = targetNodeId,
+                }
+
+                if conditionKey then
+                    choice.conditions = { [conditionKey] = conditionValue }
+                end
+                if hideWhenUnavailable then
+                    choice.hideWhenUnavailable = true
+                end
+                if choiceActions then
+                    choice.actions = choiceActions
+                end
+
+                table.insert(currentNode._choices, choice)
+            end
+            continue
+        end
+
+        -- Regular text line — append to dialogue
+        if currentNode.text == "" then
+            currentNode.text = line
+        else
+            currentNode.text = currentNode.text .. " " .. line
+        end
+    end
+
+    finishNode()
+
+    if not startNodeId then
+        for id in pairs(nodes) do
+            startNodeId = id
+            break
+        end
+    end
+
+    return {
+        id = treeId,
+        startNodeId = startNodeId,
+        nodes = nodes,
+    }
+end
+
+return DialogueParser
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX3">
+			<Properties>
+				<string name="Name">DialogueRunner</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    DialogueRunner.lua
+    Tree processor: manages traversal, condition evaluation, branching, and event hooks.
+]]
+
+local DialogueRunner = {}
+DialogueRunner.__index = DialogueRunner
+
+function DialogueRunner.new()
+    local self = setmetatable({}, DialogueRunner)
+    self._trees = {}
+    self._conditionCallbacks = {}
+    self._visitedNodes = {}
+    return self
+end
+
+function DialogueRunner:RegisterTree(treeId: string, treeData: any)
+    self._trees[treeId] = treeData
+    if not self._visitedNodes[treeId] then
+        self._visitedNodes[treeId] = {}
+    end
+end
+
+function DialogueRunner:GetTree(treeId: string): any?
+    return self._trees[treeId]
+end
+
+function DialogueRunner:GetNode(treeId: string, nodeId: string): any?
+    local tree = self._trees[treeId]
+    if not tree then return nil end
+    return tree.nodes[nodeId]
+end
+
+function DialogueRunner:GetStartNode(treeId: string): any?
+    local tree = self._trees[treeId]
+    if not tree then return nil end
+    return tree.nodes[tree.startNodeId], tree.startNodeId
+end
+
+function DialogueRunner:RegisterConditionCallback(callback: (key: string, value: any) -> boolean)
+    table.insert(self._conditionCallbacks, callback)
+end
+
+function DialogueRunner:EvaluateConditions(conditions: { [string]: any }?): boolean
+    if not conditions then return true end
+
+    for key, expectedValue in pairs(conditions) do
+        local passed = false
+        for _, callback in ipairs(self._conditionCallbacks) do
+            if callback(key, expectedValue) then
+                passed = true
+                break
+            end
+        end
+        if not passed then
+            return false
+        end
+    end
+    return true
+end
+
+function DialogueRunner:GetAvailableChoices(treeId: string, nodeId: string): { any }
+    local node = self:GetNode(treeId, nodeId)
+    if not node or not node.choices then return {} end
+
+    local available = {}
+    for i, choice in ipairs(node.choices) do
+        local isAvailable = self:EvaluateConditions(choice.conditions)
+        table.insert(available, {
+            index = i,
+            text = choice.text,
+            targetNodeId = choice.targetNodeId,
+            available = isAvailable,
+            hideWhenUnavailable = choice.hideWhenUnavailable or false,
+        })
+    end
+    return available
+end
+
+function DialogueRunner:MarkVisited(treeId: string, nodeId: string)
+    if not self._visitedNodes[treeId] then
+        self._visitedNodes[treeId] = {}
+    end
+    self._visitedNodes[treeId][nodeId] = true
+end
+
+function DialogueRunner:IsVisited(treeId: string, nodeId: string): boolean
+    return self._visitedNodes[treeId] and self._visitedNodes[treeId][nodeId] or false
+end
+
+function DialogueRunner:GetVisitedNodes(treeId: string): { [string]: boolean }
+    return self._visitedNodes[treeId] or {}
+end
+
+function DialogueRunner:SaveState(treeId: string, currentNodeId: string): any
+    return {
+        treeId = treeId,
+        currentNodeId = currentNodeId,
+        visitedNodes = self:GetVisitedNodes(treeId),
+        timestamp = os.time(),
+    }
+end
+
+function DialogueRunner:LoadState(treeId: string, savedState: any): string?
+    if not savedState or savedState.treeId ~= treeId then
+        return nil
+    end
+
+    local tree = self._trees[treeId]
+    if not tree then return nil end
+
+    if not tree.nodes[savedState.currentNodeId] then
+        return nil
+    end
+
+    self._visitedNodes[treeId] = savedState.visitedNodes or {}
+    return savedState.currentNodeId
+end
+
+function DialogueRunner:ResetVisited(treeId: string)
+    self._visitedNodes[treeId] = {}
+end
+
+return DialogueRunner
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX4">
+			<Properties>
+				<string name="Name">DialogueUI</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    DialogueUI.lua
+    ScreenGui with typewriter text, speaker portraits, choice buttons,
+    keyboard/gamepad navigation, and voice playback.
+]]
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+local Theme = require(script.Parent.Theme)
+
+local DialogueUI = {}
+DialogueUI.__index = DialogueUI
+
+function DialogueUI.new(themeOverrides: { [string]: any }?)
+    local self = setmetatable({}, DialogueUI)
+    self._theme = Theme.Merge(themeOverrides)
+    self._gui = nil
+    self._mainFrame = nil
+    self._speakerLabel = nil
+    self._textLabel = nil
+    self._portraitImage = nil
+    self._portraitViewport = nil
+    self._viewportCamera = nil
+    self._viewportClone = nil
+    self._closeButton = nil
+    self._onCloseRequested = nil
+    self._choiceFrame = nil
+    self._choiceButtons = {}
+    self._highlightIndex = 0
+    self._typewriterRunning = false
+    self._typewriterSkipped = false
+    self._fullText = ""
+    self._onChoiceSelected = nil
+    self._onSkipRequested = nil
+    self._inputConnection = nil
+    self._currentVoiceSound = nil
+    self._connections = {}
+    self._sfxPool = {} -- pool of Sound instances for typewriter SFX
+    self._sfxPoolIndex = 1
+    self._autoAdvanceThread = nil
+    self._closingAnimation = false
+    self:_buildGui()
+    self:_setupInput()
+    self:_initSfxPool()
+    return self
+end
+
+function DialogueUI:_buildGui()
+    local player = Players.LocalPlayer
+    local theme = self._theme
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "DialogueEngineGui"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 100
+    gui.Parent = player:WaitForChild("PlayerGui")
+    self._gui = gui
+
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "DialogueBox"
+    mainFrame.Size = theme.dialogueBoxSize
+    mainFrame.Position = theme.dialogueBoxPosition
+    mainFrame.BackgroundColor3 = theme.backgroundColor
+    mainFrame.BackgroundTransparency = theme.backgroundTransparency
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = theme.cornerRadius
+    corner.Parent = mainFrame
+    self._mainCorner = corner
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingTop = theme.padding
+    padding.PaddingBottom = theme.padding
+    padding.PaddingLeft = theme.padding
+    padding.PaddingRight = theme.padding
+    padding.Parent = mainFrame
+    self._mainPadding = padding
+    self._mainFrame = mainFrame
+
+    local portraitImage = Instance.new("ImageLabel")
+    portraitImage.Name = "Portrait"
+    portraitImage.Size = theme.portraitSize
+    portraitImage.Position = UDim2.new(0, 0, 0, 0)
+    portraitImage.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+    portraitImage.BackgroundTransparency = 0.3
+    portraitImage.BorderSizePixel = 0
+    portraitImage.ScaleType = Enum.ScaleType.Fit
+    portraitImage.Visible = false
+    portraitImage.Parent = mainFrame
+
+    local portraitCorner = Instance.new("UICorner")
+    portraitCorner.CornerRadius = theme.cornerRadius
+    portraitCorner.Parent = portraitImage
+    self._portraitCorner = portraitCorner
+    self._portraitImage = portraitImage
+
+    local portraitViewport = Instance.new("ViewportFrame")
+    portraitViewport.Name = "PortraitViewport"
+    portraitViewport.Size = theme.portraitSize
+    portraitViewport.Position = UDim2.new(0, 0, 0, 0)
+    portraitViewport.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+    portraitViewport.BackgroundTransparency = 0.3
+    portraitViewport.BorderSizePixel = 0
+    portraitViewport.Visible = false
+    portraitViewport.Parent = mainFrame
+
+    local vpCorner = Instance.new("UICorner")
+    vpCorner.CornerRadius = theme.cornerRadius
+    vpCorner.Parent = portraitViewport
+    self._vpCorner = vpCorner
+
+    local vpCamera = Instance.new("Camera")
+    vpCamera.Parent = portraitViewport
+    portraitViewport.CurrentCamera = vpCamera
+
+    self._portraitViewport = portraitViewport
+    self._viewportCamera = vpCamera
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 28, 0, 28)
+    closeButton.Position = UDim2.new(1, -28, 0, 0)
+    closeButton.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
+    closeButton.BackgroundTransparency = 0.3
+    closeButton.BorderSizePixel = 0
+    closeButton.Text = "X"
+    closeButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 16
+    closeButton.AutoButtonColor = true
+    closeButton.ZIndex = 10
+    closeButton.Parent = mainFrame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 6)
+    closeCorner.Parent = closeButton
+
+    closeButton.MouseButton1Click:Connect(function()
+        if self._onCloseRequested then
+            self._onCloseRequested()
+        end
+    end)
+    self._closeButton = closeButton
+
+    local textXOffset = 0
+    local speakerLabel = Instance.new("TextLabel")
+    speakerLabel.Name = "SpeakerName"
+    speakerLabel.Size = UDim2.new(1, -textXOffset, 0, 24)
+    speakerLabel.Position = UDim2.new(0, textXOffset, 0, 0)
+    speakerLabel.BackgroundTransparency = 1
+    speakerLabel.TextColor3 = theme.speakerColor
+    speakerLabel.Font = theme.speakerFont
+    speakerLabel.TextSize = theme.speakerTextSize
+    speakerLabel.TextXAlignment = Enum.TextXAlignment.Left
+    speakerLabel.TextYAlignment = Enum.TextYAlignment.Top
+    speakerLabel.Text = ""
+    speakerLabel.RichText = true
+    speakerLabel.Parent = mainFrame
+    self._speakerLabel = speakerLabel
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Name = "DialogueText"
+    textLabel.Size = UDim2.new(1, -textXOffset, 1, -30)
+    textLabel.Position = UDim2.new(0, textXOffset, 0, 28)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = theme.textColor
+    textLabel.Font = theme.font
+    textLabel.TextSize = theme.textSize
+    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+    textLabel.TextYAlignment = Enum.TextYAlignment.Top
+    textLabel.TextWrapped = true
+    textLabel.Text = ""
+    textLabel.RichText = true
+    textLabel.Parent = mainFrame
+    self._textLabel = textLabel
+
+    local choiceFrame = Instance.new("Frame")
+    choiceFrame.Name = "Choices"
+    choiceFrame.Size = UDim2.new(0.6, 0, 0, 0)
+    choiceFrame.Position = UDim2.new(0.2, 0, 0, -16)
+    choiceFrame.AnchorPoint = Vector2.new(0, 1)
+    choiceFrame.BackgroundTransparency = 1
+    choiceFrame.AutomaticSize = Enum.AutomaticSize.Y
+    choiceFrame.Visible = false
+    choiceFrame.Parent = mainFrame
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 4)
+    listLayout.FillDirection = Enum.FillDirection.Vertical
+    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    listLayout.Parent = choiceFrame
+    self._choiceFrame = choiceFrame
+
+    mainFrame.Visible = false
+end
+
+function DialogueUI:_initSfxPool()
+    for i = 1, 3 do
+        local sound = Instance.new("Sound")
+        sound.Name = "TypewriterSfx_" .. i
+        sound.Parent = SoundService
+        self._sfxPool[i] = sound
+    end
+end
+
+function DialogueUI:_playSfx(soundId: string?, pitchVariation: number?)
+    if not soundId or soundId == "" then return end
+    local theme = self._theme
+    local sound = Instance.new("Sound")
+    sound.SoundId = soundId
+    sound.Volume = theme.sfxVolume
+    if pitchVariation then
+        sound.PlaybackSpeed = 1 + (math.random() * 2 - 1) * pitchVariation
+    end
+    sound.Parent = SoundService
+    sound:Play()
+    sound.Ended:Once(function()
+        sound:Destroy()
+    end)
+end
+
+function DialogueUI:_playTypewriterSfx()
+    local theme = self._theme
+    local soundId = theme.typewriterSoundId
+    if not soundId or soundId == "" then return end
+    local sound = self._sfxPool[self._sfxPoolIndex]
+    if not sound then return end
+    sound.SoundId = soundId
+    sound.Volume = theme.sfxVolume
+    local pitch = theme.typewriterSoundPitch or 0.1
+    sound.PlaybackSpeed = 1 + (math.random() * 2 - 1) * pitch
+    sound:Play()
+    self._sfxPoolIndex = (self._sfxPoolIndex % #self._sfxPool) + 1
+end
+
+function DialogueUI:_cancelAutoAdvance()
+    if self._autoAdvanceThread then
+        task.cancel(self._autoAdvanceThread)
+        self._autoAdvanceThread = nil
+    end
+end
+
+function DialogueUI:_setupInput()
+    self._inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not self._gui or not self._mainFrame.Visible then return end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            if self._typewriterRunning then
+                self._typewriterSkipped = true
+            end
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            self:_handleKeyboard(input.KeyCode)
+        elseif input.UserInputType == Enum.UserInputType.Gamepad1 then
+            self:_handleGamepad(input.KeyCode)
+        end
+    end)
+end
+
+function DialogueUI:_handleKeyboard(keyCode: Enum.KeyCode)
+    if keyCode == Enum.KeyCode.One or keyCode == Enum.KeyCode.KeypadOne then
+        self:_selectChoiceByNumber(1)
+    elseif keyCode == Enum.KeyCode.Two or keyCode == Enum.KeyCode.KeypadTwo then
+        self:_selectChoiceByNumber(2)
+    elseif keyCode == Enum.KeyCode.Three or keyCode == Enum.KeyCode.KeypadThree then
+        self:_selectChoiceByNumber(3)
+    elseif keyCode == Enum.KeyCode.Four or keyCode == Enum.KeyCode.KeypadFour then
+        self:_selectChoiceByNumber(4)
+    elseif keyCode == Enum.KeyCode.Up or keyCode == Enum.KeyCode.W then
+        self:_moveHighlight(-1)
+    elseif keyCode == Enum.KeyCode.Down or keyCode == Enum.KeyCode.S then
+        self:_moveHighlight(1)
+    elseif keyCode == Enum.KeyCode.Return or keyCode == Enum.KeyCode.Space then
+        if self._typewriterRunning then
+            self._typewriterSkipped = true
+        elseif self._highlightIndex > 0 then
+            self:_confirmHighlighted()
+        end
+    elseif keyCode == Enum.KeyCode.Escape then
+        if self._onCloseRequested then
+            self._onCloseRequested()
+        end
+    end
+end
+
+function DialogueUI:_handleGamepad(keyCode: Enum.KeyCode)
+    if keyCode == Enum.KeyCode.DPadUp then
+        self:_moveHighlight(-1)
+    elseif keyCode == Enum.KeyCode.DPadDown then
+        self:_moveHighlight(1)
+    elseif keyCode == Enum.KeyCode.ButtonA then
+        if self._typewriterRunning then
+            self._typewriterSkipped = true
+        elseif self._highlightIndex > 0 then
+            self:_confirmHighlighted()
+        end
+    elseif keyCode == Enum.KeyCode.ButtonB then
+        if self._typewriterRunning then
+            self._typewriterSkipped = true
+        elseif self._onCloseRequested then
+            self._onCloseRequested()
+        end
+    end
+end
+
+function DialogueUI:_selectChoiceByNumber(number: number)
+    if self._typewriterRunning then return end
+    local visibleChoices = self:_getVisibleChoiceButtons()
+    if number <= #visibleChoices then
+        local btn = visibleChoices[number]
+        if btn:GetAttribute("Available") then
+            self._highlightIndex = number
+            self:_updateHighlight()
+            self:_confirmHighlighted()
+        end
+    end
+end
+
+function DialogueUI:_getVisibleChoiceButtons(): { any }
+    local buttons = {}
+    for _, btn in ipairs(self._choiceButtons) do
+        if btn.Visible then
+            table.insert(buttons, btn)
+        end
+    end
+    table.sort(buttons, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+    return buttons
+end
+
+function DialogueUI:_moveHighlight(delta: number)
+    if self._typewriterRunning then return end
+    local buttons = self:_getVisibleChoiceButtons()
+    if #buttons == 0 then return end
+
+    local newIndex = self._highlightIndex + delta
+    if newIndex < 1 then newIndex = #buttons end
+    if newIndex > #buttons then newIndex = 1 end
+
+    self._highlightIndex = newIndex
+    self:_updateHighlight()
+    self:_playSfx(self._theme.choiceHoverSoundId)
+end
+
+function DialogueUI:_updateHighlight()
+    local theme = self._theme
+    local buttons = self:_getVisibleChoiceButtons()
+    for i, btn in ipairs(buttons) do
+        if i == self._highlightIndex then
+            btn.BackgroundColor3 = theme.choiceHighlightColor
+        elseif btn:GetAttribute("Available") then
+            btn.BackgroundColor3 = theme.choiceColor
+        end
+    end
+end
+
+function DialogueUI:_confirmHighlighted()
+    local buttons = self:_getVisibleChoiceButtons()
+    local btn = buttons[self._highlightIndex]
+    if btn and btn:GetAttribute("Available") and self._onChoiceSelected then
+        self:_playSfx(self._theme.choiceSelectSoundId)
+        local choiceIndex = btn:GetAttribute("ChoiceIndex")
+        self._onChoiceSelected(choiceIndex)
+    end
+end
+
+function DialogueUI:_buildRichTextSnapshots(text: string): { string }
+    local snapshots = {}
+    local tagStack = {}
+    local i = 1
+    local len = #text
+    local visibleCount = 0
+
+    while i <= len do
+        local ch = string.sub(text, i, i)
+        if ch == "<" then
+            local closeTag = string.find(text, ">", i)
+            if closeTag then
+                local tag = string.sub(text, i, closeTag)
+                local isClosing = string.sub(tag, 1, 2) == "</"
+
+                if isClosing then
+                    if #tagStack > 0 then
+                        table.remove(tagStack)
+                    end
+                else
+                    local tagName = string.match(tag, "<(%w+)")
+                    if tagName then
+                        table.insert(tagStack, tag)
+                    end
+                end
+                i = closeTag + 1
+            else
+                visibleCount += 1
+                local displayed = string.sub(text, 1, i)
+                table.insert(snapshots, displayed)
+                i += 1
+            end
+        else
+            visibleCount += 1
+            local prefix = string.sub(text, 1, i)
+
+            local closingTags = ""
+            for j = #tagStack, 1, -1 do
+                local openTag = tagStack[j]
+                local tagName = string.match(openTag, "<(%w+)")
+                if tagName then
+                    closingTags = closingTags .. "</" .. tagName .. ">"
+                end
+            end
+
+            table.insert(snapshots, prefix .. closingTags)
+            i += 1
+        end
+    end
+
+    return snapshots
+end
+
+function DialogueUI:_disconnectNodeConnections()
+    for _, conn in ipairs(self._connections) do
+        conn:Disconnect()
+    end
+    self._connections = {}
+end
+
+function DialogueUI:DisplayNode(node: any, choices: { any }, npcModel: Model?, onChoiceSelected: (number) -> (), onAdvance: () -> (), onClose: (() -> ())?)
+    self._onChoiceSelected = nil
+    self._onCloseRequested = onClose
+    self._pendingAdvance = nil
+    self._highlightIndex = 0
+    self:_cancelAutoAdvance()
+    self:_disconnectNodeConnections()
+
+    local wasVisible = self._mainFrame.Visible and not self._closingAnimation
+    self:_cancelActiveTweens()
+    self._closingAnimation = false
+    self._mainFrame.Visible = true
+
+    if not wasVisible then
+        self:_animateOpen()
+        self:_playSfx(self._theme.openSoundId)
+    end
+
+    local speakerName = node.speaker or (npcModel and npcModel.Name) or ""
+    self._speakerLabel.Text = speakerName
+
+    local pid = node.portraitImageId
+    local hasImagePortrait = pid and pid ~= "" and pid ~= "0" and pid ~= 0 and pid ~= "rbxassetid://0"
+    local viewportModel = node.npcModel or npcModel
+    local useViewport = not hasImagePortrait and viewportModel ~= nil
+
+    self._portraitImage.Visible = hasImagePortrait
+    self._portraitViewport.Visible = useViewport
+    self:_clearViewportClone()
+
+    if hasImagePortrait then
+        self._portraitImage.Image = pid
+    end
+
+    if useViewport then
+        self:_setupViewportPortrait(viewportModel)
+    end
+
+    local hasAnyPortrait = hasImagePortrait or useViewport
+    if hasAnyPortrait then
+        local offset = self._theme.portraitSize.X.Offset + 12
+        self._speakerLabel.Position = UDim2.new(0, offset, 0, 0)
+        self._speakerLabel.Size = UDim2.new(1, -offset, 0, 24)
+        self._textLabel.Position = UDim2.new(0, offset, 0, 28)
+        self._textLabel.Size = UDim2.new(1, -offset, 1, -30)
+    else
+        self._speakerLabel.Position = UDim2.new(0, 0, 0, 0)
+        self._speakerLabel.Size = UDim2.new(1, 0, 0, 24)
+        self._textLabel.Position = UDim2.new(0, 0, 0, 28)
+        self._textLabel.Size = UDim2.new(1, 0, 1, -30)
+    end
+
+    self:_stopVoice()
+    if node.voiceSoundId and node.voiceSoundId ~= "" then
+        self:_playVoice(node.voiceSoundId)
+    end
+
+    self:_clearChoices()
+    self._choiceFrame.Visible = false
+
+    local hasChoices = choices and #choices > 0
+    local autoDelay = node.autoAdvanceDelay
+
+    self:_startTypewriter(node.text, function()
+        if node.isEndNode or not hasChoices then
+            self._onChoiceSelected = nil
+
+            if autoDelay and autoDelay > 0 and not node.isEndNode and onAdvance then
+                self._pendingAdvance = onAdvance
+                self._autoAdvanceThread = task.spawn(function()
+                    local conn
+                    local cancelled = false
+
+                    conn = UserInputService.InputBegan:Connect(function(input, gp)
+                        if gp then return end
+                        if input.UserInputType == Enum.UserInputType.MouseButton1
+                            or input.UserInputType == Enum.UserInputType.Touch
+                            or input.KeyCode == Enum.KeyCode.Return
+                            or input.KeyCode == Enum.KeyCode.Space
+                            or input.KeyCode == Enum.KeyCode.ButtonA then
+                            cancelled = true
+                            conn:Disconnect()
+                            onAdvance()
+                        end
+                    end)
+                    table.insert(self._connections, conn)
+
+                    task.wait(autoDelay)
+                    if not cancelled then
+                        conn:Disconnect()
+                        onAdvance()
+                    end
+                end)
+            elseif onAdvance then
+                self._pendingAdvance = onAdvance
+                local conn
+                conn = UserInputService.InputBegan:Connect(function(input, gp)
+                    if gp then return end
+                    if input.UserInputType == Enum.UserInputType.MouseButton1
+                        or input.UserInputType == Enum.UserInputType.Touch
+                        or input.KeyCode == Enum.KeyCode.Return
+                        or input.KeyCode == Enum.KeyCode.Space
+                        or input.KeyCode == Enum.KeyCode.ButtonA then
+                        self._pendingAdvance = nil
+                        conn:Disconnect()
+                        onAdvance()
+                    end
+                end)
+                table.insert(self._connections, conn)
+            end
+        else
+            self:_showChoices(choices, onChoiceSelected)
+        end
+    end)
+end
+
+function DialogueUI:_cancelActiveTweens()
+    if self._activeTweens then
+        for _, tween in ipairs(self._activeTweens) do
+            tween:Cancel()
+        end
+    end
+    self._activeTweens = {}
+end
+
+function DialogueUI:_animateOpen()
+    local theme = self._theme
+    local speed = theme.animationSpeed or 1
+
+    self:_cancelActiveTweens()
+    self._closingAnimation = false
+
+    local frame = self._mainFrame
+    local targetPos = theme.dialogueBoxPosition
+
+    if speed <= 0 then
+        frame.Position = targetPos
+        frame.Size = theme.dialogueBoxSize
+        frame.BackgroundTransparency = theme.backgroundTransparency
+        return
+    end
+
+    local startPos = UDim2.new(targetPos.X.Scale, targetPos.X.Offset, targetPos.Y.Scale, targetPos.Y.Offset + 60)
+
+    frame.Position = startPos
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(
+        theme.dialogueBoxSize.X.Scale * 0.95,
+        theme.dialogueBoxSize.X.Offset * 0.95,
+        theme.dialogueBoxSize.Y.Scale * 0.95,
+        theme.dialogueBoxSize.Y.Offset * 0.95
+    )
+
+    local duration = 0.3 / speed
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+
+    local posTween = TweenService:Create(frame, tweenInfo, {
+        Position = targetPos,
+        BackgroundTransparency = theme.backgroundTransparency,
+        Size = theme.dialogueBoxSize,
+    })
+    table.insert(self._activeTweens, posTween)
+    posTween:Play()
+end
+
+function DialogueUI:_animateClose(callback: (() -> ())?)
+    local theme = self._theme
+    local speed = theme.animationSpeed or 1
+
+    self:_cancelActiveTweens()
+
+    if speed <= 0 then
+        if callback then callback() end
+        return
+    end
+
+    self._closingAnimation = true
+    local frame = self._mainFrame
+    local restPos = theme.dialogueBoxPosition
+    local targetPos = UDim2.new(restPos.X.Scale, restPos.X.Offset, restPos.Y.Scale, restPos.Y.Offset + 60)
+    local duration = 0.2 / speed
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+
+    local closeTween = TweenService:Create(frame, tweenInfo, {
+        Position = targetPos,
+        BackgroundTransparency = 1,
+    })
+    table.insert(self._activeTweens, closeTween)
+    closeTween:Play()
+    closeTween.Completed:Once(function()
+        if not self._closingAnimation then return end
+        self._closingAnimation = false
+        frame.Position = restPos
+        if callback then callback() end
+    end)
+end
+
+function DialogueUI:_setupViewportPortrait(npcModel: any)
+    self:_clearViewportClone()
+    local clone = npcModel:Clone()
+    clone.Parent = self._portraitViewport
+    self._viewportClone = clone
+
+    local head = clone:FindFirstChild("Head")
+    if not head then
+        head = clone:FindFirstChildWhichIsA("BasePart")
+    end
+    if head then
+        local headPos = head.Position + Vector3.new(0, 0.2, 0)
+        local lookVector = head.CFrame.LookVector
+        self._viewportCamera.CFrame = CFrame.new(headPos + lookVector * 3, headPos)
+    end
+end
+
+function DialogueUI:_clearViewportClone()
+    if self._viewportClone then
+        self._viewportClone:Destroy()
+        self._viewportClone = nil
+    end
+end
+
+function DialogueUI:_extractInlineCommands(text: string): (string, { [number]: { { cmd: string, value: number } } })
+    local commands = {}
+    local result = {}
+    local i = 1
+    local len = #text
+    local visibleCount = 0
+
+    while i <= len do
+        local pauseVal = string.match(text, "^%[pause%s+(%d+%.?%d*)%]", i)
+        if pauseVal then
+            local fullMatch = string.match(text, "^(%[pause%s+%d+%.?%d*%])", i)
+            if not commands[visibleCount] then commands[visibleCount] = {} end
+            table.insert(commands[visibleCount], { cmd = "pause", value = tonumber(pauseVal) })
+            i = i + #fullMatch
+            continue
+        end
+
+        local speedVal = string.match(text, "^%[speed%s+(%d+%.?%d*)%]", i)
+        if speedVal then
+            local fullMatch = string.match(text, "^(%[speed%s+%d+%.?%d*%])", i)
+            if not commands[visibleCount] then commands[visibleCount] = {} end
+            table.insert(commands[visibleCount], { cmd = "speed", value = tonumber(speedVal) })
+            i = i + #fullMatch
+            continue
+        end
+
+        local ch = string.sub(text, i, i)
+        table.insert(result, ch)
+
+        if ch == "<" then
+            local closeIdx = string.find(text, ">", i + 1)
+            if closeIdx then
+                for j = i + 1, closeIdx do
+                    table.insert(result, string.sub(text, j, j))
+                end
+                i = closeIdx + 1
+            else
+                visibleCount = visibleCount + 1
+                i = i + 1
+            end
+        else
+            visibleCount = visibleCount + 1
+            i = i + 1
+        end
+    end
+
+    return table.concat(result), commands
+end
+
+function DialogueUI:_startTypewriter(text: string, onComplete: () -> ())
+    self._typewriterRunning = true
+    self._typewriterSkipped = false
+
+    local cleanText, inlineCommands = self:_extractInlineCommands(text)
+    self._fullText = cleanText
+    self._textLabel.Text = ""
+
+    local snapshots = self:_buildRichTextSnapshots(cleanText)
+    if #snapshots == 0 then
+        self._textLabel.Text = cleanText
+        self._typewriterRunning = false
+        if onComplete then onComplete() end
+        return
+    end
+
+    local currentSpeed = self._theme.typewriterSpeed
+
+    local cmds0 = inlineCommands[0]
+    if cmds0 then
+        for _, cmd in ipairs(cmds0) do
+            if cmd.cmd == "speed" then
+                currentSpeed = cmd.value
+            end
+        end
+    end
+
+    task.spawn(function()
+        for i, snapshot in ipairs(snapshots) do
+            if self._typewriterSkipped or not self._typewriterRunning then
+                break
+            end
+            self._textLabel.Text = snapshot
+            self:_playTypewriterSfx()
+
+            local cmds = inlineCommands[i]
+            if cmds then
+                for _, cmd in ipairs(cmds) do
+                    if cmd.cmd == "pause" then
+                        local elapsed = 0
+                        while elapsed < cmd.value do
+                            if self._typewriterSkipped or not self._typewriterRunning then break end
+                            task.wait(0.05)
+                            elapsed = elapsed + 0.05
+                        end
+                    elseif cmd.cmd == "speed" then
+                        currentSpeed = cmd.value
+                    end
+                end
+            end
+
+            if self._typewriterSkipped or not self._typewriterRunning then break end
+            task.wait(currentSpeed)
+        end
+        self._textLabel.Text = cleanText
+        self._typewriterRunning = false
+        if onComplete then onComplete() end
+    end)
+end
+
+function DialogueUI:_showChoices(choices: { any }, onChoiceSelected: (number) -> ())
+    self:_clearChoices()
+    self._choiceFrame.Visible = true
+    self._onChoiceSelected = onChoiceSelected
+    self._highlightIndex = 0
+
+    local theme = self._theme
+    local speed = theme.animationSpeed or 1
+    local animate = speed > 0
+    local visibleCount = 0
+
+    for i, choice in ipairs(choices) do
+        local shouldHide = not choice.available
+        if not shouldHide then
+            visibleCount += 1
+            local btn = Instance.new("TextButton")
+            btn.Name = "Choice_" .. i
+            btn.Size = UDim2.new(1, 0, 0, 36)
+            btn.LayoutOrder = i
+            btn.BackgroundColor3 = choice.available and theme.choiceColor or theme.choiceUnavailableColor
+            btn.BackgroundTransparency = animate and 1 or 0.1
+            btn.BorderSizePixel = 0
+            btn.Font = theme.font
+            btn.TextSize = theme.choiceTextSize
+            btn.TextColor3 = choice.available and theme.choiceTextColor or Color3.fromRGB(120, 120, 120)
+            btn.TextTransparency = animate and 1 or 0
+            btn.TextWrapped = true
+            btn.Text = visibleCount .. ". " .. choice.text
+            btn.AutoButtonColor = choice.available
+            btn.Visible = true
+            btn:SetAttribute("ChoiceIndex", choice.index)
+            btn:SetAttribute("Available", choice.available)
+
+            if animate then
+                btn.Position = UDim2.new(0.15, 0, 0, 0)
+            end
+
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 6)
+            btnCorner.Parent = btn
+
+            if choice.available then
+                btn.MouseEnter:Connect(function()
+                    btn.BackgroundColor3 = theme.choiceHoverColor
+                    self:_playSfx(theme.choiceHoverSoundId)
+                end)
+                btn.MouseLeave:Connect(function()
+                    local buttons = self:_getVisibleChoiceButtons()
+                    local myIdx = table.find(buttons, btn)
+                    if myIdx == self._highlightIndex then
+                        btn.BackgroundColor3 = theme.choiceHighlightColor
+                    else
+                        btn.BackgroundColor3 = theme.choiceColor
+                    end
+                end)
+                btn.MouseButton1Click:Connect(function()
+                    self:_playSfx(theme.choiceSelectSoundId)
+                    if onChoiceSelected then
+                        onChoiceSelected(choice.index)
+                    end
+                end)
+            end
+
+            btn.Parent = self._choiceFrame
+            table.insert(self._choiceButtons, btn)
+        end
+    end
+
+    if #self._choiceButtons > 0 then
+        self._highlightIndex = 1
+        self:_updateHighlight()
+    end
+
+    if animate and #self._choiceButtons > 0 then
+        task.spawn(function()
+            for idx, btn in ipairs(self._choiceButtons) do
+                local staggerDelay = 0.05 / speed
+                local tweenDur = 0.2 / speed
+                local tweenInfo = TweenInfo.new(tweenDur, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+                local targetColor = (idx == 1) and theme.choiceHighlightColor or theme.choiceColor
+                if not btn:GetAttribute("Available") then
+                    targetColor = theme.choiceUnavailableColor
+                end
+                local tween = TweenService:Create(btn, tweenInfo, {
+                    Position = UDim2.new(0, 0, 0, 0),
+                    BackgroundTransparency = 0.1,
+                    BackgroundColor3 = targetColor,
+                    TextTransparency = 0,
+                })
+                tween:Play()
+                if idx < #self._choiceButtons then
+                    task.wait(staggerDelay)
+                end
+            end
+        end)
+    end
+end
+
+function DialogueUI:_clearChoices()
+    for _, btn in ipairs(self._choiceButtons) do
+        btn:Destroy()
+    end
+    self._choiceButtons = {}
+    self._highlightIndex = 0
+end
+
+function DialogueUI:_playVoice(soundId: string)
+    self:_stopVoice()
+    local sound = Instance.new("Sound")
+    sound.SoundId = soundId
+    sound.Volume = self._theme.voiceVolume
+    sound.Parent = SoundService
+    sound:Play()
+    self._currentVoiceSound = sound
+
+    sound.Ended:Once(function()
+        if self._currentVoiceSound == sound then
+            sound:Destroy()
+            self._currentVoiceSound = nil
+        end
+    end)
+end
+
+function DialogueUI:_stopVoice()
+    if self._currentVoiceSound then
+        self._currentVoiceSound:Stop()
+        self._currentVoiceSound:Destroy()
+        self._currentVoiceSound = nil
+    end
+end
+
+function DialogueUI:_applyTheme()
+    local theme = self._theme
+
+    if self._mainFrame then
+        self._mainFrame.BackgroundColor3 = theme.backgroundColor
+        self._mainFrame.BackgroundTransparency = theme.backgroundTransparency
+        self._mainFrame.Size = theme.dialogueBoxSize
+        self._mainFrame.Position = theme.dialogueBoxPosition
+    end
+    if self._mainCorner then
+        self._mainCorner.CornerRadius = theme.cornerRadius
+    end
+    if self._mainPadding then
+        self._mainPadding.PaddingTop = theme.padding
+        self._mainPadding.PaddingBottom = theme.padding
+        self._mainPadding.PaddingLeft = theme.padding
+        self._mainPadding.PaddingRight = theme.padding
+    end
+    if self._speakerLabel then
+        self._speakerLabel.TextColor3 = theme.speakerColor
+        self._speakerLabel.Font = theme.speakerFont
+        self._speakerLabel.TextSize = theme.speakerTextSize
+    end
+    if self._textLabel then
+        self._textLabel.TextColor3 = theme.textColor
+        self._textLabel.Font = theme.font
+        self._textLabel.TextSize = theme.textSize
+    end
+    if self._portraitImage then
+        self._portraitImage.Size = theme.portraitSize
+    end
+    if self._portraitCorner then
+        self._portraitCorner.CornerRadius = theme.cornerRadius
+    end
+    if self._portraitViewport then
+        self._portraitViewport.Size = theme.portraitSize
+    end
+    if self._vpCorner then
+        self._vpCorner.CornerRadius = theme.cornerRadius
+    end
+end
+
+function DialogueUI:SetTheme(themeOverrides: { [string]: any })
+    self._theme = Theme.Merge(themeOverrides)
+    self:_applyTheme()
+end
+
+function DialogueUI:Show()
+    if self._mainFrame then
+        self._mainFrame.Visible = true
+    end
+end
+
+function DialogueUI:Hide(callback: (() -> ())?)
+    self:_cancelAutoAdvance()
+    self:_disconnectNodeConnections()
+    if self._mainFrame and self._mainFrame.Visible then
+        self:_playSfx(self._theme.closeSoundId)
+        self:_animateClose(function()
+            if self._mainFrame then
+                self._mainFrame.Visible = false
+            end
+            self:_stopVoice()
+            self:_clearViewportClone()
+            self._typewriterRunning = false
+            if callback then callback() end
+        end)
+    else
+        self:_stopVoice()
+        self:_clearViewportClone()
+        self._typewriterRunning = false
+        if callback then callback() end
+    end
+end
+
+function DialogueUI:SkipTypewriter()
+    if self._typewriterRunning then
+        self._typewriterSkipped = true
+    end
+end
+
+function DialogueUI:Advance()
+    if self._typewriterRunning then
+        self._typewriterSkipped = true
+    elseif self._pendingAdvance then
+        local advance = self._pendingAdvance
+        self._pendingAdvance = nil
+        self:_disconnectNodeConnections()
+        self:_cancelAutoAdvance()
+        advance()
+    end
+end
+
+function DialogueUI:Destroy()
+    self:_cancelAutoAdvance()
+    self:_stopVoice()
+    self:_clearViewportClone()
+    self._typewriterRunning = false
+
+    for _, sound in ipairs(self._sfxPool) do
+        sound:Destroy()
+    end
+    self._sfxPool = {}
+
+    for _, conn in ipairs(self._connections) do
+        conn:Disconnect()
+    end
+    self._connections = {}
+
+    if self._inputConnection then
+        self._inputConnection:Disconnect()
+        self._inputConnection = nil
+    end
+    if self._gui then
+        self._gui:Destroy()
+        self._gui = nil
+    end
+end
+
+return DialogueUI
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX5">
+			<Properties>
+				<string name="Name">Theme</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    Theme.lua
+    Built-in themes and merge utility for the Dialogue Engine.
+
+    Usage:
+      DialogueEngine.new()                          -- uses "Dark" (default)
+      DialogueEngine.new(Theme.Presets.Fantasy)      -- use a preset
+      DialogueEngine.new({ textSize = 22 })          -- override individual fields
+      DialogueEngine.new(Theme.Extend("Bubblegum", { textSize = 22 }))
+                                                     -- preset + overrides
+]]
+
+local Types = require(script.Parent.Types)
+type ThemeConfig = Types.ThemeConfig
+
+local Theme = {}
+
+local DEFAULT_THEME = {
+    backgroundColor = Color3.fromRGB(15, 15, 25),
+    backgroundTransparency = 0.15,
+    textColor = Color3.fromRGB(230, 230, 240),
+    speakerColor = Color3.fromRGB(255, 200, 80),
+    choiceColor = Color3.fromRGB(35, 35, 55),
+    choiceHoverColor = Color3.fromRGB(60, 60, 100),
+    choiceHighlightColor = Color3.fromRGB(80, 80, 140),
+    choiceTextColor = Color3.fromRGB(200, 200, 220),
+    choiceUnavailableColor = Color3.fromRGB(80, 80, 80),
+    font = Enum.Font.GothamMedium,
+    speakerFont = Enum.Font.GothamBold,
+    textSize = 18,
+    speakerTextSize = 20,
+    choiceTextSize = 16,
+    cornerRadius = UDim.new(0, 8),
+    portraitSize = UDim2.new(0, 100, 0, 100),
+    dialogueBoxSize = UDim2.new(0.8, 0, 0, 180),
+    dialogueBoxPosition = UDim2.new(0.1, 0, 1, -200),
+    typewriterSpeed = 0.03,
+    voiceVolume = 1,
+    padding = UDim.new(0, 12),
+    animationSpeed = 1,
+    sfxVolume = 1,
+    openSoundId = nil,
+    closeSoundId = nil,
+    typewriterSoundId = nil,
+    typewriterSoundPitch = 0.1,
+    choiceHoverSoundId = nil,
+    choiceSelectSoundId = nil,
+}
+
+------------------------------------------------------------------------
+-- Presets
+------------------------------------------------------------------------
+
+Theme.Presets = {
+    -- "Dark" — the default. Sleek dark UI for anime RPGs and action games.
+    Dark = {},
+
+    -- "Fantasy" — warm parchment tones with serif-style fonts. Great for
+    -- medieval, adventure, and classic RPG settings.
+    Fantasy = {
+        backgroundColor = Color3.fromRGB(42, 30, 18),
+        backgroundTransparency = 0.1,
+        textColor = Color3.fromRGB(240, 225, 195),
+        speakerColor = Color3.fromRGB(255, 185, 50),
+        choiceColor = Color3.fromRGB(60, 42, 25),
+        choiceHoverColor = Color3.fromRGB(90, 65, 35),
+        choiceHighlightColor = Color3.fromRGB(120, 85, 40),
+        choiceTextColor = Color3.fromRGB(230, 215, 180),
+        choiceUnavailableColor = Color3.fromRGB(100, 85, 65),
+        font = Enum.Font.Merriweather,
+        speakerFont = Enum.Font.Merriweather,
+        textSize = 18,
+        speakerTextSize = 22,
+        choiceTextSize = 16,
+        cornerRadius = UDim.new(0, 4),
+        typewriterSpeed = 0.04,
+    },
+
+    -- "Sci-Fi" — neon cyan accents on a deep dark background. Fits
+    -- cyberpunk, space, and futuristic game aesthetics.
+    SciFi = {
+        backgroundColor = Color3.fromRGB(8, 12, 20),
+        backgroundTransparency = 0.1,
+        textColor = Color3.fromRGB(200, 230, 255),
+        speakerColor = Color3.fromRGB(0, 220, 255),
+        choiceColor = Color3.fromRGB(15, 30, 50),
+        choiceHoverColor = Color3.fromRGB(20, 60, 90),
+        choiceHighlightColor = Color3.fromRGB(0, 100, 140),
+        choiceTextColor = Color3.fromRGB(180, 220, 255),
+        choiceUnavailableColor = Color3.fromRGB(50, 60, 70),
+        font = Enum.Font.Ubuntu,
+        speakerFont = Enum.Font.Ubuntu,
+        textSize = 17,
+        speakerTextSize = 20,
+        choiceTextSize = 15,
+        cornerRadius = UDim.new(0, 2),
+        typewriterSpeed = 0.015,
+    },
+
+    -- "Bubblegum" — bright, playful pastels. Perfect for tycoons, simulators,
+    -- and kid-friendly games.
+    Bubblegum = {
+        backgroundColor = Color3.fromRGB(255, 230, 245),
+        backgroundTransparency = 0.05,
+        textColor = Color3.fromRGB(60, 30, 60),
+        speakerColor = Color3.fromRGB(220, 50, 160),
+        choiceColor = Color3.fromRGB(255, 200, 230),
+        choiceHoverColor = Color3.fromRGB(255, 170, 210),
+        choiceHighlightColor = Color3.fromRGB(255, 140, 200),
+        choiceTextColor = Color3.fromRGB(80, 30, 80),
+        choiceUnavailableColor = Color3.fromRGB(200, 180, 190),
+        font = Enum.Font.FredokaOne,
+        speakerFont = Enum.Font.FredokaOne,
+        textSize = 20,
+        speakerTextSize = 24,
+        choiceTextSize = 18,
+        cornerRadius = UDim.new(0, 16),
+        typewriterSpeed = 0.025,
+    },
+
+    -- "Horror" — blood-red accents on near-black. Slow typewriter for tension.
+    -- Designed for horror, survival, and thriller games.
+    Horror = {
+        backgroundColor = Color3.fromRGB(10, 5, 5),
+        backgroundTransparency = 0.05,
+        textColor = Color3.fromRGB(180, 170, 160),
+        speakerColor = Color3.fromRGB(180, 30, 30),
+        choiceColor = Color3.fromRGB(25, 10, 10),
+        choiceHoverColor = Color3.fromRGB(50, 15, 15),
+        choiceHighlightColor = Color3.fromRGB(80, 20, 20),
+        choiceTextColor = Color3.fromRGB(170, 150, 140),
+        choiceUnavailableColor = Color3.fromRGB(60, 50, 50),
+        font = Enum.Font.Antique,
+        speakerFont = Enum.Font.Antique,
+        textSize = 18,
+        speakerTextSize = 20,
+        choiceTextSize = 16,
+        cornerRadius = UDim.new(0, 0),
+        typewriterSpeed = 0.06,
+    },
+}
+
+------------------------------------------------------------------------
+-- API
+------------------------------------------------------------------------
+
+function Theme.GetDefault(): ThemeConfig
+    local copy = {}
+    for k, v in pairs(DEFAULT_THEME) do
+        copy[k] = v
+    end
+    return copy
+end
+
+function Theme.Merge(overrides: { [string]: any }?): ThemeConfig
+    local theme = Theme.GetDefault()
+    if overrides then
+        for k, v in pairs(overrides) do
+            theme[k] = v
+        end
+    end
+    return theme
+end
+
+function Theme.Extend(presetName: string, overrides: { [string]: any }?): { [string]: any }
+    local preset = Theme.Presets[presetName]
+    if not preset then
+        warn("[DialogueEngine] Unknown theme preset: " .. tostring(presetName) .. ". Using default.")
+        preset = {}
+    end
+
+    local combined = Theme.GetDefault()
+    for k, v in pairs(preset) do
+        combined[k] = v
+    end
+    if overrides then
+        for k, v in pairs(overrides) do
+            combined[k] = v
+        end
+    end
+    return combined
+end
+
+return Theme
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX6">
+			<Properties>
+				<string name="Name">Types</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+    Types.lua
+    Type definitions for the Branching Dialogue Engine.
+    All dialogue data structures are defined here for consistency.
+]]
+
+local Types = {}
+
+export type DialogueAction = {
+    type: "set" | "call",
+    key: string,
+    value: any?, -- only used for "set"
+}
+
+export type DialogueChoice = {
+    text: string,
+    targetNodeId: string,
+    conditions: { [string]: any }?,
+    hideWhenUnavailable: boolean?,
+    actions: { DialogueAction }?,
+}
+
+export type DialogueNode = {
+    speaker: string?, -- falls back to npcModel.Name when omitted
+    text: string,
+    portraitImageId: (string | number)?,
+    npcModel: Model?, -- per-node override; usually auto-resolved from the model passed to Start()
+    voiceSoundId: string?,
+    choices: { DialogueChoice }?,
+    isEndNode: boolean?,
+    autoAdvanceDelay: number?,
+    actions: { DialogueAction }?, -- fired when this node is entered
+}
+
+export type DialogueTree = {
+    id: string,
+    startNodeId: string,
+    nodes: { [string]: DialogueNode },
+}
+
+export type ThemeConfig = {
+    backgroundColor: Color3,
+    backgroundTransparency: number,
+    textColor: Color3,
+    speakerColor: Color3,
+    choiceColor: Color3,
+    choiceHoverColor: Color3,
+    choiceHighlightColor: Color3,
+    choiceTextColor: Color3,
+    choiceUnavailableColor: Color3,
+    font: Enum.Font,
+    speakerFont: Enum.Font,
+    textSize: number,
+    speakerTextSize: number,
+    choiceTextSize: number,
+    cornerRadius: UDim,
+    portraitSize: UDim2,
+    dialogueBoxSize: UDim2,
+    dialogueBoxPosition: UDim2,
+    typewriterSpeed: number,
+    voiceVolume: number,
+    padding: UDim,
+    animationSpeed: number, -- multiplier for tween durations (default 1, 0 = instant/no animations)
+    sfxVolume: number, -- volume for UI sound effects (0-1, default 1)
+    openSoundId: string?, -- plays when dialogue opens
+    closeSoundId: string?, -- plays when dialogue closes
+    typewriterSoundId: string?, -- plays per character during typewriter
+    typewriterSoundPitch: number?, -- random pitch variation range (default 0.1)
+    choiceHoverSoundId: string?, -- plays when hovering a choice
+    choiceSelectSoundId: string?, -- plays when selecting a choice
+}
+
+export type ConditionCallback = (key: string, value: any) -> boolean
+export type VariableResolver = (variableName: string) -> any?
+
+export type DialogueCallbacks = {
+    conditions: { ConditionCallback }?,
+    onNodeEnter: ((nodeId: string) -> ())?,
+    onChoice: ((nodeId: string, choiceIndex: number) -> ())?,
+    onEnd: (() -> ())?,
+}
+
+export type SavedState = {
+    treeId: string,
+    currentNodeId: string,
+    visitedNodes: { [string]: boolean },
+    timestamp: number,
+}
+
+return Types
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="Folder" referent="RBX7">
+			<Properties>
+				<string name="Name">Example</string>
+			</Properties>
+			<Item class="LocalScript" referent="RBX8">
+				<Properties>
+					<string name="Name">VerySimpleExampleDialog</string>
+					<bool name="Disabled">true</bool>
+					<ProtectedString name="Source"><![CDATA[--[[
+    VerySimpleExampleDialog
+    The simplest possible DialogueEngine examples.
+
+    Place this as a LocalScript in StarterPlayerScripts.
+    Make sure the DialogueEngine model is in ReplicatedStorage.
+    Create NPC models in Workspace with the names below.
+
+    Each example below builds on the last, from dead-simple to slightly fancier.
+    Read through them to learn the text format step by step.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DialogueEngine = require(ReplicatedStorage:WaitForChild("DialogueEngine"):WaitForChild("DialogueEngine"))
+local DialogueParser = require(ReplicatedStorage:WaitForChild("DialogueEngine"):WaitForChild("DialogueParser"))
+
+local player = Players.LocalPlayer
+
+------------------------------------------------------------------------
+-- EXAMPLE 1: The absolute basics
+--
+-- Just a greeting with two choices. That's it.
+-- Lines starting with # define a "node" (a screen of text).
+-- Lines starting with > define a choice the player can click.
+-- The -> arrow says which node to go to next.
+-- [end] means the conversation stops at that node.
+------------------------------------------------------------------------
+
+local guardDialogue = DialogueParser.Parse([[
+=== guard
+start: greeting
+
+# greeting
+Halt! Who goes there?
+> I'm a friend. -> friendly
+> None of your business. -> rude
+
+# friendly [end]
+Ah, welcome then! You may pass.
+
+# rude [end]
+Hmph. Move along.
+]])
+
+------------------------------------------------------------------------
+-- EXAMPLE 2: Branching deeper
+--
+-- Choices can lead to more choices. You can loop back
+-- to earlier nodes too — just point -> at them.
+------------------------------------------------------------------------
+
+local shopkeeperDialogue = DialogueParser.Parse([[
+=== shopkeeper
+start: greeting
+
+# greeting
+Welcome to my shop! What are you looking for?
+> What do you sell? -> inventory
+> Just browsing. -> farewell
+
+# inventory
+I've got swords, shields, and potions. What interests you?
+> Tell me about the swords. -> swords
+> Tell me about the potions. -> potions
+> Actually, never mind. -> farewell
+
+# swords [end]
+Fine steel, sharp edge. 100 gold each. Come back when you're ready to buy!
+
+# potions [end]
+Heals you right up. 25 gold for a small one, 50 for a large.
+
+# farewell [end]
+Come back anytime!
+]])
+
+------------------------------------------------------------------------
+-- EXAMPLE 3: Speaker names
+--
+-- By default the speaker name comes from the NPC model's name.
+-- Use @ to override it mid-conversation (great for narration).
+------------------------------------------------------------------------
+
+local storytellerDialogue = DialogueParser.Parse([[
+=== storyteller
+start: intro
+
+# intro
+@ The Old Storyteller
+Gather 'round, child. Let me tell you a tale...
+> Tell me the tale! -> tale
+> Maybe later. -> farewell
+
+# tale
+@ Narrator
+Long ago, a hero set out on a journey across the mountains...
+> What happened next? -> climax
+
+# climax
+@ The Old Storyteller
+That, my friend, is a story for another day.
+> Aww, fine. -> farewell
+
+# farewell [end]
+@ The Old Storyteller
+Until next time!
+]])
+
+------------------------------------------------------------------------
+-- EXAMPLE 4: Using variables
+--
+-- Put {variableName} in your text and it gets replaced at runtime.
+-- Register a resolver below to tell the engine what value to use.
+------------------------------------------------------------------------
+
+local greeterDialogue = DialogueParser.Parse([[
+=== greeter
+start: hello
+
+# hello
+Hey there, {playerName}! Nice to meet you!
+> Nice to meet you too! -> nice
+> How do you know my name? -> confused
+
+# nice [end]
+Hope you enjoy your stay!
+
+# confused [end]
+I know everyone's name around here. It's a small village!
+]])
+
+------------------------------------------------------------------------
+-- EXAMPLE 5: Flags and conditions
+--
+-- [set key value] saves a flag when a node is entered or choice picked.
+-- [if key value] on a choice means it only shows when the flag matches.
+-- Great for quests, purchases, one-time events.
+------------------------------------------------------------------------
+
+local questgiverDialogue = DialogueParser.Parse([[
+=== questgiver
+start: greeting
+
+# greeting
+Hello, adventurer!
+> Got any quests? -> offer_quest [if questDone false]
+> I finished the quest! -> quest_complete [if questActive true]
+> Just saying hi. -> farewell
+
+# offer_quest
+There are wolves in the forest. Can you take care of them?
+> I'll do it! -> accepted [set questActive true]
+> No thanks. -> farewell
+
+# accepted [end]
+Brave soul! Come back when they're dealt with.
+
+# quest_complete [end] [set questDone true] [set questActive false]
+You did it! Thank you! Here's your reward.
+
+# farewell [end]
+Take care out there!
+]])
+
+------------------------------------------------------------------------
+-- EXAMPLE 6: End nodes and auto-advance
+--
+-- [end] = conversation stops here (no choices needed).
+-- [auto N] = the text auto-advances after N seconds (for cutscenes).
+------------------------------------------------------------------------
+
+local mysticDialogue = DialogueParser.Parse([[
+=== mystic
+start: vision1
+
+# vision1 [auto 3]
+@ ???
+A vision appears before you...
+
+# vision2 [auto 2]
+@ ???
+You see a distant mountain, shrouded in mist...
+
+# vision3
+@ Mystic
+The spirits have shown you your path. Will you follow it?
+> Yes, I will. -> yes
+> I need to think about it. -> no
+
+# yes [end]
+Then go. The mountain awaits.
+
+# no [end]
+Take your time. The mountain isn't going anywhere.
+]])
+
+------------------------------------------------------------------------
+-- ENGINE SETUP
+------------------------------------------------------------------------
+
+local engine = DialogueEngine.new()
+
+engine:RegisterTree("guard", guardDialogue)
+engine:RegisterTree("shopkeeper", shopkeeperDialogue)
+engine:RegisterTree("storyteller", storytellerDialogue)
+engine:RegisterTree("greeter", greeterDialogue)
+engine:RegisterTree("questgiver", questgiverDialogue)
+engine:RegisterTree("mystic", mysticDialogue)
+
+-- Flags for the quest example
+engine:SetFlag("questActive", false)
+engine:SetFlag("questDone", false)
+
+-- Variable resolver for {playerName}
+engine:RegisterVariable(function(varName)
+    if varName == "playerName" then
+        return player.Name
+    end
+    return nil
+end)
+
+------------------------------------------------------------------------
+-- CONNECT NPCs
+--
+-- Maps NPC model names to tree IDs.
+-- Create models in Workspace (or a Workspace.NPCs folder)
+-- with these exact names and a Head or HumanoidRootPart.
+------------------------------------------------------------------------
+
+local npcTrees = {
+    ["Guard"]       = "guard",
+    ["Shopkeeper"]  = "shopkeeper",
+    ["Storyteller"] = "storyteller",
+    ["Greeter"]     = "greeter",
+    ["Quest Giver"] = "questgiver",
+    ["Mystic"]      = "mystic",
+}
+
+local function setupNPC(npc)
+    local treeId = npcTrees[npc.Name]
+    if not treeId then return end
+
+    local head = npc:FindFirstChild("Head") or npc:FindFirstChild("HumanoidRootPart")
+    if not head then return end
+
+    local prompt = Instance.new("ProximityPrompt")
+    prompt.ActionText = "Talk"
+    prompt.ObjectText = npc.Name
+    prompt.MaxActivationDistance = 10
+    prompt.HoldDuration = 0
+    prompt.RequiresLineOfSight = false
+    prompt.Parent = head
+
+    prompt.Triggered:Connect(function(triggerPlayer)
+        if triggerPlayer ~= player then return end
+        engine:Start(treeId, npc)
+    end)
+end
+
+-- Find NPCs in Workspace or Workspace.NPCs
+task.wait(2)
+local npcsFolder = workspace:FindFirstChild("NPCs")
+for _, child in (npcsFolder or workspace):GetChildren() do
+    if child:IsA("Model") and npcTrees[child.Name] then
+        setupNPC(child)
+    end
+end
+
+print("[VerySimpleExampleDialog] Ready! Walk up to an NPC and press E.")
+]]></ProtectedString>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+</roblox>

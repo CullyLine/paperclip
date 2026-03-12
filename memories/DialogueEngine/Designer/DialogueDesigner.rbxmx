@@ -1718,12 +1718,13 @@ PropertyPanel.__index = PropertyPanel
 
 function PropertyPanel.new(parent, appState)
 	local self = setmetatable({}, PropertyPanel)
-	self._state      = appState
-	self._conns      = {}
-	self._frame      = nil
-	self._scroll     = nil
-	self._nodeId     = nil
-	self._fieldOrder = {}
+	self._state           = appState
+	self._conns           = {}
+	self._frame           = nil
+	self._scroll          = nil
+	self._nodeId          = nil
+	self._fieldOrder      = {}
+	self._suppressRebuild = false
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -2001,10 +2002,12 @@ function PropertyPanel:_populateNode(nodeId)
 				opt.BorderSizePixel = 0
 				opt.ZIndex = 21
 				Instance.new("UICorner", opt).CornerRadius = UDim.new(0, 3)
-				opt.MouseButton1Click:Connect(function()
-					self._state:UpdateNode(self._nodeId, { speaker = npc.displayName })
-					if dropdown then dropdown:Destroy(); dropdown = nil end
-				end)
+			opt.MouseButton1Click:Connect(function()
+				self._suppressRebuild = true
+				self._state:UpdateNode(self._nodeId, { speaker = npc.displayName })
+				self._suppressRebuild = false
+				if dropdown then dropdown:Destroy(); dropdown = nil end
+			end)
 				dy = dy + 24
 			end
 
@@ -2020,10 +2023,12 @@ function PropertyPanel:_populateNode(nodeId)
 			noneOpt.BorderSizePixel = 0
 			noneOpt.ZIndex = 21
 			Instance.new("UICorner", noneOpt).CornerRadius = UDim.new(0, 3)
-			noneOpt.MouseButton1Click:Connect(function()
-				self._state:UpdateNode(self._nodeId, { speaker = nil })
-				if dropdown then dropdown:Destroy(); dropdown = nil end
-			end)
+		noneOpt.MouseButton1Click:Connect(function()
+			self._suppressRebuild = true
+			self._state:UpdateNode(self._nodeId, { speaker = nil })
+			self._suppressRebuild = false
+			if dropdown then dropdown:Destroy(); dropdown = nil end
+		end)
 			dy = dy + 24
 
 			-- "Custom..." option
@@ -2045,11 +2050,13 @@ function PropertyPanel:_populateNode(nodeId)
 				local customField = makeField(self._scroll, speakerBtn.Position.Y.Offset, "NPC name")
 				customField.Text = node.speaker or ""
 				customField:CaptureFocus()
-				customField.FocusLost:Connect(function()
-					local val = customField.Text ~= "" and customField.Text or nil
-					self._state:UpdateNode(self._nodeId, { speaker = val })
-					customField:Destroy()
-				end)
+			customField.FocusLost:Connect(function()
+				local val = customField.Text ~= "" and customField.Text or nil
+				self._suppressRebuild = true
+				self._state:UpdateNode(self._nodeId, { speaker = val })
+				self._suppressRebuild = false
+				customField:Destroy()
+			end)
 			end)
 		end))
 
@@ -2057,10 +2064,12 @@ function PropertyPanel:_populateNode(nodeId)
 	else
 		local speakerField = makeField(self._scroll, y, "NPC name"); y = y + T.Sizes.FieldHeight + 8
 		speakerField.Text = node.speaker or ""
-		table.insert(self._conns, speakerField.FocusLost:Connect(function()
-			local val = speakerField.Text ~= "" and speakerField.Text or nil
-			self._state:UpdateNode(self._nodeId, { speaker = val })
-		end))
+	table.insert(self._conns, speakerField.FocusLost:Connect(function()
+		local val = speakerField.Text ~= "" and speakerField.Text or nil
+		self._suppressRebuild = true
+		self._state:UpdateNode(self._nodeId, { speaker = val })
+		self._suppressRebuild = false
+	end))
 	end
 
 	-- Text
@@ -2069,7 +2078,9 @@ function PropertyPanel:_populateNode(nodeId)
 	textField.Text = node.text or ""
 	self:_registerField(textField)
 	table.insert(self._conns, textField.FocusLost:Connect(function()
+		self._suppressRebuild = true
 		self._state:UpdateNode(self._nodeId, { text = textField.Text })
+		self._suppressRebuild = false
 	end))
 
 	-- End Node checkbox
@@ -2077,7 +2088,9 @@ function PropertyPanel:_populateNode(nodeId)
 	endTick.Text = node.isEndNode and "✓" or ""
 	table.insert(self._conns, endCheck.MouseButton1Click:Connect(function()
 		local newVal = not node.isEndNode
+		self._suppressRebuild = true
 		self._state:UpdateNode(self._nodeId, { isEndNode = newVal })
+		self._suppressRebuild = false
 		endTick.Text = newVal and "✓" or ""
 		node = self._state.nodes[self._nodeId]
 	end))
@@ -2089,13 +2102,17 @@ function PropertyPanel:_populateNode(nodeId)
 	self:_registerField(autoField)
 	table.insert(self._conns, autoField.FocusLost:Connect(function()
 		local val = tonumber(autoField.Text)
+		self._suppressRebuild = true
 		self._state:UpdateNode(self._nodeId, { autoAdvanceDelay = val })
+		self._suppressRebuild = false
 	end))
 
 	-- Node actions
 	makeSeparator(self._scroll, y, "Node Actions"); y = y + 26
 	y = self:_buildActionList(node.actions, y, function(actions)
+		self._suppressRebuild = true
 		self._state:UpdateNode(self._nodeId, { actions = actions })
+		self._suppressRebuild = false
 	end)
 
 	-- Choices
@@ -2293,7 +2310,9 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 
 	self:_registerField(ctBox)
 	table.insert(self._conns, ctBox.FocusLost:Connect(function()
+		self._suppressRebuild = true
 		self._state:UpdateChoice(nodeId, choiceIdx, { text = ctBox.Text })
+		self._suppressRebuild = false
 	end))
 	if choice.text == "New choice" then
 		table.insert(self._conns, ctBox.Focused:Connect(function()
@@ -2332,7 +2351,9 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 	self:_registerField(tgtBox)
 	table.insert(self._conns, tgtBox.FocusLost:Connect(function()
 		local val = tgtBox.Text ~= "" and tgtBox.Text or nil
+		self._suppressRebuild = true
 		self._state:UpdateChoice(nodeId, choiceIdx, { targetNodeId = val })
+		self._suppressRebuild = false
 	end))
 	innerY = innerY + T.Sizes.FieldHeight + 4
 
@@ -2394,7 +2415,9 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 			else parsed = tonumber(parsed) or parsed end
 			cond[k] = parsed
 		end
+		self._suppressRebuild = true
 		self._state:UpdateChoice(nodeId, choiceIdx, { conditions = cond })
+		self._suppressRebuild = false
 	end
 	table.insert(self._conns, ckBox.FocusLost:Connect(updateCond))
 	table.insert(self._conns, cvBox.FocusLost:Connect(updateCond))
@@ -2436,7 +2459,9 @@ function PropertyPanel:_buildChoiceEditor(choiceIdx, choice, y)
 
 	table.insert(self._conns, hideBox.MouseButton1Click:Connect(function()
 		local newVal = not choice.hideWhenUnavailable
+		self._suppressRebuild = true
 		self._state:UpdateChoice(nodeId, choiceIdx, { hideWhenUnavailable = newVal })
+		self._suppressRebuild = false
 		hideTick.Text = newVal and "✓" or ""
 		choice.hideWhenUnavailable = newVal
 	end))
@@ -2530,7 +2555,7 @@ function PropertyPanel:_bindState()
 	end)
 
 	self._state.nodeUpdated:Connect(function(nodeId)
-		if nodeId == self._nodeId then
+		if nodeId == self._nodeId and not self._suppressRebuild then
 			self:_populateNode(nodeId)
 		end
 	end)

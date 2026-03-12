@@ -1,7 +1,7 @@
 local Theme                = require(script.Parent.DesignerTheme)
 local NodeWidget           = require(script.Parent.NodeWidget)
 local ConnectionRenderer   = require(script.Parent.ConnectionRenderer)
-local RunService           = game:GetService("RunService")
+local UserInputService     = game:GetService("UserInputService")
 
 local Canvas = {}
 Canvas.__index = Canvas
@@ -17,8 +17,7 @@ function Canvas.new(parent, appState)
 	self._drag        = nil  -- { nodeId, startMouse: Vector2, startPos: Vector2 }
 	self._connecting  = nil  -- { nodeId, choiceIndex }
 	self._overlay     = nil
-	self._heartbeat   = nil  -- RunService.Heartbeat for drag polling
-	self._connectHB   = nil  -- RunService.Heartbeat for connection polling
+	self._uisConn    = nil  -- UserInputService.InputEnded fallback
 	self:_build(parent)
 	self:_bindState()
 	return self
@@ -57,24 +56,19 @@ function Canvas:_build(parent)
 
 	self._conns = ConnectionRenderer.new(inner)
 
-	-- Right-click context menu + connection tracking via scroll events
+	-- Right-click context menu
 	scroll.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			local cx, cy = self:_widgetMouseToCanvas()
+			local cx, cy = self:_screenToCanvas(input.Position.X, input.Position.Y)
 			self:_showContextMenu(cx, cy)
 		end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			self:_dismissContextMenu()
-			if self._connecting then
-				local cx, cy = self:_widgetMouseToCanvas()
-				self:_finishConnect(cx, cy)
-			elseif not self._drag then
+			if not self._drag and not self._connecting then
 				self._state:SelectNode(nil)
 			end
 		end
 	end)
-
-	-- Connection mouse tracking is handled via Heartbeat in _startConnecting
 end
 
 ------------------------------------------------------------------------
@@ -86,64 +80,50 @@ function Canvas:_screenToCanvas(sx, sy)
 	return sx - abs.X + cp.X, sy - abs.Y + cp.Y
 end
 
-function Canvas:_widgetMouseToCanvas()
-	local pos = self:_getMousePos()
-	local cp  = self._scroll.CanvasPosition
-	local T   = Theme
-	return pos.X + cp.X, pos.Y - T.Sizes.ToolbarHeight + cp.Y
-end
-
 ------------------------------------------------------------------------
 -- Drag overlay — captures all mouse input during a drag
 ------------------------------------------------------------------------
-function Canvas:_getPluginWidget()
-	local pw = self._widget.Parent
-	if pw and pw:IsA("DockWidgetPluginGui") then return pw end
-	return nil
-end
-
-function Canvas:_getMousePos()
-	local pw = self:_getPluginWidget()
-	if pw then
-		return pw:GetRelativeMousePosition()
-	end
-	return Vector2.new(0, 0)
-end
-
 function Canvas:_createOverlay()
 	if self._overlay then return end
 	local ov = Instance.new("Frame")
 	ov.Name = "DragOverlay"
 	ov.Size = UDim2.fromScale(1, 1)
-	ov.BackgroundTransparency = 0.999
-	ov.BackgroundColor3 = Color3.new(0, 0, 0)
-	ov.Active = true
+	ov.BackgroundTransparency = 1
 	ov.ZIndex = 40
 	ov.Parent = self._widget
 	self._overlay = ov
 
-	-- Poll mouse position every frame
-	self._heartbeat = RunService.Heartbeat:Connect(function()
-		if self._drag or self._connecting then
-			self:_onMouseMove(self:_getMousePos())
+	ov.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			self:_onMouseMove(input.Position.X, input.Position.Y)
+		end
+	end)
+	ov.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			self:_onMouseUp(input.Position.X, input.Position.Y)
+		end
+	end)
+	-- Fallback: mouse up may not fire on overlay if released outside GUI
+	self._uisConn = UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and (self._drag or self._connecting) then
+			self:_onMouseUp(0, 0)
 		end
 	end)
 end
 
-
 function Canvas:_removeOverlay()
-	if self._heartbeat then self._heartbeat:Disconnect(); self._heartbeat = nil end
+	if self._uisConn then self._uisConn:Disconnect(); self._uisConn = nil end
 	if self._overlay then self._overlay:Destroy(); self._overlay = nil end
 end
 
 ------------------------------------------------------------------------
 -- Mouse handlers (routed through overlay during drags)
 ------------------------------------------------------------------------
-function Canvas:_onMouseMove(pos)
+function Canvas:_onMouseMove(sx, sy)
 	if self._drag then
 		local d = self._drag
-		local dx = pos.X - d.startMouse.X
-		local dy = pos.Y - d.startMouse.Y
+		local dx = sx - d.startMouse.X
+		local dy = sy - d.startMouse.Y
 		local nx = d.startPos.X + dx
 		local ny = d.startPos.Y + dy
 		self._state:MoveNode(d.nodeId, nx, ny)
@@ -152,75 +132,25 @@ function Canvas:_onMouseMove(pos)
 		self._conns:RenderAll(self._widgets, self._state)
 	end
 
+	if self._connecting then
+		local cx, cy = self:_screenToCanvas(sx, sy)
+		self._conns:UpdateDrag(Vector2.new(cx, cy))
+	end
 end
 
-function Canvas:_onMouseUp()
+function Canvas:_onMouseUp(sx, sy)
 	if self._drag then
+		local d = self._drag
 		self._drag = nil
 		self._state:CommitMove()
 		self:_removeOverlay()
 	end
-end
 
-function Canvas:_findNearestInputDot(cx, cy, snapRadius)
-	local bestDist = snapRadius * snapRadius
-	local bestPos = nil
-	local fromId = self._connecting and self._connecting.nodeId
-	for nodeId, w in pairs(self._widgets) do
-		if nodeId ~= fromId then
-			local center = w:GetInputDotCenter()
-			if center then
-				local dx, dy = cx - center.X, cy - center.Y
-				local d2 = dx * dx + dy * dy
-				if d2 < bestDist then
-					bestDist = d2
-					bestPos = center
-				end
-			end
-		end
+	if self._connecting then
+		self._conns:CancelDrag()
+		self._connecting = nil
+		self:_removeOverlay()
 	end
-	return bestPos
-end
-
-function Canvas:_startConnecting(nodeId, choiceIdx, fromPos)
-	self._connecting = { nodeId = nodeId, choiceIndex = choiceIdx }
-	self._conns:StartDrag(fromPos)
-	if self._connectHB then self._connectHB:Disconnect() end
-	self._connectHB = RunService.Heartbeat:Connect(function()
-		if not self._connecting then return end
-		local cx, cy = self:_widgetMouseToCanvas()
-		local snap = self:_findNearestInputDot(cx, cy, 20)
-		if snap then
-			self._conns:UpdateDrag(snap)
-		else
-			self._conns:UpdateDrag(Vector2.new(cx, cy))
-		end
-	end)
-end
-
-function Canvas:_stopConnecting()
-	if self._connectHB then self._connectHB:Disconnect(); self._connectHB = nil end
-	self._conns:CancelDrag()
-	self._connecting = nil
-	self:RefreshConnections()
-end
-
-function Canvas:_finishConnect(cx, cy)
-	if not self._connecting then return end
-	local hitRadius = 20
-	for nodeId, w in pairs(self._widgets) do
-		local dotCenter = w:GetInputDotCenter()
-		if dotCenter then
-			local dx = cx - dotCenter.X
-			local dy = cy - dotCenter.Y
-			if dx * dx + dy * dy <= hitRadius * hitRadius then
-				local from = self._connecting
-				self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = nodeId })
-				break
-			end
-		end
-	end
-	self:_stopConnecting()
 end
 
 ------------------------------------------------------------------------
@@ -237,45 +167,54 @@ function Canvas:_createWidget(nodeId)
 	if dragHandle then
 		dragHandle.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				local currentId = w:GetNodeId()
-				self._state:SelectNode(currentId)
-				local curNode = self._state.nodes[currentId]
-				if not curNode then return end
-
-				local frameAbs = w:GetFrame().AbsolutePosition
-				local localX = input.Position.X - frameAbs.X
-				local localY = input.Position.Y - frameAbs.Y
-				local choiceIdx = w:HitTestChoiceDot(localX, localY)
-
-				if choiceIdx then
-					local fromPos = w:GetChoiceDotCenter(choiceIdx)
-					if fromPos then
-						self:_startConnecting(currentId, choiceIdx, fromPos)
-					end
-				else
-					self._drag = {
-						nodeId     = currentId,
-						startMouse = self:_getMousePos(),
-						startPos   = Vector2.new(curNode.x, curNode.y),
-					}
-					self:_createOverlay()
-				end
-			end
-		end)
-		dragHandle.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 and self._drag then
-				self:_onMouseUp()
+				self._state:SelectNode(nodeId)
+				self._drag = {
+					nodeId     = nodeId,
+					startMouse = Vector2.new(input.Position.X, input.Position.Y),
+					startPos   = Vector2.new(node.x, node.y),
+				}
+				self:_createOverlay()
 			end
 		end)
 	end
+
+	self:_wireChoiceDots(w, nodeId)
+	self:_wireInputDot(w, nodeId)
 end
 
 function Canvas:_wireChoiceDots(w, nodeId)
-	-- Choice dot interaction is handled via dragHandle hit-testing
+	local node = self._state.nodes[nodeId]
+	if not node then return end
+	for i = 1, #(node.choices or {}) do
+		local dot = w:GetChoiceDot(i)
+		if dot then
+			dot.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					local fromPos = w:GetChoiceDotCenter(i)
+					if fromPos then
+						self._connecting = { nodeId = nodeId, choiceIndex = i }
+						self._conns:StartDrag(fromPos)
+						self:_createOverlay()
+					end
+				end
+			end)
+		end
+	end
 end
 
 function Canvas:_wireInputDot(w, targetNodeId)
-	-- Input dot interaction is handled via dragHandle InputEnded hit-testing
+	local dot = w:GetInputDot()
+	if not dot then return end
+	dot.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._connecting then
+			local from = self._connecting
+			self._state:UpdateChoice(from.nodeId, from.choiceIndex, { targetNodeId = targetNodeId })
+			self._conns:CancelDrag()
+			self._connecting = nil
+			self:_removeOverlay()
+			self:RefreshConnections()
+		end
+	end)
 end
 
 ------------------------------------------------------------------------
@@ -293,7 +232,10 @@ function Canvas:_showContextMenu(cx, cy)
 	local menu = Instance.new("Frame")
 	menu.Name = "ContextMenu"
 	menu.Size = UDim2.fromOffset(150, 64)
-	menu.Position = UDim2.fromOffset(cx, cy)
+	menu.Position = UDim2.fromOffset(
+		cx - self._scroll.CanvasPosition.X,
+		cy - self._scroll.CanvasPosition.Y
+	)
 	menu.BackgroundColor3 = T.Colors.Toolbar
 	menu.BorderSizePixel = 0
 	menu.ZIndex = 30
@@ -427,7 +369,6 @@ function Canvas:_bindState()
 			if id ~= nodeData.id and not self._state.nodes[id] then
 				self._widgets[id] = nil
 				self._widgets[nodeData.id] = widget
-				widget:UpdateData(nodeData)
 				break
 			end
 		end
@@ -457,7 +398,6 @@ function Canvas:Destroy()
 	for _, w in pairs(self._widgets) do w:Destroy() end
 	self._conns:Destroy()
 	self:_removeOverlay()
-	self:_stopConnecting()
 	if self._scroll then self._scroll:Destroy() end
 end
 
