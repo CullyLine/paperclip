@@ -18,6 +18,12 @@ import {
 } from "@paperclipai/adapter-cursor-local/server";
 import { agentConfigurationDoc as cursorAgentConfigurationDoc, models as cursorModels } from "@paperclipai/adapter-cursor-local";
 import {
+  execute as geminiExecute,
+  testEnvironment as geminiTestEnvironment,
+  sessionCodec as geminiSessionCodec,
+} from "@paperclipai/adapter-gemini-local/server";
+import { agentConfigurationDoc as geminiAgentConfigurationDoc, models as geminiModels } from "@paperclipai/adapter-gemini-local";
+import {
   execute as openCodeExecute,
   testEnvironment as openCodeTestEnvironment,
   sessionCodec as openCodeSessionCodec,
@@ -26,15 +32,6 @@ import {
 import {
   agentConfigurationDoc as openCodeAgentConfigurationDoc,
 } from "@paperclipai/adapter-opencode-local";
-import {
-  execute as openclawExecute,
-  testEnvironment as openclawTestEnvironment,
-  onHireApproved as openclawOnHireApproved,
-} from "@paperclipai/adapter-openclaw/server";
-import {
-  agentConfigurationDoc as openclawAgentConfigurationDoc,
-  models as openclawModels,
-} from "@paperclipai/adapter-openclaw";
 import {
   execute as openclawGatewayExecute,
   testEnvironment as openclawGatewayTestEnvironment,
@@ -89,14 +86,14 @@ const cursorLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: cursorAgentConfigurationDoc,
 };
 
-const openclawAdapter: ServerAdapterModule = {
-  type: "openclaw",
-  execute: openclawExecute,
-  testEnvironment: openclawTestEnvironment,
-  onHireApproved: openclawOnHireApproved,
-  models: openclawModels,
-  supportsLocalAgentJwt: false,
-  agentConfigurationDoc: openclawAgentConfigurationDoc,
+const geminiLocalAdapter: ServerAdapterModule = {
+  type: "gemini_local",
+  execute: geminiExecute,
+  testEnvironment: geminiTestEnvironment,
+  sessionCodec: geminiSessionCodec,
+  models: geminiModels,
+  supportsLocalAgentJwt: true,
+  agentConfigurationDoc: geminiAgentConfigurationDoc,
 };
 
 const openclawGatewayAdapter: ServerAdapterModule = {
@@ -137,7 +134,7 @@ const adaptersByType = new Map<string, ServerAdapterModule>(
     openCodeLocalAdapter,
     piLocalAdapter,
     cursorLocalAdapter,
-    openclawAdapter,
+    geminiLocalAdapter,
     openclawGatewayAdapter,
     processAdapter,
     httpAdapter,

@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
 import { agents as agentsTable, companies, heartbeatRuns } from "@paperclipai/db";
@@ -37,12 +37,14 @@ import {
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
+import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import { ensureOpenCodeModelConfiguredAndAvailable } from "@paperclipai/adapter-opencode-local/server";
 
 export function agentRoutes(db: Db) {
   const DEFAULT_INSTRUCTIONS_PATH_KEYS: Record<string, string> = {
     claude_local: "instructionsFilePath",
     codex_local: "instructionsFilePath",
+    gemini_local: "instructionsFilePath",
     opencode_local: "instructionsFilePath",
     cursor: "instructionsFilePath",
   };
@@ -181,6 +183,40 @@ export function agentRoutes(db: Db) {
     return trimmed.length > 0 ? trimmed : null;
   }
 
+  function parseBooleanLike(value: unknown): boolean | null {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+      return null;
+    }
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+      return false;
+    }
+    return null;
+  }
+
+  function generateEd25519PrivateKeyPem(): string {
+    const { privateKey } = generateKeyPairSync("ed25519");
+    return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  }
+
+  function ensureGatewayDeviceKey(
+    adapterType: string | null | undefined,
+    adapterConfig: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (adapterType !== "openclaw_gateway") return adapterConfig;
+    const disableDeviceAuth = parseBooleanLike(adapterConfig.disableDeviceAuth) === true;
+    if (disableDeviceAuth) return adapterConfig;
+    if (asNonEmptyString(adapterConfig.devicePrivateKeyPem)) return adapterConfig;
+    return { ...adapterConfig, devicePrivateKeyPem: generateEd25519PrivateKeyPem() };
+  }
+
   function applyCreateDefaultsByAdapterType(
     adapterType: string | null | undefined,
     adapterConfig: Record<string, unknown>,
@@ -196,13 +232,17 @@ export function agentRoutes(db: Db) {
       if (!hasBypassFlag) {
         next.dangerouslyBypassApprovalsAndSandbox = DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
       }
-      return next;
+      return ensureGatewayDeviceKey(adapterType, next);
+    }
+    if (adapterType === "gemini_local" && !asNonEmptyString(next.model)) {
+      next.model = DEFAULT_GEMINI_LOCAL_MODEL;
+      return ensureGatewayDeviceKey(adapterType, next);
     }
     // OpenCode requires explicit model selection — no default
     if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_CURSOR_LOCAL_MODEL;
     }
-    return next;
+    return ensureGatewayDeviceKey(adapterType, next);
   }
 
   async function assertAdapterConfigConstraints(
@@ -211,7 +251,7 @@ export function agentRoutes(db: Db) {
     adapterConfig: Record<string, unknown>,
   ) {
     if (adapterType !== "opencode_local") return;
-    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
+    const { config: runtimeConfig } = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
     const runtimeEnv = asRecord(runtimeConfig.env) ?? {};
     try {
       await ensureOpenCodeModelConfiguredAndAvailable({
@@ -386,7 +426,7 @@ export function agentRoutes(db: Db) {
         inputAdapterConfig,
         { strictMode: strictSecretsMode },
       );
-      const runtimeAdapterConfig = await secretsSvc.resolveAdapterConfigForRuntime(
+      const { config: runtimeAdapterConfig } = await secretsSvc.resolveAdapterConfigForRuntime(
         companyId,
         normalizedAdapterConfig,
       );
@@ -930,11 +970,7 @@ export function agentRoutes(db: Db) {
       if (changingInstructionsPath) {
         await assertCanManageInstructionsPath(req, existing);
       }
-      patchData.adapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
-        existing.companyId,
-        adapterConfig,
-        { strictMode: strictSecretsMode },
-      );
+      patchData.adapterConfig = adapterConfig;
     }
 
     const requestedAdapterType =
@@ -942,15 +978,23 @@ export function agentRoutes(db: Db) {
     const touchesAdapterConfiguration =
       Object.prototype.hasOwnProperty.call(patchData, "adapterType") ||
       Object.prototype.hasOwnProperty.call(patchData, "adapterConfig");
-    if (touchesAdapterConfiguration && requestedAdapterType === "opencode_local") {
+    if (touchesAdapterConfiguration) {
       const rawEffectiveAdapterConfig = Object.prototype.hasOwnProperty.call(patchData, "adapterConfig")
         ? (asRecord(patchData.adapterConfig) ?? {})
         : (asRecord(existing.adapterConfig) ?? {});
-      const effectiveAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
-        existing.companyId,
+      const effectiveAdapterConfig = applyCreateDefaultsByAdapterType(
+        requestedAdapterType,
         rawEffectiveAdapterConfig,
+      );
+      const normalizedEffectiveAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
+        existing.companyId,
+        effectiveAdapterConfig,
         { strictMode: strictSecretsMode },
       );
+      patchData.adapterConfig = normalizedEffectiveAdapterConfig;
+    }
+    if (touchesAdapterConfiguration && requestedAdapterType === "opencode_local") {
+      const effectiveAdapterConfig = asRecord(patchData.adapterConfig) ?? {};
       await assertAdapterConfigConstraints(
         existing.companyId,
         requestedAdapterType,
@@ -1226,7 +1270,7 @@ export function agentRoutes(db: Db) {
     }
 
     const config = asRecord(agent.adapterConfig) ?? {};
-    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
+    const { config: runtimeConfig } = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
     const result = await runClaudeLogin({
       runId: `claude-login-${randomUUID()}`,
       agent: {
@@ -1306,6 +1350,17 @@ export function agentRoutes(db: Db) {
     }
 
     res.json(liveRuns);
+  });
+
+  router.get("/heartbeat-runs/:runId", async (req, res) => {
+    const runId = req.params.runId as string;
+    const run = await heartbeat.getRun(runId);
+    if (!run) {
+      res.status(404).json({ error: "Heartbeat run not found" });
+      return;
+    }
+    assertCompanyAccess(req, run.companyId);
+    res.json(run);
   });
 
   router.post("/heartbeat-runs/:runId/cancel", async (req, res) => {
