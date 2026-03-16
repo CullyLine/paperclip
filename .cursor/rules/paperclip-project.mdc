@@ -1,0 +1,127 @@
+---
+description: Paperclip project context — architecture, setup, conventions, and key commands
+alwaysApply: true
+---
+
+# Paperclip — AI Company Orchestration Platform
+
+Paperclip is an open-source Node.js + React platform that orchestrates teams of AI agents as a company. It is **not** an agent framework — it is the control plane that organises agents into org charts with goals, budgets, governance, and ticketing.
+
+Repo: https://github.com/paperclipai/paperclip
+
+## Repo Structure (pnpm monorepo)
+
+```
+server/          Express REST API + orchestration services
+ui/              React + Vite board UI
+packages/db/     Drizzle ORM schema, migrations, DB client
+packages/shared/ Shared types, constants, validators, API path constants
+packages/adapters/*  Agent adapter packages (OpenClaw, Claude Code, etc.)
+cli/             CLI tool (`pnpm paperclipai …`)
+doc/             Specs, product docs, developing guide
+skills/          Runtime skill documents injected into agents
+```
+
+Workspace packages are declared in `pnpm-workspace.yaml`:
+`packages/*`, `packages/adapters/*`, `server`, `ui`, `cli`.
+
+## Requirements
+
+- Node.js 20+
+- pnpm 9.15+
+
+## Setup & Running
+
+### Quickstart (auto-onboard)
+```sh
+npx paperclipai onboard --yes
+```
+
+### Manual clone
+```sh
+git clone https://github.com/paperclipai/paperclip.git
+cd paperclip
+pnpm install
+pnpm dev
+```
+
+- API server: `http://localhost:3100`
+- UI: served on the same origin via dev middleware
+
+Leave `DATABASE_URL` unset for local dev — an embedded PGlite database is auto-created at `~/.paperclip/instances/default/db`.
+
+### Key commands
+```sh
+pnpm dev              # API + UI, watch mode
+pnpm dev:once         # same but no file watching
+pnpm dev:server       # server only
+pnpm build            # build all packages
+pnpm typecheck        # typecheck all packages
+pnpm test:run         # run vitest tests
+pnpm db:generate      # generate Drizzle migration after schema change
+pnpm db:migrate       # apply pending migrations
+pnpm paperclipai run  # auto-onboard + doctor + start (one-command)
+```
+
+### Health check
+```sh
+curl http://localhost:3100/api/health    # → {"status":"ok"}
+curl http://localhost:3100/api/companies # → JSON array
+```
+
+### Reset local DB
+```sh
+rm -rf ~/.paperclip/instances/default/db
+pnpm dev
+```
+
+## Architecture Overview
+
+**Two layers:**
+
+1. **Control Plane (this repo)** — agent registry, org chart, task/ticket system, budgets, goal hierarchy, heartbeat monitoring, governance gates.
+2. **Execution Services (adapters)** — agents run externally (OpenClaw, Claude Code, Codex, Cursor, Bash, HTTP) and report back via heartbeats.
+
+The control plane does not run agents; it orchestrates them.
+
+## Core Engineering Rules
+
+1. **Company-scoped everything** — every domain entity belongs to a company; enforce company boundaries in routes and services.
+2. **Keep contracts synchronised** — schema changes must cascade through `packages/db` → `packages/shared` → `server` → `ui`.
+3. **Preserve control-plane invariants:** single-assignee tasks, atomic issue checkout, approval gates, budget hard-stop, activity logging.
+4. **Database changes:** edit `packages/db/src/schema/*.ts`, export from `schema/index.ts`, run `pnpm db:generate`, then `pnpm -r typecheck`.
+5. **Verification before done:** `pnpm -r typecheck && pnpm test:run && pnpm build`.
+
+## API Conventions
+
+- Base path: `/api`
+- Board access = full-control operator context
+- Agent access = bearer API key (hashed at rest), company-scoped
+- All mutations must write activity log entries
+- HTTP error codes: `400 / 401 / 403 / 404 / 409 / 422 / 500`
+
+## Data & Secrets
+
+- Local storage: `~/.paperclip/instances/default/data/storage`
+- Secrets use local encryption by default; master key at `~/.paperclip/instances/default/secrets/master.key`
+- Override via `PAPERCLIP_SECRETS_MASTER_KEY` or `PAPERCLIP_SECRETS_MASTER_KEY_FILE`
+- Strict mode (`PAPERCLIP_SECRETS_STRICT_MODE=true`) requires secret refs for `*_API_KEY`, `*_TOKEN`, `*_SECRET`
+
+## Docker Alternative
+
+```sh
+docker compose -f docker-compose.quickstart.yml up --build
+```
+
+## Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| Company | Top-level tenant; full data isolation per company |
+| Org Chart | Agent hierarchy with roles, reporting lines, titles |
+| Goal | Cascading objectives: company → team → agent → task |
+| Heartbeat | Scheduled wake-up; agents check in, get work, act |
+| Ticket/Issue | Tracked unit of work with conversation threading |
+| Budget | Monthly token spend cap per agent; auto-pause on limit |
+| Governance | Board approval gates for hires, strategy, config changes |
+| Skill | Runtime-injected context document for agent capabilities |

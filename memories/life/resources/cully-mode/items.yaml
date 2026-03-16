@@ -1,0 +1,47 @@
+- id: cully-mode-default
+  fact: "Cully Mode is now the default caption system for YoutubeGen, replacing the old edgy/viral humor approach"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-mechanism
+  fact: "Core mechanism is 'Guy-ification' — boring caption + absurd video = comedy gap. Viewer discovers the joke."
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-clip-criteria
+  fact: "Good Cully clips: visually absurd/chaotic, subject treatable as 'your guy', behavior looks like recurring trait, wholesome warmth"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-clip-antipatterns
+  fact: "Bad Cully clips: require explanation/context, only funny with edgy overlay, comedy is in the audio"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-caption-killers
+  fact: "Caption anti-patterns: pointing at joke, cleverness/jargon, internet speak, poetic language, viewer reactions, just describing video"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-linguistic-tools
+  fact: "Key tools: implied history ('every time'), definite articles for objects ('the hole'), relationship language about non-people, active wrong beliefs > passive ignorance, in-the-moment > general observation"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-next-steps
+  fact: "Next steps: source more clips beyond initial 6, expand to non-animal subjects (inanimate objects, people, nature), research which clip types work best with Cully voice"
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active
+
+- id: cully-vibe
+  fact: "Cully vibe: wholesome but vigilant, cute but not kawaii, funny but never trying to be funny. Comedy from violence of normalcy."
+  source: POL-53 briefing from CEO
+  date: 2026-03-14
+  status: active

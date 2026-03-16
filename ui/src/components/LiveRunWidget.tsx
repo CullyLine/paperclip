@@ -9,6 +9,7 @@ import { Identity } from "./Identity";
 import { StatusBadge } from "./StatusBadge";
 import { RunTranscriptView } from "./transcript/RunTranscriptView";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
+import { useAutoScroll } from "../hooks/useAutoScroll";
 
 interface LiveRunWidgetProps {
   issueId: string;
@@ -98,63 +99,87 @@ export function LiveRunWidget({ issueId, companyId }: LiveRunWidgetProps) {
       </div>
 
       <div className="divide-y divide-border/60">
-        {runs.map((run) => {
-          const isActive = isRunActive(run.status);
-          const transcript = transcriptByRun.get(run.id) ?? [];
-          return (
-            <section key={run.id} className="px-4 py-4">
-              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <Link to={`/agents/${run.agentId}`} className="inline-flex hover:underline">
-                    <Identity name={run.agentName} size="sm" />
-                  </Link>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Link
-                      to={`/agents/${run.agentId}/runs/${run.id}`}
-                      className="inline-flex items-center rounded-full border border-border/70 bg-background/70 px-2 py-1 font-mono hover:border-cyan-500/30 hover:text-foreground"
-                    >
-                      {run.id.slice(0, 8)}
-                    </Link>
-                    <StatusBadge status={run.status} />
-                    <span>{formatDateTime(run.startedAt ?? run.createdAt)}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isActive && (
-                    <button
-                      onClick={() => handleCancelRun(run.id)}
-                      disabled={cancellingRunIds.has(run.id)}
-                      className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-500/[0.12] dark:text-red-300 disabled:opacity-50"
-                    >
-                      <Square className="h-2.5 w-2.5" fill="currentColor" />
-                      {cancellingRunIds.has(run.id) ? "Stopping…" : "Stop"}
-                    </button>
-                  )}
-                  <Link
-                    to={`/agents/${run.agentId}/runs/${run.id}`}
-                    className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-cyan-700 transition-colors hover:border-cyan-500/30 hover:text-cyan-600 dark:text-cyan-300"
-                  >
-                    Open run
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                </div>
-              </div>
-
-              <div className="max-h-[320px] overflow-y-auto pr-1">
-                <RunTranscriptView
-                  entries={transcript}
-                  density="compact"
-                  limit={8}
-                  streaming={isActive}
-                  collapseStdout
-                  emptyMessage={hasOutputForRun(run.id) ? "Waiting for transcript parsing..." : "Waiting for run output..."}
-                />
-              </div>
-            </section>
-          );
-        })}
+        {runs.map((run) => (
+          <LiveRunSection
+            key={run.id}
+            run={run}
+            transcript={transcriptByRun.get(run.id) ?? []}
+            hasOutput={hasOutputForRun(run.id)}
+            cancellingRunIds={cancellingRunIds}
+            onCancel={handleCancelRun}
+          />
+        ))}
       </div>
     </div>
+  );
+}
+
+function LiveRunSection({
+  run,
+  transcript,
+  hasOutput,
+  cancellingRunIds,
+  onCancel,
+}: {
+  run: LiveRunForIssue;
+  transcript: import("../adapters").TranscriptEntry[];
+  hasOutput: boolean;
+  cancellingRunIds: Set<string>;
+  onCancel: (runId: string) => void;
+}) {
+  const isActive = isRunActive(run.status);
+  const scrollRef = useAutoScroll<HTMLDivElement>([transcript.length]);
+
+  return (
+    <section className="px-4 py-4">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <Link to={`/agents/${run.agentId}`} className="inline-flex hover:underline">
+            <Identity name={run.agentName} size="sm" />
+          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Link
+              to={`/agents/${run.agentId}/runs/${run.id}`}
+              className="inline-flex items-center rounded-full border border-border/70 bg-background/70 px-2 py-1 font-mono hover:border-cyan-500/30 hover:text-foreground"
+            >
+              {run.id.slice(0, 8)}
+            </Link>
+            <StatusBadge status={run.status} />
+            <span>{formatDateTime(run.startedAt ?? run.createdAt)}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {isActive && (
+            <button
+              onClick={() => onCancel(run.id)}
+              disabled={cancellingRunIds.has(run.id)}
+              className="inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-500/[0.12] dark:text-red-300 disabled:opacity-50"
+            >
+              <Square className="h-2.5 w-2.5" fill="currentColor" />
+              {cancellingRunIds.has(run.id) ? "Stopping…" : "Stop"}
+            </button>
+          )}
+          <Link
+            to={`/agents/${run.agentId}/runs/${run.id}`}
+            className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-cyan-700 transition-colors hover:border-cyan-500/30 hover:text-cyan-600 dark:text-cyan-300"
+          >
+            Open run
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="max-h-[320px] overflow-y-auto pr-1">
+        <RunTranscriptView
+          entries={transcript}
+          density="compact"
+          limit={8}
+          streaming={isActive}
+          collapseStdout
+          emptyMessage={hasOutput ? "Waiting for transcript parsing..." : "Waiting for run output..."}
+        />
+      </div>
+    </section>
   );
 }

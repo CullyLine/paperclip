@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -10,6 +11,13 @@ import { workspaceRuntimeServices } from "@paperclipai/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { asNumber, asString, parseObject, renderTemplate } from "../adapters/utils.js";
 import { resolveHomeAwarePath } from "../home-paths.js";
+
+function resolveShell(): { shell: string; flag: string } {
+  if (os.platform() === "win32") {
+    return { shell: process.env.ComSpec || "cmd.exe", flag: "/c" };
+  }
+  return { shell: process.env.SHELL?.trim() || "/bin/sh", flag: "-c" };
+}
 
 export interface ExecutionWorkspaceInput {
   baseCwd: string;
@@ -273,9 +281,9 @@ async function runWorkspaceCommand(input: {
   env: NodeJS.ProcessEnv;
   label: string;
 }) {
-  const shell = process.env.SHELL?.trim() || "/bin/sh";
+  const { shell, flag } = resolveShell();
   const proc = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(shell, ["-c", input.command], {
+    const child = spawn(shell, [flag, input.command], {
       cwd: input.cwd,
       env: input.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -693,8 +701,8 @@ async function startLocalRuntimeService(input: {
     const portEnvKey = asString(portConfig.envKey, "PORT");
     env[portEnvKey] = String(port);
   }
-  const shell = process.env.SHELL?.trim() || "/bin/sh";
-  const child = spawn(shell, ["-lc", command], {
+  const { shell: runtimeShell, flag: runtimeFlag } = resolveShell();
+  const child = spawn(runtimeShell, [runtimeFlag, command], {
     cwd: serviceCwd,
     env,
     detached: false,

@@ -8,6 +8,7 @@ import { CONFIG } from './config';
 const SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube',
+  'https://www.googleapis.com/auth/youtube.force-ssl',
 ];
 const REDIRECT_PORT = 8976;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}`;
@@ -202,8 +203,7 @@ export async function getAuthenticatedClient() {
   oauth2.setCredentials({ refresh_token: stored.refresh_token });
 
   try {
-    const { credentials } = await oauth2.refreshAccessToken();
-    oauth2.setCredentials(credentials);
+    await oauth2.getAccessToken();
   } catch (err: any) {
     if (
       err.message?.includes('invalid_grant') ||

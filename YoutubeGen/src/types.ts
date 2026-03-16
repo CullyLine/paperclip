@@ -17,6 +17,7 @@ export interface Caption {
 
 export interface SceneAlternative {
   movieTitle: string;
+  year?: number;
   character: string;
   momentDescription: string;
   searchKeywords: string[];
@@ -63,6 +64,22 @@ export interface VideoMetadata {
   hashtags: string[];
   tags: string[];
   category: string;
+  pinnedComment?: string;
+  animalSpecies?: string;
+}
+
+export interface AnimalClipContext {
+  /** The Cully Mode caption text, e.g. "he checks in with the hole" */
+  captionText: string;
+  /**
+   * Specific animal species, e.g. "hyrax", "capuchin monkey", "cockatoo".
+   * When unknown, use the generic noun ("bird", "cat") — but be specific if you can.
+   */
+  animalSpecies: string;
+  /**
+   * One-line behavior description for keyword generation, e.g. "screaming at nothing"
+   */
+  behavior: string;
 }
 
 export interface PipelineResult {

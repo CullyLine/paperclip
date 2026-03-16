@@ -140,6 +140,7 @@ export async function selectBestPairing(captions: Caption[]): Promise<JointMatch
       confidence: parsed.confidence ?? 0.5,
       alternatives: (parsed.alternatives || []).slice(0, 2).map((alt: any) => ({
         movieTitle: alt.movie || alt.movieTitle || '',
+        year: alt.year || undefined,
         character: alt.character || '',
         momentDescription: alt.scene_description || alt.momentDescription || '',
         searchKeywords: alt.search_keywords || alt.searchKeywords || [],
@@ -234,6 +235,7 @@ export async function selectTopPairings(captions: Caption[], count: number = 5):
         confidence: pick.confidence ?? 0.5,
         alternatives: (pick.alternatives || []).slice(0, 2).map((alt: any) => ({
           movieTitle: alt.movie || alt.movieTitle || '',
+          year: alt.year || undefined,
           character: alt.character || '',
           momentDescription: alt.scene_description || alt.momentDescription || '',
           searchKeywords: alt.search_keywords || alt.searchKeywords || [],
@@ -457,6 +459,7 @@ export async function matchScene(caption: Caption): Promise<SceneMatch> {
       confidence: parsed.confidence ?? 0.5,
       alternatives: (parsed.alternatives || []).slice(0, 2).map((alt: any) => ({
         movieTitle: alt.movie || alt.movieTitle || '',
+        year: alt.year || undefined,
         character: alt.character || '',
         momentDescription: alt.scene_description || alt.momentDescription || '',
         searchKeywords: alt.search_keywords || alt.searchKeywords || [],

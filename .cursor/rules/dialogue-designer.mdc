@@ -1,0 +1,18 @@
+---
+description: Dialogue Designer Roblox Studio plugin — build & deploy after any code change
+globs:
+  - memories/DialogueEngine/Designer/*.lua
+---
+
+# Dialogue Designer — Build & Deploy
+
+When ANY `.lua` file under `memories/DialogueEngine/Designer/` is modified, you MUST run the build script and copy the output to the Roblox Studio plugins folder before finishing:
+
+```powershell
+node build-rbxmx.cjs
+Copy-Item "DialogueDesigner.rbxmx" "$env:LOCALAPPDATA\Roblox\Plugins\DialogueDesigner.rbxmx" -Force
+```
+
+Both commands run from `memories/DialogueEngine/Designer/`.
+
+This rebuilds the `.rbxmx` plugin bundle and deploys it so Studio picks up changes on next restart/reload.

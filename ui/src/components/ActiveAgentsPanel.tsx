@@ -11,6 +11,7 @@ import { ExternalLink } from "lucide-react";
 import { Identity } from "./Identity";
 import { RunTranscriptView } from "./transcript/RunTranscriptView";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
+import { useAutoScroll } from "../hooks/useAutoScroll";
 
 const MIN_DASHBOARD_RUNS = 4;
 
@@ -89,6 +90,8 @@ function AgentRunCard({
   hasOutput: boolean;
   isActive: boolean;
 }) {
+  const scrollRef = useAutoScroll<HTMLDivElement>([transcript.length]);
+
   return (
     <div className={cn(
       "flex h-[320px] flex-col overflow-hidden rounded-xl border shadow-sm",
@@ -140,7 +143,7 @@ function AgentRunCard({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
         <RunTranscriptView
           entries={transcript}
           density="compact"

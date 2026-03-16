@@ -17,6 +17,11 @@ import { publishVideo, schedulePublish, deleteVideo, publishAllPending } from '.
 import { acquireLibraryClip, loadLibrary, listLibrary, type ClipSpec, type LibraryClip } from './clip-library';
 import type { TrendingTopic, Caption, SceneMatch, PipelineResult } from './types';
 
+function ensureDirs(): void {
+  fs.mkdirSync(CONFIG.outputDir, { recursive: true });
+  fs.mkdirSync(CONFIG.cacheDir, { recursive: true });
+}
+
 function sanitizeFilename(text: string): string {
   return text
     .toLowerCase()
@@ -95,7 +100,7 @@ async function trySceneAlternative(
 
   const altScene: SceneMatch = {
     movieTitle: alt.movieTitle,
-    year: prev.scene.year,
+    year: alt.year || prev.scene.year,
     character: alt.character,
     momentDescription: alt.momentDescription,
     emotionalMatch: prev.scene.emotionalMatch,
@@ -257,8 +262,7 @@ program
   .action(async (options) => {
     console.log('\n🎬 YouTube Shorts Generator\n');
 
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
-    fs.mkdirSync(CONFIG.cacheDir, { recursive: true });
+    ensureDirs();
 
     let topics: TrendingTopic[];
 
@@ -487,7 +491,7 @@ program
   .action(async (topicArg, options) => {
     console.log('\n📝 Caption Brainstorm\n');
 
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
+    ensureDirs();
 
     const topic: TrendingTopic = {
       topic: topicArg,
@@ -557,8 +561,7 @@ program
     console.log(`\n🎬 Finding ${count} Best Clips for Caption #${options.number}\n`);
     console.log(`  "${caption.text}"\n`);
 
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
-    fs.mkdirSync(CONFIG.cacheDir, { recursive: true });
+    ensureDirs();
 
     const useTwitch = options.twitch || process.argv.includes('--twitch');
     const scenes = useTwitch
@@ -654,8 +657,7 @@ program
     console.log(`  Clip:    ${scene.movieTitle} — ${scene.character}`);
     console.log(`  Score:   ${chosen.viralityScore}/100\n`);
 
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
-    fs.mkdirSync(CONFIG.cacheDir, { recursive: true });
+    ensureDirs();
 
     const timestamp = Date.now();
     const slug = sanitizeFilename(caption.topic || caption.text);
@@ -755,7 +757,7 @@ program
 
     if (options.build) {
       console.log('\n📚 Building Clip Library — 5 Iconic Twitch Moments\n');
-      fs.mkdirSync(CONFIG.cacheDir, { recursive: true });
+      ensureDirs();
 
       for (const spec of ICONIC_CLIPS) {
         const existing = loadLibrary().find(c => c.streamer === spec.streamer && c.moment === spec.moment);
@@ -942,11 +944,42 @@ Wholesome but vigilant. Cute but not kawaii. Funny but never trying to be funny.
 - Test: "Would a tired person mutter this to their friend?" If no, kill it.
 - Test: "Does this POINT at the joke or let the viewer DISCOVER it?" If it points, kill it.
 
+### JOKE PLAYBOOK — Recurring Comedy Patterns
+
+These are proven humor archetypes we've discovered. Each caption should lean into at least one:
+
+**1. Stock Footage Sincerity**
+The clip is obviously generic stock footage. The caption narrates it like a deeply personal home recording of someone you know. The more obviously "stock" and corporate the footage looks, the funnier the deadpan familiarity becomes. Don't hide that it's stock footage — that IS the joke.
+Example: A Pixabay puppy on a beach + "he figured it out" = sounds like your dog did something in the backyard.
+
+**2. Anti-Delivery**
+The caption promises or describes something the animal clearly never does. The gap between the narration and reality is the entire joke. Caption says action, animal does nothing. Caption implies speech, animal is silent.
+Example: Parrot sits motionless for 60 seconds + "he tells it like it is" = he never tells anything.
+
+**3. Inanimate Object as Guy**
+Holes, rocks, trees, weather — treat them as creatures with feelings, social lives, and personal history. Use relationship language. "The hole" is a recurring character you check in on, not a feature of the landscape.
+Example: "the hole has been quiet lately" = the hole is a friend who hasn't texted back.
+
+**4. Active Wrong Beliefs**
+The animal isn't just confused — it counted, concluded, and got the wrong answer. It has a confident, specific wrong belief. Passive ignorance ("forgot he had those") is weaker than active error ("thought he had two").
+Example: "he thought he had two" = the cat did leg math and failed.
+
+**5. Longitudinal Relationship**
+"Every time," "sometimes," "lately," "always," "since Tuesday," "for three weeks." You imply a long shared history with this creature that obviously doesn't exist. You've been monitoring this situation.
+Example: "he has been here since Tuesday" = you've been tracking this toad's residency.
+
+**6. Mundane Bureaucracy**
+Narrate animal behavior using workplace or institutional language. Reports, announcements, documentation, management awareness. The animal is an employee or a case file.
+Example: "he has an announcement" = the rooster is conducting a morning briefing.
+
+When writing captions, try to hit 1-2 of these patterns. The best captions often combine them (e.g., Stock Footage Sincerity + Longitudinal Relationship).
+
 ### OUTPUT FORMAT:
 Return a JSON object with a "captions" array of exactly 15 objects:
 - "caption": string (the caption text, 8 words MAX)
 - "mood": string (tired | fond | accepting | concerned | matter-of-fact | deadpan)
 - "why": string (1 sentence — what makes this land)
+- "joke_patterns": array of strings (which patterns from the playbook this caption uses, e.g. ["stock_footage_sincerity", "longitudinal_relationship"])
 - "banger_rating": number (1-10, where 10 = "he thought he had two" tier)
 `;
 
@@ -1205,7 +1238,7 @@ Pick the TOP 10. ${cullyMode ? 'Rank by mundaneness and warmth. Kill anything th
     }
 
     const savePath = path.join(CONFIG.outputDir, `clipfirst_${sanitizeFilename(clip.streamer)}_${clip.id.slice(0, 8)}_${Date.now()}.json`);
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
+    ensureDirs();
     fs.writeFileSync(savePath, JSON.stringify({
       clip,
       grokCaptions,
@@ -1260,7 +1293,7 @@ program
     console.log(`  Source:   ${chosen.source || 'grok'}`);
     console.log(`  Rating:   ${rating}/10\n`);
 
-    fs.mkdirSync(CONFIG.outputDir, { recursive: true });
+    ensureDirs();
 
     const timestamp = Date.now();
     const outputName = `clipfirst_${sanitizeFilename(clip.streamer)}_${timestamp}`;

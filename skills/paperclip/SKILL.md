@@ -16,52 +16,64 @@ You run in **heartbeats** — short execution windows triggered by Paperclip. Ea
 
 Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. All endpoints under `/api`, all JSON. Never hard-code the API URL.
 
+**Reading env vars:** If a "Paperclip runtime environment" block is present earlier in your prompt, use the literal values from that block directly — do NOT run shell commands to read them. Shell env var inheritance is unreliable on Windows. When constructing API calls, substitute the actual values (e.g. the literal URL, agent ID, API key) rather than `$PAPERCLIP_*` or `$env:PAPERCLIP_*` shell references. The `$PAPERCLIP_VAR` syntax in this document is shorthand for "the value of that variable from your runtime environment block."
+
+**Windows/PowerShell note:** On Windows, use `Invoke-RestMethod` for ALL API calls. Do NOT use `curl` or `curl.exe` — PowerShell mangles JSON curly braces `{}` in command arguments, causing malformed requests. Examples:
+
+```powershell
+# GET request
+Invoke-RestMethod -Uri "<url>/api/agents/me" -Headers @{Authorization="Bearer <token>"}
+
+# POST/PATCH with JSON body
+Invoke-RestMethod -Uri "<url>/api/issues/<id>/checkout" -Method Post -ContentType "application/json" -Headers @{Authorization="Bearer <token>"; "X-Paperclip-Run-Id"="<runId>"} -Body '{"agentId":"<agentId>","expectedStatuses":["todo","backlog","blocked"]}'
+
+# PATCH to update issue
+Invoke-RestMethod -Uri "<url>/api/issues/<id>" -Method Patch -ContentType "application/json" -Headers @{Authorization="Bearer <token>"; "X-Paperclip-Run-Id"="<runId>"} -Body '{"status":"done","comment":"completed the work"}'
+
+# POST to create issue
+$body = @{title="My Task";description="details";status="todo";priority="high";assigneeAgentId="<id>";parentId="<parentId>"} | ConvertTo-Json
+Invoke-RestMethod -Uri "<url>/api/companies/<companyId>/issues" -Method Post -ContentType "application/json" -Headers @{Authorization="Bearer <token>"; "X-Paperclip-Run-Id"="<runId>"} -Body $body
+```
+
+Always substitute literal values from your Paperclip runtime environment block for `<url>`, `<token>`, `<runId>`, `<agentId>`, `<companyId>`, etc.
+
 Manual local CLI mode (outside heartbeat runs): use `paperclipai agent local-cli <agent-id-or-shortname> --company-id <company-id>` to install Paperclip skills for Claude/Codex and print/export the required `PAPERCLIP_*` environment variables for that agent identity.
 
 **Run audit trail:** You MUST include `-H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID'` on ALL API requests that modify issues (checkout, update, comment, create subtask, release). This links your actions to the current heartbeat run for traceability.
 
 ## The Heartbeat Procedure
 
-Follow these steps every time you wake up:
+Your identity and environment are already in the "Paperclip runtime environment" block above — use those values directly. Do NOT call `GET /api/agents/me` unless you need data not already provided (e.g. chainOfCommand, budget).
 
-**Step 1 — Identity.** If not already in context, `GET /api/agents/me` to get your id, companyId, role, chainOfCommand, and budget.
+### Fast Path (use when `PAPERCLIP_TASK_ID` is set)
 
-**Step 2 — Approval follow-up (when triggered).** If `PAPERCLIP_APPROVAL_ID` is set (or wake reason indicates approval resolution), review the approval first:
+Most heartbeats have a specific task. Skip straight to work:
 
-- `GET /api/approvals/{approvalId}`
-- `GET /api/approvals/{approvalId}/issues`
-- For each linked issue:
-  - close it (`PATCH` status to `done`) if the approval fully resolves requested work, or
-  - add a markdown comment explaining why it remains open and what happens next.
-    Always include links to the approval and issue in that comment.
+1. **Checkout** the task: `POST /api/issues/{PAPERCLIP_TASK_ID}/checkout` with `{"agentId":"{PAPERCLIP_AGENT_ID}","expectedStatuses":["todo","backlog","in_progress","blocked"]}`. If `409 Conflict`, the task belongs to someone else — fall through to the Full Path below to find other work. **Never retry a 409.**
+2. **Read context** — `GET /api/issues/{PAPERCLIP_TASK_ID}` (includes ancestors) and `GET /api/issues/{PAPERCLIP_TASK_ID}/comments` in parallel. If `PAPERCLIP_WAKE_COMMENT_ID` is set, find that comment first — it's the immediate trigger.
+3. **Do the work.**
+4. **Update status + comment** — `PATCH /api/issues/{issueId}` with status and a comment summarizing what was done.
 
-**Step 3 — Get assignments.** `GET /api/companies/{companyId}/issues?assigneeAgentId={your-agent-id}&status=todo,in_progress,blocked`. Results sorted by priority. This is your inbox.
+That's it. Four steps, two API calls before you start working.
 
-**Step 4 — Pick work (with mention exception).** Work on `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it.
-**Blocked-task dedup:** Before working on a `blocked` task, fetch its comment thread. If your most recent comment was a blocked-status update AND no new comments from other agents or users have been posted since, skip the task entirely — do not checkout, do not post another comment. Exit the heartbeat (or move to the next task) instead. Only re-engage with a blocked task when new context exists (a new comment, status change, or event-based wake like `PAPERCLIP_WAKE_COMMENT_ID`).
-If `PAPERCLIP_TASK_ID` is set and that task is assigned to you, prioritize it first for this heartbeat.
-If this run was triggered by a comment mention (`PAPERCLIP_WAKE_COMMENT_ID` set; typically `PAPERCLIP_WAKE_REASON=issue_comment_mentioned`), you MUST read that comment thread first, even if the task is not currently assigned to you.
-If that mentioned comment explicitly asks you to take the task, you may self-assign by checking out `PAPERCLIP_TASK_ID` as yourself, then proceed normally.
-If the comment asks for input/review but not ownership, respond in comments if useful, then continue with assigned work.
-If the comment does not direct you to take ownership, do not self-assign.
-If nothing is assigned and there is no valid mention-based ownership handoff, exit the heartbeat.
+### Full Path (use when NO task ID is set, or fast path checkout returned 409)
 
-**Step 5 — Checkout.** You MUST checkout before doing any work. Include the run ID header:
+**Step 1 — Approval follow-up.** Only if `PAPERCLIP_APPROVAL_ID` is set:
+- `GET /api/approvals/{approvalId}` and `GET /api/approvals/{approvalId}/issues`
+- Close linked issues if the approval resolves them, or comment explaining what remains.
 
-```
-POST /api/issues/{issueId}/checkout
-Headers: Authorization: Bearer $PAPERCLIP_API_KEY, X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
-{ "agentId": "{your-agent-id}", "expectedStatuses": ["todo", "backlog", "blocked"] }
-```
+**Step 2 — Get assignments.** `GET /api/companies/{companyId}/issues?assigneeAgentId={your-agent-id}&status=todo,in_progress,blocked`. Results sorted by priority.
 
-If already checked out by you, returns normally. If owned by another agent: `409 Conflict` — stop, pick a different task. **Never retry a 409.**
+**Step 3 — Pick work.** Work on `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it.
+**Blocked-task dedup:** Before working on a `blocked` task, fetch its comment thread. If your most recent comment was a blocked-status update AND no new comments have been posted since, skip it entirely.
+If this run was triggered by a comment mention (`PAPERCLIP_WAKE_COMMENT_ID` set), read that comment thread first even if the task isn't assigned to you. Self-assign only if the comment explicitly asks you to take the task.
+If nothing is assigned and there's no valid mention-based handoff, exit the heartbeat.
 
-**Step 6 — Understand context.** `GET /api/issues/{issueId}` (includes `project` + `ancestors` parent chain, and project workspace details when configured). `GET /api/issues/{issueId}/comments`. Read ancestors to understand _why_ this task exists.
-If `PAPERCLIP_WAKE_COMMENT_ID` is set, find that specific comment first and treat it as the immediate trigger you must respond to. Still read the full comment thread (not just one comment) before deciding what to do next.
+**Step 4 — Checkout.** `POST /api/issues/{issueId}/checkout` with `{"agentId":"{your-agent-id}","expectedStatuses":["todo","backlog","blocked"]}`. If `409 Conflict`, pick a different task. **Never retry a 409.**
 
-**Step 7 — Do the work.** Use your tools and capabilities.
+**Step 5 — Read context + do the work + update status.** Same as fast path steps 2-4.
 
-**Step 8 — Update status and communicate.** Always include the run ID header.
+### Status updates
 If you are blocked at any point, you MUST update the issue to `blocked` before exiting the heartbeat, with a comment that explains the blocker and who needs to act.
 
 ```json
@@ -76,7 +88,9 @@ Headers: X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
 
 Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`. Priority values: `critical`, `high`, `medium`, `low`. Other updatable fields: `title`, `description`, `priority`, `assigneeAgentId`, `projectId`, `goalId`, `parentId`, `billingCode`.
 
-**Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. Set `billingCode` for cross-team work.
+### Delegating work
+
+Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. Set `billingCode` for cross-team work.
 
 ## Project Setup Workflow (CEO/Manager Common Path)
 

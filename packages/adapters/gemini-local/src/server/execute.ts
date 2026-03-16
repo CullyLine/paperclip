@@ -46,14 +46,33 @@ function resolveGeminiBillingType(env: Record<string, string>): "api" | "subscri
 }
 
 function renderPaperclipEnvNote(env: Record<string, string>): string {
-  const paperclipKeys = Object.keys(env)
-    .filter((key) => key.startsWith("PAPERCLIP_"))
+  const SENSITIVE_SUFFIXES = ["_KEY", "_TOKEN", "_SECRET", "_PASSWORD"];
+  const paperclipEntries = Object.entries(env)
+    .filter(([key]) => key.startsWith("PAPERCLIP_"))
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (paperclipEntries.length === 0) return "";
+  const nonPaperclipSecrets = Object.entries(env)
+    .filter(
+      ([key]) =>
+        !key.startsWith("PAPERCLIP_") &&
+        SENSITIVE_SUFFIXES.some((s) => key.endsWith(s)),
+    )
+    .map(([key]) => key)
     .sort();
-  if (paperclipKeys.length === 0) return "";
+  const lines = paperclipEntries.map(([key, value]) => `  ${key}=${value}`);
+  const secretsNote =
+    nonPaperclipSecrets.length > 0
+      ? `\nUser-configured secrets also available via shell env (PowerShell: $env:VAR_NAME): ${nonPaperclipSecrets.join(", ")}`
+      : "";
   return [
-    "Paperclip runtime note:",
-    `The following PAPERCLIP_* environment variables are available in this run: ${paperclipKeys.join(", ")}`,
-    "Do not assume these variables are missing without checking your shell environment.",
+    "Paperclip runtime environment — use these values directly in API calls, do NOT run shell commands to read them:",
+    ...lines,
+    secretsNote,
+    "",
+    "IMPORTANT (Windows/PowerShell):",
+    "- Shell environment variables may NOT be inherited by subprocesses. Use the literal values above instead of $env: references.",
+    "- Use Invoke-RestMethod for ALL API calls. Do NOT use curl or curl.exe — PowerShell mangles JSON curly braces {} in command arguments.",
+    "- For non-Paperclip secrets (user-configured API keys), use PowerShell syntax: $env:VAR_NAME",
     "",
     "",
   ].join("\n");

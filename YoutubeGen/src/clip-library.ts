@@ -28,7 +28,11 @@ function ensureLibraryDir(): void {
 export function loadLibrary(): LibraryClip[] {
   ensureLibraryDir();
   if (!fs.existsSync(LIBRARY_INDEX)) return [];
-  return JSON.parse(fs.readFileSync(LIBRARY_INDEX, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(LIBRARY_INDEX, 'utf-8'));
+  } catch {
+    return [];
+  }
 }
 
 function saveLibrary(clips: LibraryClip[]): void {

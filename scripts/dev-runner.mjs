@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
@@ -154,6 +154,30 @@ async function maybePreflightMigrations() {
   }
 }
 
+function killOrphanedNodeOnPort(port) {
+  if (process.platform !== "win32") return;
+  try {
+    const netstat = execSync("netstat -ano", { encoding: "utf-8" });
+    const listeners = netstat.split("\n").filter(
+      (l) => l.includes(`:${port} `) && l.toUpperCase().includes("LISTEN"),
+    );
+    for (const line of listeners) {
+      const pid = line.trim().split(/\s+/).pop();
+      if (!pid || pid === "0") continue;
+      try {
+        const info = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+          encoding: "utf-8",
+        });
+        if (info.includes("node.exe")) {
+          process.kill(Number(pid), "SIGTERM");
+          console.log(`[preflight] killed orphaned node.exe (pid=${pid}) on port ${port}`);
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+await killOrphanedNodeOnPort(3100);
 await maybePreflightMigrations();
 
 if (mode === "watch") {
