@@ -1,0 +1,5 @@
+require(script.Parent:WaitForChild("HubController"))
+require(script.Parent:WaitForChild("PreRoundController"))
+require(script.Parent:WaitForChild("DriverHUD"))
+require(script.Parent:WaitForChild("EndRoundController"))
+require(script.Parent:WaitForChild("ChassisClient"))
