@@ -85,6 +85,46 @@ Read enough ancestor/comment context to understand _why_ the task exists and wha
 
 **Step 5 — Read context + do the work + update status.** Same as fast path steps 2-4.
 
+### Self-Governing Mode (CEO/Leadership only)
+
+If your inbox is empty (no assigned tasks after Step 2-3 of the Full Path), check your own metadata:
+
+`GET /api/agents/me` → check `metadata.selfGoverning`
+
+Self-governing is active when `metadata.selfGoverning` is an object with an `expiresAt` field containing an ISO 8601 timestamp that is **in the future**. Compare against the current time. If `expiresAt` is in the past, self-governing has expired — treat it as disabled and exit the heartbeat.
+
+If self-governing is active, do NOT exit the heartbeat. Instead, proactively find and create work:
+
+1. **Review project state** — list all company issues (`GET /api/companies/{companyId}/issues`), check which are done, in progress, blocked, or stale.
+2. **Check agent statuses** — `GET /api/companies/{companyId}/agents` to see who is idle, who is working, who is blocked.
+3. **Identify next steps** — based on your AGENTS.md milestones, project goals, and current progress, determine what work needs to happen next.
+4. **Create tickets** — `POST /api/companies/{companyId}/issues` with clear titles, descriptions, `assigneeAgentId`, `priority`, and `parentId` where appropriate. Assign to the right agent based on their capabilities and current workload.
+5. **Balance workload** — don't overload one agent. Spread work across the team. Check who's idle and give them something to do.
+6. **Comment on your own activity** — create a self-assigned "sprint planning" or "project review" ticket and comment on it with your findings and delegation decisions, so there's a record of what you did.
+
+If `selfGoverning` is missing, `null`, not an object, or `expiresAt` is in the past, follow the normal rule: no assignments = exit the heartbeat.
+
+Self-governing agents should focus on high-impact work: unblocking others, advancing milestones, filling gaps. Avoid creating busywork.
+
+### Giga Mode (continuous work within a single heartbeat)
+
+After completing a task (marking it `done` or `in_review`), check your metadata:
+
+`GET /api/agents/me` → check `metadata.gigaMode`
+
+If `gigaMode` is `true`, do NOT exit the heartbeat. Instead:
+
+1. **Re-check your inbox** — `GET /api/agents/me/inbox-lite` or the full issues query.
+2. **If tasks remain**, pick the next one (highest priority first) and loop back to checkout → work → update.
+3. **If inbox is empty**, exit the heartbeat normally (or enter Self-Governing Mode if you're the CEO and that's enabled).
+
+**Safety limits:**
+- Stop after **5 completed tasks** in a single heartbeat to avoid runaway sessions. Exit and let the next heartbeat pick up the rest.
+- If a task takes you to `blocked` status, do NOT count it as completed — exit the heartbeat after updating the blocker, don't loop.
+- If you hit errors or unexpected states, exit the heartbeat cleanly.
+
+If `gigaMode` is `false`, `null`, or not present, complete one task and exit as normal.
+
 ### Status updates
 If you are blocked at any point, you MUST update the issue to `blocked` before exiting the heartbeat, with a comment that explains the blocker and who needs to act.
 
@@ -147,8 +187,8 @@ Access control:
 
 - **Always checkout** before working. Never PATCH to `in_progress` manually.
 - **Never retry a 409.** The task belongs to someone else.
-- **Never look for unassigned work.**
-- **Self-assign only for explicit @-mention handoff.** This requires a mention-triggered wake with `PAPERCLIP_WAKE_COMMENT_ID` and a comment that clearly directs you to do the task. Use checkout (never direct assignee patch). Otherwise, no assignments = exit.
+- **Never look for unassigned work** — unless Self-Governing Mode is enabled for your agent (see above). Self-governing agents may proactively create and assign work when their inbox is empty.
+- **Self-assign only for explicit @-mention handoff** (or Self-Governing Mode). Outside self-governing, this requires a mention-triggered wake with `PAPERCLIP_WAKE_COMMENT_ID` and a comment that clearly directs you to do the task. Use checkout (never direct assignee patch). Otherwise, no assignments = exit.
 - **Honor "send it back to me" requests from board users.** If a board/user asks for review handoff (e.g. "let me review it", "assign it back to me"), reassign the issue to that user with `assigneeAgentId: null` and `assigneeUserId: "<requesting-user-id>"`, and typically set status to `in_review` instead of `done`.
   Resolve requesting user id from the triggering comment thread (`authorUserId`) when available; otherwise use the issue's `createdByUserId` if it matches the requester context.
 - **Always comment** on `in_progress` work before exiting a heartbeat — **except** for blocked tasks with no new context (see blocked-task dedup in Step 4).

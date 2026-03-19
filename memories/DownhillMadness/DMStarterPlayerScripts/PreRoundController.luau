@@ -24,6 +24,8 @@ local countdownRemaining = 10
 
 local cachedVehicles: { any } = {}
 local cachedPlayerLevel: number = 0
+local cachedPlayerScrap: number = 0
+local cachedUnlockedVehicles: { string } = { "all_rounder" }
 
 local function waitForRemote(name: string, class: string): any
 	local remote = ReplicatedStorage:FindFirstChild(name)
@@ -40,13 +42,20 @@ local preRoundStartRemote: RemoteEvent = nil :: any
 local preRoundEndRemote: RemoteEvent = nil :: any
 local preRoundCountdownRemote: RemoteEvent = nil :: any
 
+local function isVehicleUnlocked(vehicleId: string): boolean
+	for _, id in cachedUnlockedVehicles do
+		if id == vehicleId then return true end
+	end
+	return false
+end
+
 local function refreshAllCardStates()
 	if not screen then return end
 	for _, vData in cachedVehicles do
-		local isUnlocked = vData.unlockLevel <= cachedPlayerLevel
+		local unlocked = isVehicleUnlocked(vData.id)
 		if vData.id == selectedVehicle then
 			screen:setVehicleState(vData.id, "selected")
-		elseif not isUnlocked then
+		elseif not unlocked then
 			screen:setVehicleState(vData.id, "locked")
 		else
 			screen:setVehicleState(vData.id, "available")
@@ -68,18 +77,35 @@ local function loadVehicleTemplate(vehicleId: string): Model?
 	return template :: Model?
 end
 
+local function tryPurchaseVehicle(vehicleId: string)
+	local purchaseRemote = ReplicatedStorage:FindFirstChild("PurchaseVehicle") :: RemoteFunction?
+	if not purchaseRemote then return end
+
+	local ok, result = pcall(function()
+		return purchaseRemote:InvokeServer(vehicleId)
+	end)
+
+	if ok and result and result.success then
+		table.insert(cachedUnlockedVehicles, vehicleId)
+		if result.scrap then
+			cachedPlayerScrap = result.scrap
+		end
+		screen:buildCards(cachedVehicles, cachedPlayerLevel, cachedPlayerScrap, cachedUnlockedVehicles)
+		selectVehicle(vehicleId)
+	end
+end
+
 local function selectVehicle(vehicleId: string)
 	if isConfirmed then return end
 
-	-- Check unlock
-	local isUnlocked = false
-	for _, vData in cachedVehicles do
-		if vData.id == vehicleId then
-			isUnlocked = vData.unlockLevel <= cachedPlayerLevel
-			break
-		end
+	-- Handle purchase: prefix
+	if string.sub(vehicleId, 1, 9) == "purchase:" then
+		local realId = string.sub(vehicleId, 10)
+		tryPurchaseVehicle(realId)
+		return
 	end
-	if not isUnlocked then return end
+
+	if not isVehicleUnlocked(vehicleId) then return end
 
 	-- Toggle deselect
 	if vehicleId == selectedVehicle then
@@ -138,7 +164,7 @@ local function onVehicleUpdate(selections: { [string]: number }, confirmed: { [n
 	refreshAllCardStates()
 end
 
-local function onPreRoundStart(duration: number, vehicles: { any }, playerLevel: number?)
+local function onPreRoundStart(duration: number, vehicles: { any }, playerLevel: number?, playerScrap: number?, unlockedVehicles: { string }?)
 	selectedVehicle = nil
 	isConfirmed = false
 	countdownActive = true
@@ -148,6 +174,10 @@ local function onPreRoundStart(duration: number, vehicles: { any }, playerLevel:
 		cachedVehicles = vehicles
 	end
 	cachedPlayerLevel = playerLevel or 0
+	cachedPlayerScrap = playerScrap or 0
+	if unlockedVehicles then
+		cachedUnlockedVehicles = unlockedVehicles
+	end
 
 	if not screen then
 		screen = PreRoundScreen.new(playerGui)
@@ -161,12 +191,9 @@ local function onPreRoundStart(duration: number, vehicles: { any }, playerLevel:
 	screen.vehicleNameLabel.Visible = false
 	screen.vehicleTaglineLabel.Visible = false
 	screen.vehicleDescLabel.Visible = false
-	screen:buildCards(cachedVehicles, cachedPlayerLevel)
+	screen:buildCards(cachedVehicles, cachedPlayerLevel, cachedPlayerScrap, cachedUnlockedVehicles)
 	screen:setCountdown(countdownRemaining)
 	screen:setVisible(true)
-
-	-- Auto-select saved preference if server pre-selected for us
-	-- The server fires VehicleUpdate shortly after Start with pre-selections
 end
 
 local function onPreRoundEnd()

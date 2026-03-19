@@ -93,6 +93,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 - **Downforce + drag** — speed-dependent aerodynamic forces.
 - **Counter-steer assist** — automatic slide correction for controllable drifting.
 - **Vehicle destruction watcher** — auto-cleanup via `AncestryChanged` when the server destroys the vehicle between rounds.
+- **Collision damage system** — detects impacts via Touched on CollisionShell + velocity-delta detection. Calculates damage based on impact speed, applies to nearest BodyPanel(s). Panels darken as health decreases, detach at 0 HP (unanchor + impulse + fade-destroy). Windshield shatters into glass fragments. Losing panels increases drag and reduces max speed; below 20% total health = "wrecked" state with heavy penalties. Owning client drives damage calculation; server validates and broadcasts to others.
 - **Custom chase camera** — smooth follow behind vehicle with velocity look-ahead, speed-dependent FOV (70→85), impact shake on deceleration, rear-view (hold C / mobile button), and right-click free-look orbit. Activates automatically when driving starts, deactivates on stop.
 
 ### Design Decisions
@@ -104,7 +105,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | Invisible template wheels + server-replicated visual wheels | Avoids wheel jitter; owning client drives locally, server relays to others via WheelReplication RemoteEvent |
 | Flat drive force (no gears/RPM) | Simpler, more predictable, less to break |
 | `CenterOfMass` part with high density | Lowers effective center of mass for stability without changing chassis size |
-| Damage-ready `BodyPanels` with Health attributes | Future destruction system can detach/destroy individual panels |
+| Damage-ready `BodyPanels` with Health attributes | Destruction system detaches/destroys individual panels based on collision damage |
 
 ## File Reference
 
@@ -120,6 +121,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | `ProfileManager.server.luau` | ProfileService wrapper — handles player data (load/save/get/set), input settings persistence via GetInputSettings/SetInputSettings RemoteFunctions |
 | `TemplateVehicleBuilder.server.luau` | Runs once at server start — builds the modular damage-ready TemplateVehicle in ReplicatedStorage (see Vehicle Hierarchy above) |
 | `WheelReplication.server.luau` | Receives visual-wheel CFrame updates from owning clients (~10 Hz) and writes them to replicated VisualWheels parts inside the vehicle model. Rate-limited server-side at ~12 Hz per player |
+| `DamageReplication.server.luau` | Receives damage reports from owning clients, validates them, applies health to authoritative model, broadcasts to other clients. Handles panel detach (unanchor + impulse + fade destroy) and windshield shatter (glass shard particles). Rate-limited at ~15 Hz per player |
 
 ### DMStarterPlayerScripts (StarterPlayerScripts)
 
@@ -138,8 +140,9 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `DownhillConfig.luau` | **Active** | Flat tuning table for the chassis — suspension, steering, drive force, traction, surface friction, aero, air control, gravity |
+| `DownhillConfig.luau` | **Active** | Flat tuning table for the chassis — suspension, steering, drive force, traction, surface friction, aero, air control, gravity, damage thresholds |
 | `DownhillPhysics.luau` | **Active** | Pure computation functions — suspension spring-damper, anti-roll, lateral grip (tire model), steering, airborne torques, downforce, drag, angular damping |
+| `DamageSystem.luau` | **Active** | Shared damage calculations — impact damage from velocity, nearest-panel lookup, health tracking, damage tint, wrecked state detection, handling penalty computation, server-side validation |
 | `ChassisConfig.luau` | ⚠️ Deprecated | Original Polaris-based tuning config. Not used — kept as reference |
 | `ChassisPhysics.luau` | ⚠️ Deprecated | Original Polaris physics functions. Not used — kept as reference |
 | `Drivetrain.luau` | ⚠️ Deprecated | Original gear shifting / RPM simulation. Not used — flat force model replaced it |
@@ -183,5 +186,6 @@ Settings are loaded from the server via `GetInputSettings` RemoteFunction when d
 
 ## Known Limitations / Future Work
 
-- **Destruction system** — BodyPanels have Health attributes but no damage/detachment logic yet
 - **Settings UI** — mobile input settings need an in-game settings panel (currently only settable via code/API)
+- **Damage VFX** — particle effects for sparks/smoke on impact not yet implemented
+- **Damage HUD** — no on-screen damage indicator or vehicle health bar yet

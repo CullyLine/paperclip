@@ -34,7 +34,7 @@ export type HubScreenInstance = {
 	showNotification: (self: HubScreenInstance, text: string) -> (),
 	updatePlayerList: (self: HubScreenInstance, players: { any }, queuedCount: number, totalCount: number) -> (),
 	setPlayButtonQueued: (self: HubScreenInstance, isQueued: boolean) -> (),
-	setProgression: (self: HubScreenInstance, level: number, xp: number, xpNeeded: number) -> (),
+	setProgression: (self: HubScreenInstance, level: number, xp: number, xpNeeded: number, scrap: number?) -> (),
 }
 
 local function createButton(
@@ -349,6 +349,19 @@ function HubScreen.new(playerGui: PlayerGui): HubScreenInstance
 	xpFillCorner.CornerRadius = UDim.new(0, 5)
 	xpFillCorner.Parent = xpBarFill
 
+	local scrapLabel = Instance.new("TextLabel")
+	scrapLabel.Name = "Scrap"
+	scrapLabel.Size = UDim2.new(0, 120, 0, 24)
+	scrapLabel.Position = UDim2.new(1, -12, 0, 6)
+	scrapLabel.AnchorPoint = Vector2.new(1, 0)
+	scrapLabel.BackgroundTransparency = 1
+	scrapLabel.Font = Enum.Font.GothamBold
+	scrapLabel.TextColor3 = Color3.fromRGB(200, 180, 60)
+	scrapLabel.TextSize = 16
+	scrapLabel.TextXAlignment = Enum.TextXAlignment.Right
+	scrapLabel.Text = "0 Scrap"
+	scrapLabel.Parent = progressPanel
+
 	-- ═══════════════════════════════════════════════════════════════
 	-- INSTANCE METHODS
 	-- ═══════════════════════════════════════════════════════════════
@@ -470,13 +483,16 @@ function HubScreen.new(playerGui: PlayerGui): HubScreenInstance
 		end
 	end
 
-	function self:setProgression(level: number, xp: number, xpNeeded: number)
+	function self:setProgression(level: number, xp: number, xpNeeded: number, scrap: number?)
 		levelLabel.Text = "LVL " .. level
 		xpTextLabel.Text = xp .. " / " .. xpNeeded .. " XP"
 		local fraction = if xpNeeded > 0 then math.clamp(xp / xpNeeded, 0, 1) else 0
 		TweenService:Create(xpBarFill, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Size = UDim2.new(fraction, 0, 1, 0),
 		}):Play()
+		if scrap ~= nil then
+			scrapLabel.Text = tostring(scrap) .. " Scrap"
+		end
 	end
 
 	return self

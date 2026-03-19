@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate, useLocation } from "@/lib/router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentsApi, type OrgNode } from "../api/agents";
 import { heartbeatsApi } from "../api/heartbeats";
 import { useCompany } from "../context/CompanyContext";
@@ -17,7 +17,7 @@ import { relativeTime, cn, agentRouteRef, agentUrl } from "../lib/utils";
 import { PageTabBar } from "../components/PageTabBar";
 import { Tabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Bot, Plus, List, GitBranch, SlidersHorizontal } from "lucide-react";
+import { Bot, Plus, List, GitBranch, SlidersHorizontal, Pause, Play } from "lucide-react";
 import { AGENT_ROLE_LABELS, type Agent } from "@paperclipai/shared";
 
 const adapterLabels: Record<string, string> = {
@@ -65,6 +65,7 @@ export function Agents() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isMobile } = useSidebar();
+  const queryClient = useQueryClient();
   const pathSegment = location.pathname.split("/").pop() ?? "all";
   const tab: FilterTab = (pathSegment === "all" || pathSegment === "active" || pathSegment === "paused" || pathSegment === "error") ? pathSegment : "all";
   const [view, setView] = useState<"list" | "org">("org");
@@ -112,6 +113,27 @@ export function Agents() {
     for (const a of agents ?? []) map.set(a.id, a);
     return map;
   }, [agents]);
+
+  const liveAgents = useMemo(
+    () => (agents ?? []).filter((a) => a.status !== "terminated"),
+    [agents],
+  );
+  const allPaused = liveAgents.length > 0 && liveAgents.every((a) => a.status === "paused");
+
+  const toggleAll = useMutation({
+    mutationFn: async () => {
+      const action = allPaused ? "resume" : "pause";
+      const fn = action === "pause" ? agentsApi.pause : agentsApi.resume;
+      const targets = allPaused
+        ? liveAgents
+        : liveAgents.filter((a) => a.status !== "paused");
+      await Promise.allSettled(targets.map((a) => fn(a.id, selectedCompanyId ?? undefined)));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.org(selectedCompanyId!) });
+    },
+  });
 
   useEffect(() => {
     setBreadcrumbs([{ label: "Agents" }]);
@@ -196,6 +218,26 @@ export function Agents() {
                 <GitBranch className="h-3.5 w-3.5" />
               </button>
             </div>
+          )}
+          {liveAgents.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => toggleAll.mutate()}
+              disabled={toggleAll.isPending}
+            >
+              {allPaused ? (
+                <>
+                  <Play className="h-3.5 w-3.5 mr-1.5" />
+                  {toggleAll.isPending ? "Resuming…" : "Resume All"}
+                </>
+              ) : (
+                <>
+                  <Pause className="h-3.5 w-3.5 mr-1.5" />
+                  {toggleAll.isPending ? "Pausing…" : "Pause All"}
+                </>
+              )}
+            </Button>
           )}
           <Button size="sm" variant="outline" onClick={openNewAgent}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />

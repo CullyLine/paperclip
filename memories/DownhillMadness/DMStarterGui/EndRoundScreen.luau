@@ -37,7 +37,15 @@ export type EndRoundScreenInstance = {
 	setResults: (self: EndRoundScreenInstance, results: { any }) -> (),
 	setTimer: (self: EndRoundScreenInstance, remaining: number) -> (),
 	setReadyState: (self: EndRoundScreenInstance, isReady: boolean) -> (),
-	showXPAward: (self: EndRoundScreenInstance, data: { xpGained: number, placement: number, leveledUp: boolean, newLevel: number }) -> (),
+	showXPAward: (self: EndRoundScreenInstance, data: {
+		xpGained: number,
+		xpBreakdown: any?,
+		scrapGained: number?,
+		placement: number,
+		leveledUp: boolean,
+		newLevel: number,
+		scrapBonuses: number?,
+	}) -> (),
 }
 
 local function formatTime(seconds: number): string

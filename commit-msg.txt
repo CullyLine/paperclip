@@ -1,10 +1,16 @@
-chore: add company assets — Tide Pools, Polaris chassis, media, 3D models
+feat: self-governing timer, giga mode, pause-all button + agent M1 work
 
-- NewRobloxGame (Tide Pools): M0 design doc, Aquarium + SunnyShore prototypes,
-  creature art (11 species), lore bible, economy benchmarks, competitive analysis
-- RobloxChassis (Polaris): reference chassis system, car/wheel models, build tools
-- Media: animal video projects (raw + final), concept art frames
-- Models: car body + wheel iterations (concept -> prototype -> production -> final)
-- Village: Blender scene + multi-angle renders
-- Agents: CEO agent config
-- Tools: decimate.py, scene-render.py
+UI:
+- Add Pause All / Resume All button to Agents page
+- Add Self-Governing Mode timer control to Dashboard (countdown timer with preset durations)
+- Add Giga Mode toggle to Dashboard (agents work through inbox continuously)
+
+Skill:
+- Add Self-Governing Mode to paperclip skill (CEO proactively finds/creates work when inbox empty)
+- Add Giga Mode to paperclip skill (agents loop through tasks within a single heartbeat, cap of 5)
+- Self-governing uses timed expiry (expiresAt) instead of boolean toggle
+
+Agent configs:
+- Update CEO AGENTS.md with self-governing timer instructions
+- Agent-produced M1 progress: damage system, progression system, vehicle registry updates,
+  profile manager expansion, pre-round UI, chase camera improvements

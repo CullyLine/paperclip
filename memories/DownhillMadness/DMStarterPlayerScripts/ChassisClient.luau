@@ -26,9 +26,13 @@ local InputManager = require(script.Parent:WaitForChild("InputManager"))
 local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
 local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
 local DownhillPhysics = require(DMRep:WaitForChild("DownhillPhysics"))
+local DamageSystem = require(DMRep:WaitForChild("DamageSystem"))
 
 local cachedInputSettings: { [string]: any }? = nil
 local wheelReplicationEvent: RemoteEvent = nil
+local damageReportEvent: RemoteEvent = nil
+local damageBroadcastEvent: RemoteEvent = nil
+local panelDetachedEvent: RemoteEvent = nil
 local REPLICATION_INTERVAL = 1 / 10
 local lastReplicationTime = 0
 
@@ -55,8 +59,18 @@ local rayParams: RaycastParams = nil
 local currentSteerAngle = 0
 local physicsConn: RBXScriptConnection? = nil
 local vehicleDestroyConn: RBXScriptConnection? = nil
+local collisionConn: RBXScriptConnection? = nil
+local damageBroadcastConn: RBXScriptConnection? = nil
+local panelDetachedConn: RBXScriptConnection? = nil
 local isActive = false
 local savedGravity: number = 196.2
+
+local damageState: any = nil
+local lastVelocity: Vector3 = Vector3.zero
+local DAMAGE_COOLDOWN = 0.15
+local lastDamageTime = 0
+local windshieldShakeTimer = 0
+local windshieldShakeActive = false
 
 local DEBUG_ENABLED = true
 local debugTimer = 0
@@ -177,6 +191,121 @@ local function updateVisualWheels()
 end
 
 ----------------------------------------------------------------
+-- Damage system helpers
+----------------------------------------------------------------
+
+local function applyDamageTint(panelPart: BasePart, healthRatio: number, panelState: any)
+	if not panelPart or not panelPart.Parent then return end
+	if not cfg then return end
+
+	local tinted = DamageSystem.getDamageTint(
+		healthRatio,
+		panelState.originalColor,
+		cfg.damageColorDark
+	)
+	panelPart.Color = tinted
+end
+
+local function handleLocalDamage(collisionPoint: Vector3, impactSpeed: number)
+	if not vehicleModel or not cfg or not damageState then return end
+	if not root or not root.Parent then return end
+
+	local now = tick()
+	if (now - lastDamageTime) < DAMAGE_COOLDOWN then return end
+
+	local damage = DamageSystem.calculateImpactDamage(impactSpeed, cfg)
+	if damage <= 0 then return end
+
+	lastDamageTime = now
+
+	local panelsModel = vehicleModel:FindFirstChild("BodyPanels")
+	if not panelsModel then return end
+
+	local nearestPanels = DamageSystem.findNearestPanels(collisionPoint, panelsModel, 2)
+
+	for i, panelName in nearestPanels do
+		local panelDamage = if i == 1 then damage * 0.7 else damage * 0.3
+		local result = DamageSystem.applyDamage(damageState, panelName, panelDamage)
+		if not result then continue end
+
+		local panel = panelsModel:FindFirstChild(panelName)
+		if panel and panel:IsA("BasePart") then
+			local ps = damageState.panels[panelName]
+			if ps then
+				local ratio = ps.health / ps.maxHealth
+				applyDamageTint(panel, ratio, ps)
+			end
+
+			if result.destroyed and panelName == "Windshield" then
+				windshieldShakeActive = true
+				windshieldShakeTimer = cfg.windshieldShakeDuration
+			end
+		end
+
+		if damageReportEvent then
+			damageReportEvent:FireServer({
+				panelName = panelName,
+				damage = panelDamage,
+				impactSpeed = impactSpeed,
+			})
+		end
+	end
+end
+
+local function setupCollisionDetection()
+	if not vehicleModel then return end
+
+	local body = vehicleModel:FindFirstChild("Body")
+	if not body then return end
+
+	local shell = body:FindFirstChild("CollisionShell")
+	if not shell or not shell:IsA("BasePart") then return end
+
+	collisionConn = shell.Touched:Connect(function(otherPart: BasePart)
+		if not isActive or not root or not root.Parent then return end
+		if not otherPart or not otherPart.Parent then return end
+
+		if otherPart:IsDescendantOf(vehicleModel) then return end
+		if player.Character and otherPart:IsDescendantOf(player.Character) then return end
+
+		local velocity = root.AssemblyLinearVelocity
+		local impactSpeed = velocity.Magnitude
+
+		if impactSpeed < (cfg and cfg.damageSpeedThreshold or 30) then return end
+
+		handleLocalDamage(shell.Position, impactSpeed)
+	end)
+end
+
+local function setupDamageBroadcastListener()
+	damageBroadcastEvent = ReplicatedStorage:FindFirstChild("DamageBroadcast") :: RemoteEvent
+	if not damageBroadcastEvent then return end
+
+	damageBroadcastConn = damageBroadcastEvent.OnClientEvent:Connect(function(data)
+		if typeof(data) ~= "table" then return end
+		if not data.vehicleName or not data.panelName then return end
+
+		if vehicleModel and data.vehicleName == vehicleModel.Name then return end
+
+		local vehicle = workspace:FindFirstChild(data.vehicleName)
+		if not vehicle then return end
+
+		local panelsModel = vehicle:FindFirstChild("BodyPanels")
+		if not panelsModel then return end
+
+		local panel = panelsModel:FindFirstChild(data.panelName)
+		if not panel or not panel:IsA("BasePart") then return end
+
+		if data.newHealth and data.maxHealth and data.maxHealth > 0 then
+			local ratio = data.newHealth / data.maxHealth
+			local originalColor = { panel.Color.R, panel.Color.G, panel.Color.B }
+			local darkColor = { 0.15, 0.12, 0.10 }
+			panel.Color = DamageSystem.getDamageTint(ratio, originalColor, darkColor)
+		end
+	end)
+end
+
+----------------------------------------------------------------
 -- Physics step (Heartbeat — after physics sim)
 ----------------------------------------------------------------
 
@@ -195,6 +324,32 @@ local function physicsStep(dt: number)
 	local forwardSpeed = velocity:Dot(rootCF.LookVector)
 	local mass = root.AssemblyMass
 	if mass <= 0 then return end
+
+	-- Velocity-delta collision detection (supplements Touched)
+	local velDelta = (lastVelocity - velocity).Magnitude
+	lastVelocity = velocity
+	if velDelta > (cfg.damageSpeedThreshold * 0.8) and damageState then
+		local now = tick()
+		if (now - lastDamageTime) >= DAMAGE_COOLDOWN then
+			handleLocalDamage(rootCF.Position, velDelta)
+		end
+	end
+
+	-- Windshield shake decay
+	if windshieldShakeActive then
+		windshieldShakeTimer -= dt
+		if windshieldShakeTimer <= 0 then
+			windshieldShakeActive = false
+			windshieldShakeTimer = 0
+		end
+	end
+
+	-- Damage penalties
+	local damagePenalties = if damageState
+		then DamageSystem.calculatePenalties(damageState, cfg)
+		else { speedMultiplier = 1.0, extraDrag = 0.0 }
+	local effectiveMaxSpeed = cfg.maxSpeed * damagePenalties.speedMultiplier
+	local effectiveDragCoeff = cfg.dragCoeff + damagePenalties.extraDrag
 
 	-- Counter-steer assist
 	local lateralVel = velocity:Dot(rootCF.RightVector)
@@ -297,7 +452,7 @@ local function physicsStep(dt: number)
 			end
 			root:ApplyImpulseAtPosition(wheelRight * latForce * dt, attachPt)
 
-			local atLimit = math.abs(forwardSpeed) > cfg.maxSpeed
+			local atLimit = math.abs(forwardSpeed) > effectiveMaxSpeed
 			if not atLimit then
 				if math.abs(throttle) > 0.05 then
 					local force = if throttle > 0 then cfg.driveForce else cfg.reverseForce
@@ -370,7 +525,7 @@ local function physicsStep(dt: number)
 		root:ApplyImpulseAtPosition(df, rootCF.Position)
 	end
 
-	local dragImp = DownhillPhysics.drag(velocity, speed, cfg.dragCoeff, dt)
+	local dragImp = DownhillPhysics.drag(velocity, speed, effectiveDragCoeff, dt)
 	if dragImp.Magnitude > 0 then
 		root:ApplyImpulseAtPosition(dragImp, rootCF.Position)
 	end
@@ -450,7 +605,17 @@ local function startDriving(vModel: Model)
 	end
 
 	wheelReplicationEvent = ReplicatedStorage:FindFirstChild("WheelReplication") :: RemoteEvent
+	damageReportEvent = ReplicatedStorage:FindFirstChild("DamageReport") :: RemoteEvent
 	lastReplicationTime = 0
+
+	local panelsModel = vModel:FindFirstChild("BodyPanels")
+	if panelsModel then
+		damageState = DamageSystem.buildState(panelsModel)
+	end
+	lastVelocity = Vector3.zero
+	lastDamageTime = 0
+	windshieldShakeActive = false
+	windshieldShakeTimer = 0
 
 	if not cachedInputSettings then
 		local getSettings = ReplicatedStorage:FindFirstChild("GetInputSettings") :: RemoteFunction?
@@ -471,6 +636,9 @@ local function startDriving(vModel: Model)
 
 	physicsConn = RunService.Heartbeat:Connect(physicsStep)
 
+	setupCollisionDetection()
+	setupDamageBroadcastListener()
+
 	-- Auto-cleanup if the vehicle is destroyed (e.g. round ends, server calls cleanup)
 	vehicleDestroyConn = root.AncestryChanged:Connect(function(_, newParent)
 		if isActive and (not newParent or not root:IsDescendantOf(workspace)) then
@@ -489,6 +657,18 @@ stopDriving = function()
 		vehicleDestroyConn:Disconnect()
 		vehicleDestroyConn = nil
 	end
+	if collisionConn then
+		collisionConn:Disconnect()
+		collisionConn = nil
+	end
+	if damageBroadcastConn then
+		damageBroadcastConn:Disconnect()
+		damageBroadcastConn = nil
+	end
+	if panelDetachedConn then
+		panelDetachedConn:Disconnect()
+		panelDetachedConn = nil
+	end
 	if input then
 		input:destroy()
 		input = nil
@@ -496,6 +676,10 @@ stopDriving = function()
 
 	destroyVisualWheels()
 	wheels = {}
+	damageState = nil
+	lastVelocity = Vector3.zero
+	windshieldShakeActive = false
+	windshieldShakeTimer = 0
 
 	if player.Character then
 		for _, desc in player.Character:GetDescendants() do
@@ -506,6 +690,9 @@ stopDriving = function()
 	workspace.Gravity = savedGravity
 
 	wheelReplicationEvent = nil
+	damageReportEvent = nil
+	damageBroadcastEvent = nil
+	panelDetachedEvent = nil
 	vehicleModel = nil
 	cfg = nil
 	root = nil
@@ -568,6 +755,18 @@ end
 
 function ChassisClient.getConfig(): any
 	return cfg
+end
+
+function ChassisClient.getDamageState(): any
+	return damageState
+end
+
+function ChassisClient.isWrecked(): boolean
+	return damageState ~= nil and damageState.isWrecked
+end
+
+function ChassisClient.getWindshieldShake(): (boolean, number)
+	return windshieldShakeActive, windshieldShakeTimer
 end
 
 return ChassisClient

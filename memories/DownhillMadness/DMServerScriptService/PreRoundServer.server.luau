@@ -172,7 +172,9 @@ local function startPreRound()
 	local allVehicles = VehicleRegistry.getAll()
 	for _, p in ipairs(Players:GetPlayers()) do
 		local level = if PM then PM.GetLevel(p) else 0
-		preRoundStartEvent:FireClient(p, COUNTDOWN_DURATION, allVehicles, level)
+		local scrap = if PM then PM.GetScrap(p) else 0
+		local unlockedVehicles = if PM then PM.GetUnlockedVehicles(p) else { "all_rounder" }
+		preRoundStartEvent:FireClient(p, COUNTDOWN_DURATION, allVehicles, level, scrap, unlockedVehicles)
 	end
 
 	for i = COUNTDOWN_DURATION, 1, -1 do

@@ -69,6 +69,20 @@ export type Config = {
 
 	-- Max suspension force as multiple of weight-per-wheel
 	maxSuspForceMul: number,
+
+	-- Damage system
+	damageSpeedThreshold: number,
+	damageMultiplier: number,
+	panelDetachImpulse: number,
+	panelFadeTime: number,
+	windshieldShakeIntensity: number,
+	windshieldShakeDuration: number,
+	wreckedHealthPercent: number,
+	wreckedSpeedPenalty: number,
+	wreckedDragPenalty: number,
+	panelLossDragPerPanel: number,
+	panelLossSpeedPerPanel: number,
+	damageColorDark: { number },
 }
 
 local DEFAULT: Config = {
@@ -125,6 +139,19 @@ local DEFAULT: Config = {
 	counterSteerFactor = 0.35,
 	gravity = 120,
 	maxSuspForceMul = 3.0,
+
+	damageSpeedThreshold = 30,
+	damageMultiplier = 0.5,
+	panelDetachImpulse = 80,
+	panelFadeTime = 4.0,
+	windshieldShakeIntensity = 0.6,
+	windshieldShakeDuration = 1.5,
+	wreckedHealthPercent = 0.20,
+	wreckedSpeedPenalty = 0.35,
+	wreckedDragPenalty = 0.06,
+	panelLossDragPerPanel = 0.008,
+	panelLossSpeedPerPanel = 0.04,
+	damageColorDark = { 0.15, 0.12, 0.10 },
 }
 
 function DownhillConfig.new(overrides: { [string]: any }?): Config

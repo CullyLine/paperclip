@@ -53,7 +53,7 @@ export type PreRoundScreenInstance = {
 	setConfirmEnabled: (self: PreRoundScreenInstance, enabled: boolean) -> (),
 	setVehicleModel: (self: PreRoundScreenInstance, model: Model?) -> (),
 	setVehicleInfo: (self: PreRoundScreenInstance, displayName: string, tagline: string, description: string) -> (),
-	buildCards: (self: PreRoundScreenInstance, vehicles: { any }, playerLevel: number) -> (),
+	buildCards: (self: PreRoundScreenInstance, vehicles: { any }, playerLevel: number, playerScrap: number?, unlockedVehicles: { string }?) -> (),
 }
 
 local function createStatBar(statName: string, value: number, parent: Frame, layoutOrder: number): Frame
@@ -102,7 +102,7 @@ local function createStatBar(statName: string, value: number, parent: Frame, lay
 	return row
 end
 
-local function createVehicleCard(vehicleData: any, isUnlocked: boolean, parent: Frame): Frame
+local function createVehicleCard(vehicleData: any, isUnlocked: boolean, parent: Frame, canPurchase: boolean?): Frame
 	local card = Instance.new("Frame")
 	card.Name = "Card_" .. vehicleData.id
 	card.BackgroundColor3 = if isUnlocked then AVAILABLE_COLOR else LOCKED_COLOR
@@ -164,26 +164,52 @@ local function createVehicleCard(vehicleData: any, isUnlocked: boolean, parent: 
 		createStatBar(STAT_LABELS[i], vehicleData.stats[key], statsFrame, i)
 	end
 
-	-- Lock overlay
+	-- Lock overlay / Purchase info
 	if not isUnlocked then
 		local lockOverlay = Instance.new("Frame")
 		lockOverlay.Name = "LockOverlay"
-		lockOverlay.Size = UDim2.new(1, 0, 0, 20)
-		lockOverlay.Position = UDim2.new(0, 0, 1, -28)
+		lockOverlay.Size = UDim2.new(1, 0, 0, 34)
+		lockOverlay.Position = UDim2.new(0, 0, 1, -42)
 		lockOverlay.BackgroundTransparency = 1
 		lockOverlay.Parent = card
 
+		local lockText = "LVL " .. vehicleData.unlockLevel
+		if vehicleData.scrapCost and vehicleData.scrapCost > 0 then
+			lockText = lockText .. " + " .. vehicleData.scrapCost .. " Scrap"
+		end
+
 		local lockIcon = Instance.new("TextLabel")
 		lockIcon.Name = "LockText"
-		lockIcon.Size = UDim2.new(1, -16, 1, 0)
+		lockIcon.Size = UDim2.new(1, -16, 0, 14)
 		lockIcon.Position = UDim2.new(0, 8, 0, 0)
 		lockIcon.BackgroundTransparency = 1
 		lockIcon.Font = Enum.Font.GothamBold
 		lockIcon.TextColor3 = Color3.fromRGB(200, 160, 60)
 		lockIcon.TextSize = 12
 		lockIcon.TextXAlignment = Enum.TextXAlignment.Left
-		lockIcon.Text = "UNLOCK AT LEVEL " .. vehicleData.unlockLevel
+		lockIcon.Text = lockText
 		lockIcon.Parent = lockOverlay
+
+		if canPurchase then
+			local buyBtn = Instance.new("TextButton")
+			buyBtn.Name = "BuyButton"
+			buyBtn.Size = UDim2.new(0, 70, 0, 18)
+			buyBtn.Position = UDim2.new(1, -8, 0, 0)
+			buyBtn.AnchorPoint = Vector2.new(1, 0)
+			buyBtn.BackgroundColor3 = Color3.fromRGB(200, 180, 60)
+			buyBtn.BackgroundTransparency = 0.2
+			buyBtn.BorderSizePixel = 0
+			buyBtn.Font = Enum.Font.GothamBold
+			buyBtn.TextColor3 = Color3.fromRGB(20, 20, 24)
+			buyBtn.TextSize = 11
+			buyBtn.Text = "BUY"
+			buyBtn.ZIndex = 5
+			buyBtn.Parent = lockOverlay
+
+			local buyCorner = Instance.new("UICorner")
+			buyCorner.CornerRadius = UDim.new(0, 4)
+			buyCorner.Parent = buyBtn
+		end
 	end
 
 	-- Click detector
@@ -607,7 +633,7 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 		vehicleDescLabel.Visible = true
 	end
 
-	function self:buildCards(vehicles: { any }, playerLevel: number)
+	function self:buildCards(vehicles: { any }, playerLevel: number, playerScrap: number?, unlockedVehicles: { string }?)
 		-- Clear existing cards
 		for _, child in cardContainer:GetChildren() do
 			if child:IsA("Frame") then
@@ -617,12 +643,22 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 		vehicleCards = {}
 		self.vehicleCards = vehicleCards
 
+		local scrap = playerScrap or 0
+		local unlockedSet: { [string]: boolean } = {}
+		if unlockedVehicles then
+			for _, id in unlockedVehicles do
+				unlockedSet[id] = true
+			end
+		end
+
 		for i, vData in vehicles do
-			local isUnlocked = vData.unlockLevel <= playerLevel
-			local card = createVehicleCard(vData, isUnlocked, cardContainer)
+			local isUnlocked = unlockedSet[vData.id] or (not unlockedVehicles and vData.unlockLevel <= playerLevel)
+			local meetsLevel = vData.unlockLevel <= playerLevel
+			local meetsScrap = scrap >= (vData.scrapCost or 0)
+			local canPurchase = (not isUnlocked) and meetsLevel and meetsScrap and (vData.scrapCost or 0) > 0
+			local card = createVehicleCard(vData, isUnlocked, cardContainer, canPurchase)
 			card.LayoutOrder = i
 
-			-- Calculate card height: fill available space evenly
 			card.Size = UDim2.new(1, 0, 1 / #vehicles, -(10 * (#vehicles - 1) / #vehicles))
 
 			vehicleCards[vData.id] = card
@@ -634,6 +670,17 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 						onVehicleSelected:Fire(vData.id)
 					end
 				end)
+			end
+
+			-- Purchase button
+			local lockOverlay = card:FindFirstChild("LockOverlay")
+			if lockOverlay then
+				local buyBtn = lockOverlay:FindFirstChild("BuyButton") :: TextButton?
+				if buyBtn and canPurchase then
+					buyBtn.Activated:Connect(function()
+						onVehicleSelected:Fire("purchase:" .. vData.id)
+					end)
+				end
 			end
 
 			-- Hover effect for unlocked cards

@@ -55,7 +55,7 @@ local function refreshProgression()
 				return (remote :: RemoteFunction):InvokeServer()
 			end)
 			if ok and data and hub then
-				hub:setProgression(data.level, data.xp, data.xpNeeded)
+				hub:setProgression(data.level, data.xp, data.xpNeeded, data.scrap)
 			end
 		end
 	end)
@@ -158,6 +158,16 @@ local despawnEvent = waitForRemoteEvent("DespawnCharacter")
 if despawnEvent then
 	despawnEvent.OnClientEvent:Connect(function()
 		setHubCamera()
+	end)
+end
+
+-- Daily login reward notification
+local dailyLoginEvent = ReplicatedStorage:WaitForChild("DailyLoginReward", 5)
+if dailyLoginEvent then
+	(dailyLoginEvent :: RemoteEvent).OnClientEvent:Connect(function(data: any)
+		if data and data.rewarded and hub then
+			hub:showNotification("Daily Login Day " .. data.day .. ": +" .. data.scrap .. " Scrap!")
+		end
 	end)
 end
 

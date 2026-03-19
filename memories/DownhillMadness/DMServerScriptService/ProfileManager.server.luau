@@ -8,6 +8,7 @@ local PROFILE_TEMPLATE = {
 	level = 1,
 	xp = 0,
 	totalXp = 0,
+	scrap = 0,
 	unlockedVehicles = { "all_rounder" },
 	selectedVehicle = "all_rounder",
 	racesPlayed = 0,
@@ -21,6 +22,18 @@ local PROFILE_TEMPLATE = {
 		durability = 0,
 		recovery = 0,
 	},
+	equippedCosmetics = {
+		paint = "",
+		wheels = "",
+		trail = "",
+		plate = "",
+		horn = "",
+		wrap = "",
+	},
+	activeBoosts = {},
+	dailyLoginDay = 0,
+	lastLoginDate = "",
+	gamePasses = {},
 	cosmetics = {},
 	currency = 0,
 	settings = {},
@@ -113,10 +126,10 @@ function ProfileManager.GetXP(player: Player): (number, number)
 	return xp, xpForLevel(level)
 end
 
-function ProfileManager.AwardXP(player: Player, amount: number): { leveledUp: boolean, newLevel: number, xpGained: number }
+function ProfileManager.AwardXP(player: Player, amount: number): { leveledUp: boolean, newLevel: number, xpGained: number, scrapBonuses: number }
 	local profile = Profiles[player]
 	if not profile then
-		return { leveledUp = false, newLevel = 1, xpGained = 0 }
+		return { leveledUp = false, newLevel = 1, xpGained = 0, scrapBonuses = 0 }
 	end
 
 	local data = profile.Data
@@ -124,27 +137,25 @@ function ProfileManager.AwardXP(player: Player, amount: number): { leveledUp: bo
 	data.totalXp = (data.totalXp or 0) + amount
 
 	local leveledUp = false
-	local startLevel = data.level or 1
+	local totalScrapBonus = 0
+
+	local ProgressionSystem = require(DMReplicatedStorage:WaitForChild("ProgressionSystem"))
 
 	while data.xp >= xpForLevel(data.level) do
 		data.xp = data.xp - xpForLevel(data.level)
 		data.level = data.level + 1
 		leveledUp = true
 
-		local VehicleRegistry = require(DMReplicatedStorage:WaitForChild("VehicleRegistry"))
-		for _, vDef in VehicleRegistry.getAll() do
-			if vDef.unlockLevel <= data.level then
-				if not table.find(data.unlockedVehicles, vDef.id) then
-					table.insert(data.unlockedVehicles, vDef.id)
-				end
-			end
-		end
+		local scrapBonus = ProgressionSystem.levelUpScrapBonus(data.level)
+		data.scrap = (data.scrap or 0) + scrapBonus
+		totalScrapBonus += scrapBonus
 	end
 
 	return {
 		leveledUp = leveledUp,
 		newLevel = data.level,
 		xpGained = amount,
+		scrapBonuses = totalScrapBonus,
 	}
 end
 
@@ -180,6 +191,69 @@ function ProfileManager.RecordRace(player: Player, placement: number, finished: 
 	if finished then
 		data.racesFinished = (data.racesFinished or 0) + 1
 	end
+end
+
+function ProfileManager.GetScrap(player: Player): number
+	return ProfileManager.GetValue(player, "scrap") or 0
+end
+
+function ProfileManager.AwardScrap(player: Player, amount: number)
+	local profile = Profiles[player]
+	if not profile then return end
+	profile.Data.scrap = (profile.Data.scrap or 0) + amount
+end
+
+function ProfileManager.PurchaseVehicle(player: Player, vehicleId: string): (boolean, string?)
+	local profile = Profiles[player]
+	if not profile then return false, "No profile" end
+
+	if ProfileManager.IsVehicleUnlocked(player, vehicleId) then
+		return false, "Already unlocked"
+	end
+
+	local VehicleRegistry = require(DMReplicatedStorage:WaitForChild("VehicleRegistry"))
+	local vDef = VehicleRegistry.getById(vehicleId)
+	if not vDef then return false, "Unknown vehicle" end
+
+	local data = profile.Data
+	if (data.level or 1) < vDef.unlockLevel then
+		return false, "Reach Level " .. vDef.unlockLevel
+	end
+	if (data.scrap or 0) < vDef.scrapCost then
+		return false, "Need " .. vDef.scrapCost .. " Scrap"
+	end
+
+	data.scrap = data.scrap - vDef.scrapCost
+	if not data.unlockedVehicles then
+		data.unlockedVehicles = { "all_rounder" }
+	end
+	table.insert(data.unlockedVehicles, vehicleId)
+
+	return true, nil
+end
+
+function ProfileManager.ProcessDailyLogin(player: Player): { rewarded: boolean, day: number, scrap: number }
+	local profile = Profiles[player]
+	if not profile then
+		return { rewarded = false, day = 0, scrap = 0 }
+	end
+
+	local data = profile.Data
+	local today = os.date("!%Y-%m-%d")
+
+	if data.lastLoginDate == today then
+		return { rewarded = false, day = data.dailyLoginDay or 0, scrap = 0 }
+	end
+
+	local newDay = ((data.dailyLoginDay or 0) % 7) + 1
+	data.dailyLoginDay = newDay
+	data.lastLoginDate = today
+
+	local ProgressionSystem = require(DMReplicatedStorage:WaitForChild("ProgressionSystem"))
+	local reward = ProgressionSystem.getDailyReward(newDay)
+	data.scrap = (data.scrap or 0) + reward
+
+	return { rewarded = true, day = newDay, scrap = reward }
 end
 
 function ProfileManager.XpForLevel(level: number): number
@@ -223,6 +297,19 @@ local function onPlayerAdded(player: Player)
 
 	Profiles[player] = profile
 
+	local loginResult = ProfileManager.ProcessDailyLogin(player)
+	if loginResult.rewarded then
+		task.defer(function()
+			local dailyLoginRewardEvent = ReplicatedStorage:FindFirstChild("DailyLoginReward")
+			if not dailyLoginRewardEvent then
+				dailyLoginRewardEvent = Instance.new("RemoteEvent")
+				dailyLoginRewardEvent.Name = "DailyLoginReward"
+				dailyLoginRewardEvent.Parent = ReplicatedStorage
+			end
+			(dailyLoginRewardEvent :: RemoteEvent):FireClient(player, loginResult)
+		end)
+	end
+
 	ProfileLoaded:Fire(player)
 end
 
@@ -250,10 +337,12 @@ getProgressionRemote.Parent = ReplicatedStorage
 getProgressionRemote.OnServerInvoke = function(player: Player)
 	local xp, xpNeeded = ProfileManager.GetXP(player)
 	local level = ProfileManager.GetLevel(player)
+	local scrap = ProfileManager.GetScrap(player)
 	return {
 		level = level,
 		xp = xp,
 		xpNeeded = xpNeeded,
+		scrap = scrap,
 	}
 end
 
@@ -295,4 +384,20 @@ setInputSettingsRemote.OnServerInvoke = function(player: Player, newSettings: { 
 	end
 	profile.Data.settings = settings
 	return true
+end
+
+-- RemoteFunction for vehicle purchase
+local purchaseVehicleRemote = Instance.new("RemoteFunction")
+purchaseVehicleRemote.Name = "PurchaseVehicle"
+purchaseVehicleRemote.Parent = ReplicatedStorage
+
+purchaseVehicleRemote.OnServerInvoke = function(player: Player, vehicleId: any)
+	if type(vehicleId) ~= "string" then return { success = false, reason = "Invalid vehicle ID" } end
+
+	local success, reason = ProfileManager.PurchaseVehicle(player, vehicleId)
+	return {
+		success = success,
+		reason = reason,
+		scrap = ProfileManager.GetScrap(player),
+	}
 end

@@ -20,13 +20,11 @@ local RunService = game:GetService("RunService")
 
 local VehicleSpawner = require(script.Parent:WaitForChild("VehicleSpawner"))
 
+local DMReplicatedStorage = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
+local ProgressionSystem = require(DMReplicatedStorage:WaitForChild("ProgressionSystem"))
+
 local COUNTDOWN_SECONDS = 3
 local RACE_DURATION = 120
-
--- XP awards
-local XP_BASE = 50
-local XP_PLACEMENT_MULTIPLIER = { [1] = 3.0, [2] = 2.0, [3] = 1.5 }
-local XP_FINISH_BONUS = 25
 
 -- ═══════════════════════════════════════════════════════════════════
 -- EVENTS
@@ -71,6 +69,8 @@ type PlayerResult = {
 	progress: number,
 	placement: number,
 	xpAwarded: number?,
+	scrapAwarded: number?,
+	xpBreakdown: any?,
 }
 
 local isRaceActive = false
@@ -81,6 +81,10 @@ local playerFinishTimes: { [number]: number } = {}
 local finishedPlayers: { [number]: boolean } = {}
 local finishConnection: RBXScriptConnection? = nil
 local heartbeatConnection: RBXScriptConnection? = nil
+
+local playerStartPositions: { [number]: Vector3 } = {}
+local playerDamageTaken: { [number]: number } = {}
+local playerPanelsDestroyed: { [number]: number } = {}
 
 local startY = 0
 local finishY = 0
@@ -213,31 +217,53 @@ end
 -- XP AWARD
 -- ═══════════════════════════════════════════════════════════════════
 
-local function awardXP(results: { PlayerResult })
+local function calculateDistanceTraveled(player: Player): number
+	local startPos = playerStartPositions[player.UserId]
+	if not startPos then return 0 end
+	local sv = VehicleSpawner.getVehicleForPlayer(player)
+	if sv and sv.chassis and sv.chassis.Parent then
+		return (sv.chassis.Position - startPos).Magnitude
+	end
+	return 0
+end
+
+local function awardProgression(results: { PlayerResult })
 	local PM = _G.ProfileManager
 	if not PM then return end
 
 	for _, result in results do
 		if not result.player or not result.player:IsDescendantOf(Players) then continue end
 
-		local xp = XP_BASE
-		local multiplier = XP_PLACEMENT_MULTIPLIER[result.placement] or 1.0
-		xp = math.floor(xp * multiplier)
+		local raceStats: ProgressionSystem.RaceStats = {
+			placement = result.placement,
+			finished = result.finishTime ~= nil,
+			distanceTraveled = calculateDistanceTraveled(result.player),
+			panelsDestroyed = playerPanelsDestroyed[result.player.UserId] or 0,
+			damageTaken = playerDamageTaken[result.player.UserId] or 0,
+			airtimeTricks = 0,
+			driftTricks = 0,
+			nearMissTricks = 0,
+		}
 
-		if result.finishTime then
-			xp = xp + XP_FINISH_BONUS
-		end
+		local xpBreakdown = ProgressionSystem.calculateXP(raceStats)
+		local scrap = ProgressionSystem.calculateScrap(result.placement, raceStats.finished)
 
-		result.xpAwarded = xp
+		result.xpAwarded = xpBreakdown.total
+		result.scrapAwarded = scrap
+		result.xpBreakdown = xpBreakdown
 
-		local awardResult = PM.AwardXP(result.player, xp)
+		local awardResult = PM.AwardXP(result.player, xpBreakdown.total)
+		PM.AwardScrap(result.player, scrap)
 		PM.RecordRace(result.player, result.placement, result.finishTime ~= nil)
 
 		xpAwardEvent:FireClient(result.player, {
-			xpGained = xp,
+			xpGained = xpBreakdown.total,
+			xpBreakdown = xpBreakdown,
+			scrapGained = scrap,
 			placement = result.placement,
 			leveledUp = awardResult.leveledUp,
 			newLevel = awardResult.newLevel,
+			scrapBonuses = awardResult.scrapBonuses,
 		})
 	end
 end
@@ -288,7 +314,7 @@ local function endRace()
 
 	local results = buildFinalResults()
 
-	awardXP(results)
+	awardProgression(results)
 
 	VehicleSpawner.cleanup()
 
@@ -313,9 +339,14 @@ local function startRace(players: { Player }, playerVehicles: { [number]: string
 	playerProgress = {}
 	playerFinishTimes = {}
 	finishedPlayers = {}
+	playerStartPositions = {}
+	playerDamageTaken = {}
+	playerPanelsDestroyed = {}
 
 	for _, player in racePlayers do
 		playerProgress[player.UserId] = 0
+		playerDamageTaken[player.UserId] = 0
+		playerPanelsDestroyed[player.UserId] = 0
 	end
 
 	local spawnedVehicles = VehicleSpawner.spawnVehicles(racePlayers, playerVehicles)
@@ -342,6 +373,13 @@ local function startRace(players: { Player }, playerVehicles: { [number]: string
 	end
 
 	VehicleSpawner.unlockAll()
+
+	for _, player in racePlayers do
+		local sv = VehicleSpawner.getVehicleForPlayer(player)
+		if sv and sv.chassis then
+			playerStartPositions[player.UserId] = sv.chassis.Position
+		end
+	end
 
 	isRaceActive = true
 	raceStartTime = tick()
@@ -398,6 +436,31 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	if checkAllFinished() then
 		endRace()
 	end
+end)
+
+-- Track damage stats from DamageReplication for XP calculations
+local panelDestroyedEvent = ReplicatedStorage:FindFirstChild("PanelDestroyed")
+if not panelDestroyedEvent then
+	panelDestroyedEvent = Instance.new("BindableEvent")
+	panelDestroyedEvent.Name = "PanelDestroyed"
+	panelDestroyedEvent.Parent = ReplicatedStorage
+end
+
+(panelDestroyedEvent :: BindableEvent).Event:Connect(function(attackerUserId: number, _panelName: string)
+	if not isRaceActive then return end
+	playerPanelsDestroyed[attackerUserId] = (playerPanelsDestroyed[attackerUserId] or 0) + 1
+end)
+
+local damageDealtEvent = ReplicatedStorage:FindFirstChild("DamageDealt")
+if not damageDealtEvent then
+	damageDealtEvent = Instance.new("BindableEvent")
+	damageDealtEvent.Name = "DamageDealt"
+	damageDealtEvent.Parent = ReplicatedStorage
+end
+
+(damageDealtEvent :: BindableEvent).Event:Connect(function(victimUserId: number, damage: number)
+	if not isRaceActive then return end
+	playerDamageTaken[victimUserId] = (playerDamageTaken[victimUserId] or 0) + damage
 end)
 
 print("[RoundController] Initialized — waiting for StartRace event")

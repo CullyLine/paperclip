@@ -44,6 +44,7 @@ export type VehicleDef = {
 	flavorText: string,
 	stats: VehicleStats,
 	unlockLevel: number,
+	scrapCost: number,
 	buildSpec: VehicleBuildSpec,
 	physicsOverrides: PhysicsOverrides,
 }
@@ -57,6 +58,7 @@ local VEHICLES: { VehicleDef } = {
 		flavorText = "It's not boring. It's reliable. There's a difference.",
 		stats = { speed = 6, handling = 6, weight = 6, durability = 6 },
 		unlockLevel = 0,
+		scrapCost = 0,
 		buildSpec = {
 			chassisSize = Vector3.new(10, 3, 18),
 			chassisDensity = 1.5,
@@ -107,6 +109,7 @@ local VEHICLES: { VehicleDef } = {
 		flavorText = "Speed has never killed anyone. Suddenly stopping, that's what gets you.",
 		stats = { speed = 9, handling = 7, weight = 3, durability = 3 },
 		unlockLevel = 5,
+		scrapCost = 500,
 		buildSpec = {
 			chassisSize = Vector3.new(10.5, 2.5, 20),
 			chassisDensity = 1.0,
@@ -161,6 +164,7 @@ local VEHICLES: { VehicleDef } = {
 		flavorText = "Other cars have crumple zones. This one has a bull bar.",
 		stats = { speed = 4, handling = 4, weight = 9, durability = 9 },
 		unlockLevel = 10,
+		scrapCost = 1200,
 		buildSpec = {
 			chassisSize = Vector3.new(12, 4, 19),
 			chassisDensity = 2.0,
@@ -253,6 +257,12 @@ function VehicleRegistry.isUnlocked(vehicleId: string, level: number): boolean
 	local v = vehicleById[vehicleId]
 	if not v then return false end
 	return v.unlockLevel <= level
+end
+
+function VehicleRegistry.getScrapCost(vehicleId: string): number
+	local v = vehicleById[vehicleId]
+	if not v then return 0 end
+	return v.scrapCost
 end
 
 function VehicleRegistry.getVehicleIds(): { string }

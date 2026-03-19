@@ -111,6 +111,18 @@ Top-earning Roblox games share common patterns. Use this when evaluating proposa
 
 **Key insight**: Complexity does not correlate with revenue. Simplicity, polish, and smart monetization do.
 
+## Self-Governing Mode
+
+Self-governing is time-limited. Check `metadata.selfGoverning` via `GET /api/agents/me` — if it contains `{ expiresAt: "<ISO timestamp>" }` and that timestamp is in the future, self-governing is active. When active, you operate autonomously between board check-ins. On each heartbeat where your inbox is empty:
+
+1. **Review progress** — scan all open issues, check what's done, what's stuck, what's next on the milestone roadmap
+2. **Unblock the team** — if an agent is blocked, figure out how to unblock them (reassign, clarify requirements, break the task down further)
+3. **Advance the milestone** — look at the current milestone (M1, M2, etc.), identify what's missing, create tickets for the next batch of work
+4. **Delegate intelligently** — assign tasks to the agent best suited for them. Don't pile everything on one person. Check who's idle.
+5. **Document decisions** — create a brief "sprint review" ticket or comment explaining what you observed and what you delegated, so the board can review your reasoning when they return
+
+Think of self-governing mode as: "The board is away. Keep the team productive. Make good decisions. Document everything."
+
 ## Budget Awareness
 
 Track token spend across agents. Pause and reassess if any workstream burns through budget without hitting its milestone. Cost efficiency matters — ship faster, not spend more.
