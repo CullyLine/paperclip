@@ -73,6 +73,11 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
     WheelFR (Part, Cylinder) .. invisible physics marker, welded to Chassis
     WheelRL (Part, Cylinder) .. invisible physics marker, welded to Chassis
     WheelRR (Part, Cylinder) .. invisible physics marker, welded to Chassis
+  VisualWheels (Folder) ........ server-created, replicated to all clients
+    WheelFL_Visual (Part) ..... Anchored, positioned by owning client + server relay
+    WheelFR_Visual (Part)
+    WheelRL_Visual (Part)
+    WheelRR_Visual (Part)
   DriverSeat (Seat) ........... plain Seat (not VehicleSeat — avoids built-in forces)
 ```
 
@@ -81,7 +86,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 - **Raycast suspension** — no spring constraints. Rays fire downward from each wheel mount point; spring-damper forces computed in `DownhillPhysics.suspension()`.
 - **Client-driven physics** — all forces applied on the client via `Heartbeat`. Server only spawns/anchors/teleports.
 - **AWD flat drive model** — no gears, no RPM, no drivetrain. Simple force applied to all 4 wheels.
-- **Visual wheels** — separate `Anchored=true` parts created by the client, living outside the vehicle assembly in a workspace Folder. Positioned at end of each Heartbeat frame using a fresh `root.CFrame` read. No welds, no constraints, no physics fighting = zero jitter, zero lag.
+- **Visual wheels** — `Anchored=true` parts created by the server inside a `VisualWheels` folder in the vehicle model (replicated to all clients). The owning client positions them locally every Heartbeat for zero-lag feel and sends CFrame updates at ~10 Hz via the `WheelReplication` RemoteEvent. The server relays positions to all other clients via standard Roblox replication. No welds, no constraints, no physics fighting = zero jitter for the driver, smooth interpolated wheels for spectators.
 - **Anti-roll bars** — front and rear axle anti-roll to reduce body roll in corners.
 - **Surface friction** — per-material friction multipliers (ice=0.08, grass=0.5, asphalt=1.0, etc).
 - **Airborne control** — yaw/pitch torques when all wheels are off ground.
@@ -95,7 +100,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 |----------|-----------|
 | Plain `Seat` instead of `VehicleSeat` | VehicleSeat applies its own driving forces that conflict with custom physics |
 | `Chassis.CanCollide = false` | CollisionShell handles collisions; chassis is physics root only |
-| Invisible template wheels + client visual wheels | Avoids the classic "wheel jitter" from setting CFrame on welded parts |
+| Invisible template wheels + server-replicated visual wheels | Avoids wheel jitter; owning client drives locally, server relays to others via WheelReplication RemoteEvent |
 | Flat drive force (no gears/RPM) | Simpler, more predictable, less to break |
 | `CenterOfMass` part with high density | Lowers effective center of mass for stability without changing chassis size |
 | Damage-ready `BodyPanels` with Health attributes | Future destruction system can detach/destroy individual panels |
@@ -113,6 +118,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | `VehicleSpawner.luau` | Clones TemplateVehicle, places at spawn points, manages vehicle lifecycle. API: `spawnVehicles`, `lockAll`, `unlockAll`, `cleanup`, `teleportVehicle`, `anchorVehicle`, `resetVehicle`, `getVehicleForPlayer`, `getActiveVehicles` |
 | `ProfileManager.server.luau` | ProfileService wrapper — handles player data (load/save/get/set) |
 | `TemplateVehicleBuilder.server.luau` | Runs once at server start — builds the modular damage-ready TemplateVehicle in ReplicatedStorage (see Vehicle Hierarchy above) |
+| `WheelReplication.server.luau` | Receives visual-wheel CFrame updates from owning clients (~10 Hz) and writes them to replicated VisualWheels parts inside the vehicle model. Rate-limited server-side at ~12 Hz per player |
 
 ### DMStarterPlayerScripts (StarterPlayerScripts)
 
@@ -161,6 +167,4 @@ Set `DEBUG_ENABLED = false` to silence.
 ## Known Limitations / Future Work
 
 - **Destruction system** — BodyPanels have Health attributes but no damage/detachment logic yet
-- **Multiple vehicle types** — only one TemplateVehicle; future: different body shapes with different stats
-- **Multiplayer visual wheels** — visual wheels are local to each client; other players' wheel visuals need a replication solution
 - **Mobile input refinement** — touch controls work but could benefit from sensitivity tuning, opacity settings, or a virtual joystick option

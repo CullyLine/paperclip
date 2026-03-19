@@ -19,6 +19,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
+local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
+
 local VehicleSpawner = {}
 
 type SpawnedVehicle = {
@@ -100,6 +103,42 @@ local function findSeat(vehicle: Model): Instance?
 end
 
 ----------------------------------------------------------------
+-- Replicated visual wheels (seen by all clients)
+----------------------------------------------------------------
+
+local function createReplicatedVisualWheels(vehicle: Model, vehicleId: string)
+	local cfg = DownhillConfig.forVehicle(vehicleId)
+	local wheelsModel = vehicle:FindFirstChild("Wheels")
+	if not wheelsModel then return end
+
+	local folder = Instance.new("Folder")
+	folder.Name = "VisualWheels"
+
+	for _, def in cfg.wheels do
+		local templatePart = wheelsModel:FindFirstChild(def.name)
+		if not templatePart or not templatePart:IsA("BasePart") then continue end
+
+		local vis = templatePart:Clone()
+		vis.Name = def.name .. "_Visual"
+		vis.Transparency = 0
+		vis.Anchored = true
+		vis.CanCollide = false
+		vis.CanQuery = false
+		vis.Massless = true
+
+		for _, child in vis:GetChildren() do
+			if child:IsA("WeldConstraint") or child:IsA("Weld") then
+				child:Destroy()
+			end
+		end
+
+		vis.Parent = folder
+	end
+
+	folder.Parent = vehicle
+end
+
+----------------------------------------------------------------
 -- Public API
 ----------------------------------------------------------------
 
@@ -157,6 +196,8 @@ function VehicleSpawner.spawnVehicles(players: { Player }, playerVehicles: { [nu
 
 		local spawnCF = spawnPoint.CFrame * CFrame.new(0, 2, 0)
 		vehicle:PivotTo(spawnCF)
+
+		createReplicatedVisualWheels(vehicle, vehicleId)
 
 		chassis.Anchored = true
 		vehicle.Parent = workspace

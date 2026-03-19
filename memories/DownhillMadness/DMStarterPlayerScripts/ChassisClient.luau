@@ -8,10 +8,11 @@
 	Uses DownhillConfig + DownhillPhysics (no Drivetrain, no LiveValues).
 	All 4 wheels are driven (AWD). Simple flat drive force model.
 
-	Visual wheels are separate Anchored parts living outside the vehicle
-	assembly. Positioned on RenderStepped (not Heartbeat) so they always
-	read the latest chassis CFrame right before the frame renders.
-	No welds, no constraints, no physics — zero jitter.
+	Visual wheels live in a server-created VisualWheels folder inside
+	the vehicle model (replicated to all clients). The owning client
+	positions them locally every Heartbeat for zero-lag feel AND sends
+	CFrame updates at ~10 Hz via the WheelReplication RemoteEvent so
+	the server can relay positions to other clients.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -25,6 +26,10 @@ local InputManager = require(script.Parent:WaitForChild("InputManager"))
 local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
 local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
 local DownhillPhysics = require(DMRep:WaitForChild("DownhillPhysics"))
+
+local wheelReplicationEvent: RemoteEvent = nil
+local REPLICATION_INTERVAL = 1 / 10
+local lastReplicationTime = 0
 
 local input: any = nil
 local vehicleModel: Model = nil
@@ -57,33 +62,11 @@ local debugTimer = 0
 local DEBUG_INTERVAL = 0.5
 
 ----------------------------------------------------------------
--- Visual wheel creation / destruction
+-- Visual wheel helpers
 ----------------------------------------------------------------
 
-local function createVisualWheel(templatePart: BasePart): BasePart
-	local vis = templatePart:Clone()
-	vis.Name = templatePart.Name .. "_Visual"
-	vis.Transparency = 0
-	vis.Anchored = true
-	vis.CanCollide = false
-	vis.CanQuery = false
-	vis.Massless = true
-
-	for _, child in vis:GetChildren() do
-		if child:IsA("WeldConstraint") or child:IsA("Weld") then
-			child:Destroy()
-		end
-	end
-
-	vis.Parent = visualWheelFolder
-	return vis
-end
-
 local function destroyVisualWheels()
-	if visualWheelFolder then
-		visualWheelFolder:Destroy()
-		visualWheelFolder = nil
-	end
+	visualWheelFolder = nil
 end
 
 ----------------------------------------------------------------
@@ -92,11 +75,13 @@ end
 
 local function buildWheels()
 	wheels = {}
-
 	destroyVisualWheels()
-	visualWheelFolder = Instance.new("Folder")
-	visualWheelFolder.Name = "VisualWheels_" .. player.Name
-	visualWheelFolder.Parent = workspace
+
+	visualWheelFolder = vehicleModel:WaitForChild("VisualWheels", 5)
+	if not visualWheelFolder then
+		warn("[ChassisClient] VisualWheels folder not found — server may not have created it")
+		return
+	end
 
 	for _, def in cfg.wheels do
 		local part = wheelsFolder:FindFirstChild(def.name)
@@ -106,7 +91,13 @@ local function buildWheels()
 			continue
 		end
 
-		local visual = createVisualWheel(part)
+		local visualName = def.name .. "_Visual"
+		local visual = visualWheelFolder:FindFirstChild(visualName)
+			or visualWheelFolder:WaitForChild(visualName, 5)
+		if not visual then
+			warn("[ChassisClient] Visual wheel missing: " .. visualName)
+			continue
+		end
 
 		table.insert(wheels, {
 			part = part,
@@ -154,8 +145,13 @@ local function updateVisualWheels()
 	local freshCF = root.CFrame
 	local bodyRot = freshCF - freshCF.Position
 
-	for _, wheel in wheels do
-		if not wheel.visual or not wheel.visual.Parent then continue end
+	local cframes: { CFrame } = {}
+
+	for i, wheel in wheels do
+		if not wheel.visual or not wheel.visual.Parent then
+			cframes[i] = CFrame.identity
+			continue
+		end
 
 		local mountWorld = freshCF:PointToWorldSpace(wheel.def.offset)
 		local visualPos = mountWorld + Vector3.new(0, -wheel.lastSpringLen, 0)
@@ -169,6 +165,13 @@ local function updateVisualWheels()
 		cf = cf * CFrame.Angles(math.rad(wheel.spinAngle), 0, 0)
 
 		wheel.visual.CFrame = cf
+		cframes[i] = cf
+	end
+
+	local now = tick()
+	if wheelReplicationEvent and (now - lastReplicationTime) >= REPLICATION_INTERVAL then
+		lastReplicationTime = now
+		wheelReplicationEvent:FireServer(cframes)
 	end
 end
 
@@ -445,6 +448,9 @@ local function startDriving(vModel: Model)
 		table.insert(rayParams.FilterDescendantsInstances, visualWheelFolder)
 	end
 
+	wheelReplicationEvent = ReplicatedStorage:FindFirstChild("WheelReplication") :: RemoteEvent
+	lastReplicationTime = 0
+
 	input = InputManager.new()
 	currentSteerAngle = 0
 	debugTimer = 0
@@ -486,6 +492,7 @@ stopDriving = function()
 
 	workspace.Gravity = savedGravity
 
+	wheelReplicationEvent = nil
 	vehicleModel = nil
 	cfg = nil
 	root = nil
