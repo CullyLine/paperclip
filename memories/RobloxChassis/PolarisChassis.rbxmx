@@ -1,0 +1,2930 @@
+<?xml version="1.0" encoding="utf-8"?>
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+<Meta name="ExplicitAutoJoints">false</Meta>
+<External>null</External>
+<External>nil</External>
+<Item class="Model" referent="RBX00000001"><Properties><string name="Name">TestVehicle</string><Ref name="PrimaryPart">RBX00000003</Ref></Properties><Item class="Model" referent="RBX00000002"><Properties><string name="Name">Body</string><Ref name="PrimaryPart">RBX00000003</Ref></Properties><Item class="Part" referent="RBX00000003"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>0</X><Y>5</Y><Z>0</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.117647</R><G>0.137255</G><B>0.176471</B></Color3><token name="Material">272</token><string name="Name">CarBody</string><token name="shape">1</token><Vector3 name="size"><X>9</X><Y>3.5</Y><Z>18</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">0.0</float><PhysicalProperties name="CustomPhysicalProperties"><CustomPhysics>true</CustomPhysics><Density>3</Density><Friction>0.3</Friction><Elasticity>0</Elasticity><FrictionWeight>1</FrictionWeight><ElasticityWeight>1</ElasticityWeight></PhysicalProperties></Properties></Item><Item class="Part" referent="RBX00000004"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>0</X><Y>4.5</Y><Z>0</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.501961</R><G>0.501961</G><B>0.501961</B></Color3><token name="Material">272</token><string name="Name">CenterOfMass</string><token name="shape">1</token><Vector3 name="size"><X>1</X><Y>1</Y><Z>1</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">1.0</float></Properties></Item></Item><Item class="Model" referent="RBX00000005"><Properties><string name="Name">Wheels</string><Ref name="PrimaryPart">null</Ref></Properties><Item class="Part" referent="RBX00000006"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>-4.5</X><Y>4.5</Y><Z>6.75</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.098039</R><G>0.098039</G><B>0.117647</B></Color3><token name="Material">272</token><string name="Name">WheelFL</string><token name="shape">2</token><Vector3 name="size"><X>1.5</X><Y>4</Y><Z>4</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">0.0</float></Properties></Item><Item class="Part" referent="RBX00000007"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>4.5</X><Y>4.5</Y><Z>6.75</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.098039</R><G>0.098039</G><B>0.117647</B></Color3><token name="Material">272</token><string name="Name">WheelFR</string><token name="shape">2</token><Vector3 name="size"><X>1.5</X><Y>4</Y><Z>4</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">0.0</float></Properties></Item><Item class="Part" referent="RBX00000008"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>-4.5</X><Y>4.5</Y><Z>-6.75</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.098039</R><G>0.098039</G><B>0.117647</B></Color3><token name="Material">272</token><string name="Name">WheelRL</string><token name="shape">2</token><Vector3 name="size"><X>1.5</X><Y>4</Y><Z>4</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">0.0</float></Properties></Item><Item class="Part" referent="RBX00000009"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>4.5</X><Y>4.5</Y><Z>-6.75</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.098039</R><G>0.098039</G><B>0.117647</B></Color3><token name="Material">272</token><string name="Name">WheelRR</string><token name="shape">2</token><Vector3 name="size"><X>1.5</X><Y>4</Y><Z>4</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token><float name="Transparency">0.0</float></Properties></Item></Item><Item class="Seat" referent="RBX0000000A"><Properties><bool name="Anchored">true</bool><bool name="CanCollide">false</bool><CoordinateFrame name="CFrame"><X>-1.8</X><Y>5.7</Y><Z>0</Z><R00>1.00000000</R00><R01>0.00000000</R01><R02>0.00000000</R02><R10>0.00000000</R10><R11>1.00000000</R11><R12>0.00000000</R12><R20>-0.00000000</R20><R21>0.00000000</R21><R22>1.00000000</R22></CoordinateFrame><Color3 name="Color"><R>0.078431</R><G>0.078431</G><B>0.098039</B></Color3><token name="Material">272</token><string name="Name">DriverSeat</string><Vector3 name="size"><X>2.5</X><Y>0.5</Y><Z>2.5</Z></Vector3><token name="TopSurface">0</token><token name="BottomSurface">0</token></Properties><Item class="WeldConstraint" referent="RBX0000000B"><Properties><string name="Name">SeatWeld</string><Ref name="Part0">RBX00000003</Ref><Ref name="Part1">RBX0000000A</Ref></Properties></Item><Item class="ProximityPrompt" referent="RBX0000000C"><Properties><string name="ActionText">Drive</string><string name="ObjectText">Vehicle</string><float name="MaxActivationDistance">10</float><float name="HoldDuration">0</float><string name="Name">ProximityPrompt</string></Properties></Item></Item><Item class="ModuleScript" referent="RBX0000000D"><Properties><string name="Name">ChassisConfig</string><ProtectedString name="Source"><![CDATA[--[[
+	ChassisConfig — Single source of truth for all vehicle tuning parameters.
+	
+	Every adjustable value lives here. External scripts modify LiveValues
+	(ValueBase objects on the vehicle model), and the chassis reads from
+	this config each physics frame. Changing a value here or via LiveValues
+	takes effect instantly — no restart needed.
+	
+	Architecture:
+	  LiveValues (ValueBase instances on vehicle model)
+	       ↕  .Changed listeners keep this table in sync
+	  ChassisConfig (this module — the runtime truth)
+	       ↓  read each frame
+	  ChassisController (physics loop)
+]]
+
+local ChassisConfig = {}
+ChassisConfig.__index = ChassisConfig
+
+export type WheelDef = {
+	partName: string,
+	isSteered: boolean,
+	isDriven: boolean,
+	axleId: number,
+	suspensionOffset: Vector3,
+}
+
+export type DiffType = "open" | "locked" | "lsd"
+
+export type DifferentialDef = {
+	diffType: DiffType,
+	preload: number,
+	powerRamp: number,
+	coastRamp: number,
+}
+
+export type Config = {
+	-- Suspension
+	suspensionRestLength: number,
+	springStiffness: number,
+	dampingCompression: number,
+	dampingRebound: number,
+	antiRollStiffness: number,
+	suspensionMaxTravel: number,
+
+	-- Steering
+	maxSteerAngle: number,
+	steerSpeed: number,
+	steerReturnSpeed: number,
+	counterSteerFactor: number,
+
+	-- Engine & Drivetrain
+	maxTorque: number,
+	brakeTorque: number,
+	reverseTorque: number,
+	idleRPM: number,
+	redlineRPM: number,
+	shiftUpRPM: number,
+	shiftDownRPM: number,
+	gearRatios: { number },
+	reverseGearRatio: number,
+	finalDriveRatio: number,
+	activeGearCount: number,
+	transmissionEfficiency: number,
+
+	-- Differential
+	frontDiff: DifferentialDef,
+	rearDiff: DifferentialDef,
+	centerDiff: DifferentialDef,
+
+	-- Tire / Friction
+	tireFrictionCoefficient: number,
+	tireSlipAnglepeak: number,
+	lateralGripMultiplier: number,
+	longitudinalGripMultiplier: number,
+	lateralFalloffSpeed: number,
+	surfaceFrictionMap: { [string]: number },
+
+	-- Stability Limits
+	maxSuspensionForceMultiplier: number,
+	maxLateralForceClamp: number,
+	angularDampingCoefficient: number,
+
+	-- Wheel Visuals
+	wheelRadius: number,
+
+	-- Body Physics
+	downforceCoefficient: number,
+	dragCoefficient: number,
+	centerOfMassOffset: Vector3,
+
+	-- ABS (Anti-lock Braking System)
+	absEnabled: boolean,
+	absSlipThreshold: number,
+	absCycleRate: number,
+
+	-- TCS (Traction Control System)
+	tcsEnabled: boolean,
+	tcsSlipThreshold: number,
+	tcsMinTorqueFraction: number,
+	tcsFadeRate: number,
+
+	-- Brake System
+	brakeBiasFront: number,
+	handbrakeForce: number,
+	engineBrakingCoefficient: number,
+
+	-- Limits
+	maxSpeedStudsPerSec: number,
+
+	-- Hydraulics (lowrider)
+	hydraulicMaxLift: number,
+	hydraulicPumpSpeed: number,
+	hydraulicLowerSpeed: number,
+	hydraulicBounceFrequency: number,
+	hydraulicBounceAmplitude: number,
+
+	-- Wheel Definitions
+	wheels: { WheelDef },
+}
+
+local DEFAULT_CONFIG: Config = {
+	-- Suspension — weight-relative base force handles weight-bearing;
+	-- these values control ride feel on top of that.
+	suspensionRestLength = 2.5,
+	springStiffness = 3000,
+	dampingCompression = 2500,
+	dampingRebound = 3000,
+	antiRollStiffness = 800,
+	suspensionMaxTravel = 3.0,
+
+	-- Steering
+	maxSteerAngle = 35,
+	steerSpeed = 6,
+	steerReturnSpeed = 8,
+	counterSteerFactor = 0.3,
+
+	-- Engine & Drivetrain (scaled for ~1700 mass chassis, high performance)
+	maxTorque = 12000,
+	brakeTorque = 6000,
+	reverseTorque = 4000,
+	idleRPM = 800,
+	redlineRPM = 7500,
+	shiftUpRPM = 6800,
+	shiftDownRPM = 3200,
+	gearRatios = { 3.636, 2.375, 1.761, 1.346, 1.062, 0.848, 0.667, 0.553 },
+	reverseGearRatio = 3.25,
+	finalDriveRatio = 3.42,
+	activeGearCount = 6,
+	transmissionEfficiency = 0.85,
+
+	-- Differential — per-axle limited-slip differentials.
+	-- preload: fraction of torque always sent to slower wheel (0 = open, 1 = locked).
+	-- powerRamp / coastRamp: multipliers that scale lock-up under accel / decel.
+	frontDiff = { diffType = "open" :: any, preload = 0, powerRamp = 0, coastRamp = 0 },
+	rearDiff  = { diffType = "lsd" :: any,  preload = 0.15, powerRamp = 1.0, coastRamp = 0.6 },
+	centerDiff = { diffType = "open" :: any, preload = 0, powerRamp = 0, coastRamp = 0 },
+
+	-- Tire / Friction
+	tireFrictionCoefficient = 1.6,
+	tireSlipAnglepeak = 8,
+	lateralGripMultiplier = 1.0,
+	longitudinalGripMultiplier = 1.0,
+	lateralFalloffSpeed = 15,
+	surfaceFrictionMap = {
+		Asphalt = 1.0,
+		Concrete = 0.95,
+		Brick = 0.9,
+		Cobblestone = 0.85,
+		Wood = 0.8,
+		WoodPlanks = 0.8,
+		Metal = 0.75,
+		DiamondPlate = 0.75,
+		CorrodedMetal = 0.7,
+		Slate = 0.7,
+		Basalt = 0.7,
+		Granite = 0.7,
+		Limestone = 0.7,
+		Sandstone = 0.65,
+		Pavement = 0.95,
+		Grass = 0.6,
+		LeafyGrass = 0.55,
+		Ground = 0.55,
+		Mud = 0.35,
+		Sand = 0.4,
+		Snow = 0.3,
+		Ice = 0.15,
+		Glacier = 0.15,
+		SmoothPlastic = 0.85,
+		Neon = 0.9,
+		Fabric = 0.65,
+		Marble = 0.8,
+		Pebble = 0.6,
+		CrackedLava = 0.5,
+		Salt = 0.6,
+	},
+
+	-- Stability Limits
+	maxSuspensionForceMultiplier = 3.0,
+	maxLateralForceClamp = 0.8,
+	angularDampingCoefficient = 2.5,
+
+	-- Wheel Visuals
+	wheelRadius = 2.0,
+
+	-- Body Physics
+	downforceCoefficient = 0.3,
+	dragCoefficient = 0.02,
+	centerOfMassOffset = Vector3.new(0, -0.5, 0),
+
+	-- ABS — pulses brake force to prevent wheel lockup
+	absEnabled = true,
+	absSlipThreshold = 0.15,
+	absCycleRate = 15,
+
+	-- TCS — reduces drive torque when wheels spin
+	tcsEnabled = true,
+	tcsSlipThreshold = 0.20,
+	tcsMinTorqueFraction = 0.1,
+	tcsFadeRate = 8,
+
+	-- Brake System
+	brakeBiasFront = 0.6,
+	handbrakeForce = 5000,
+	engineBrakingCoefficient = 0.4,
+
+	-- Limits
+	maxSpeedStudsPerSec = 500,
+
+	-- Hydraulics (lowrider) — all offsets at 0 by default (invisible until activated)
+	hydraulicMaxLift = 3.0,
+	hydraulicPumpSpeed = 10,
+	hydraulicLowerSpeed = 5,
+	hydraulicBounceFrequency = 2.0,
+	hydraulicBounceAmplitude = 1.5,
+
+	-- Default 4-wheel layout (FL, FR, RL, RR)
+	-- axleId groups left/right wheels for differential: 1 = front axle, 2 = rear axle
+	-- Front (steered) wheels at -Z to match root LookVector direction
+	wheels = {
+		{ partName = "WheelFL", isSteered = true,  isDriven = false, axleId = 1, suspensionOffset = Vector3.new(-4.5, 0, -6.75) },
+		{ partName = "WheelFR", isSteered = true,  isDriven = false, axleId = 1, suspensionOffset = Vector3.new(4.5, 0, -6.75)  },
+		{ partName = "WheelRL", isSteered = false, isDriven = true,  axleId = 2, suspensionOffset = Vector3.new(-4.5, 0, 6.75)  },
+		{ partName = "WheelRR", isSteered = false, isDriven = true,  axleId = 2, suspensionOffset = Vector3.new(4.5, 0, 6.75)   },
+	},
+}
+
+function ChassisConfig.new(overrides: Config?): Config
+	local config = table.clone(DEFAULT_CONFIG)
+	-- Deep-clone nested tables so instances don't share diff/wheel refs
+	config.frontDiff = table.clone(config.frontDiff)
+	config.rearDiff = table.clone(config.rearDiff)
+	config.centerDiff = table.clone(config.centerDiff)
+	config.surfaceFrictionMap = table.clone(config.surfaceFrictionMap)
+	config.gearRatios = table.clone(config.gearRatios)
+	local clonedWheels = {}
+	for i, w in config.wheels do
+		clonedWheels[i] = table.clone(w)
+	end
+	config.wheels = clonedWheels
+	if overrides then
+		for key, value in overrides do
+			if config[key] ~= nil then
+				config[key] = value
+			end
+		end
+	end
+	-- Clamp activeGearCount
+	config.activeGearCount = math.clamp(config.activeGearCount, 1, #config.gearRatios)
+	return config
+end
+
+function ChassisConfig.getDefault(): Config
+	local config = table.clone(DEFAULT_CONFIG)
+	config.frontDiff = table.clone(config.frontDiff)
+	config.rearDiff = table.clone(config.rearDiff)
+	config.centerDiff = table.clone(config.centerDiff)
+	config.surfaceFrictionMap = table.clone(config.surfaceFrictionMap)
+	config.gearRatios = table.clone(config.gearRatios)
+	local clonedWheels = {}
+	for i, w in config.wheels do
+		clonedWheels[i] = table.clone(w)
+	end
+	config.wheels = clonedWheels
+	return config
+end
+
+function ChassisConfig.getSurfaceFriction(config: Config, material: Enum.Material): number
+	local name = material.Name
+	return config.surfaceFrictionMap[name] or 1.0
+end
+
+return ChassisConfig
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0000000E"><Properties><string name="Name">LiveValuesSync</string><ProtectedString name="Source"><![CDATA[--[[
+	LiveValuesSync — Bridges ValueBase instances on the vehicle model
+	to the runtime ChassisConfig table. Changes to any LiveValue are
+	reflected in the config instantly via .Changed connections.
+	
+	LiveValues container structure (under vehicle model):
+	  LiveValues (Configuration)
+	    ├── SpringStiffness (NumberValue)
+	    ├── DampingCompression (NumberValue)
+	    ├── DampingRebound (NumberValue)
+	    ├── MaxSteerAngle (NumberValue)
+	    ├── MaxTorque (NumberValue)
+	    ├── ActiveGearCount (IntValue)
+	    ├── SuspensionRestLength (NumberValue)
+	    ├── TireFriction (NumberValue)
+	    ├── AntiRollStiffness (NumberValue)
+	    ├── MaxSpeed (NumberValue)
+	    └── ... (any config key)
+]]
+
+local LiveValuesSync = {}
+LiveValuesSync.__index = LiveValuesSync
+
+type LiveValuesInstance = {
+	container: Configuration,
+	connections: { RBXScriptConnection },
+	config: any,
+}
+
+local VALUE_KEY_MAP = {
+	SpringStiffness       = "springStiffness",
+	DampingCompression    = "dampingCompression",
+	DampingRebound        = "dampingRebound",
+	AntiRollStiffness     = "antiRollStiffness",
+	SuspensionRestLength  = "suspensionRestLength",
+	SuspensionMaxTravel   = "suspensionMaxTravel",
+	MaxSteerAngle         = "maxSteerAngle",
+	SteerSpeed            = "steerSpeed",
+	SteerReturnSpeed      = "steerReturnSpeed",
+	CounterSteerFactor    = "counterSteerFactor",
+	MaxTorque             = "maxTorque",
+	BrakeTorque           = "brakeTorque",
+	ReverseTorque         = "reverseTorque",
+	IdleRPM               = "idleRPM",
+	RedlineRPM            = "redlineRPM",
+	ShiftUpRPM            = "shiftUpRPM",
+	ShiftDownRPM          = "shiftDownRPM",
+	ActiveGearCount       = "activeGearCount",
+	TransmissionEfficiency = "transmissionEfficiency",
+	TireFriction          = "tireFrictionCoefficient",
+	LateralGrip           = "lateralGripMultiplier",
+	LongitudinalGrip      = "longitudinalGripMultiplier",
+	WheelRadius           = "wheelRadius",
+	DownforceCoefficient  = "downforceCoefficient",
+	DragCoefficient       = "dragCoefficient",
+	MaxSpeed              = "maxSpeedStudsPerSec",
+	ReverseGearRatio      = "reverseGearRatio",
+	FinalDriveRatio       = "finalDriveRatio",
+	BrakeBiasFront        = "brakeBiasFront",
+	HandbrakeForce        = "handbrakeForce",
+	EngineBraking         = "engineBrakingCoefficient",
+	AbsSlipThreshold      = "absSlipThreshold",
+	AbsCycleRate          = "absCycleRate",
+	TcsSlipThreshold      = "tcsSlipThreshold",
+	TcsMinTorqueFraction  = "tcsMinTorqueFraction",
+	TcsFadeRate           = "tcsFadeRate",
+	AngularDamping        = "angularDampingCoefficient",
+	MaxSuspForceMultiplier = "maxSuspensionForceMultiplier",
+	MaxLateralForceClamp  = "maxLateralForceClamp",
+	HydraulicMaxLift      = "hydraulicMaxLift",
+	HydraulicPumpSpeed    = "hydraulicPumpSpeed",
+	HydraulicLowerSpeed   = "hydraulicLowerSpeed",
+	HydraulicBounceFrequency = "hydraulicBounceFrequency",
+	HydraulicBounceAmplitude = "hydraulicBounceAmplitude",
+}
+
+-- Nested diff values: LiveValue name → { parent config key, child key }
+local DIFF_VALUE_MAP = {
+	RearDiffPreload    = { "rearDiff",   "preload"   },
+	RearDiffPowerRamp  = { "rearDiff",   "powerRamp" },
+	RearDiffCoastRamp  = { "rearDiff",   "coastRamp" },
+	FrontDiffPreload   = { "frontDiff",  "preload"   },
+	FrontDiffPowerRamp = { "frontDiff",  "powerRamp" },
+	FrontDiffCoastRamp = { "frontDiff",  "coastRamp" },
+	CenterDiffPreload  = { "centerDiff", "preload"   },
+	CenterDiffPowerRamp = { "centerDiff", "powerRamp" },
+	CenterDiffCoastRamp = { "centerDiff", "coastRamp" },
+}
+
+local DIFF_TYPE_MAP = {
+	RearDiffType   = "rearDiff",
+	FrontDiffType  = "frontDiff",
+	CenterDiffType = "centerDiff",
+}
+
+function LiveValuesSync.createContainer(parent: Instance, config: any): Configuration
+	local container = Instance.new("Configuration")
+	container.Name = "LiveValues"
+
+	for displayName, configKey in VALUE_KEY_MAP do
+		local val = config[configKey]
+		if val == nil then continue end
+
+		local valueObj
+		if typeof(val) == "number" then
+			if math.floor(val) == val and val < 1000 and val > -1000 and configKey:find("Count") then
+				valueObj = Instance.new("IntValue")
+			else
+				valueObj = Instance.new("NumberValue")
+			end
+			valueObj.Value = val
+		elseif typeof(val) == "boolean" then
+			valueObj = Instance.new("BoolValue")
+			valueObj.Value = val
+		end
+
+		if valueObj then
+			valueObj.Name = displayName
+			valueObj.Parent = container
+		end
+	end
+
+	-- Differential numeric values
+	for displayName, mapping in DIFF_VALUE_MAP do
+		local parentKey = mapping[1]
+		local childKey = mapping[2]
+		local diffTable = config[parentKey]
+		if diffTable and diffTable[childKey] ~= nil then
+			local valueObj = Instance.new("NumberValue")
+			valueObj.Value = diffTable[childKey]
+			valueObj.Name = displayName
+			valueObj.Parent = container
+		end
+	end
+
+	-- Differential type values (string)
+	for displayName, parentKey in DIFF_TYPE_MAP do
+		local diffTable = config[parentKey]
+		if diffTable and diffTable.diffType then
+			local valueObj = Instance.new("StringValue")
+			valueObj.Value = diffTable.diffType
+			valueObj.Name = displayName
+			valueObj.Parent = container
+		end
+	end
+
+	container.Parent = parent
+	return container
+end
+
+function LiveValuesSync.bind(container: Configuration, config: any): LiveValuesInstance
+	local inst: LiveValuesInstance = {
+		container = container,
+		connections = {},
+		config = config,
+	}
+
+	local function bindChild(child: Instance)
+		if not child:IsA("ValueBase") then return end
+
+		-- Flat config key
+		local configKey = VALUE_KEY_MAP[child.Name]
+		if configKey and config[configKey] ~= nil then
+			config[configKey] = child.Value
+			local conn = child.Changed:Connect(function(newValue)
+				config[configKey] = newValue
+				if configKey == "activeGearCount" then
+					config.activeGearCount = math.clamp(
+						newValue, 1, #config.gearRatios
+					)
+				end
+			end)
+			table.insert(inst.connections, conn)
+			return
+		end
+
+		-- Nested differential numeric values
+		local diffMapping = DIFF_VALUE_MAP[child.Name]
+		if diffMapping then
+			local parentKey, childKey = diffMapping[1], diffMapping[2]
+			if config[parentKey] then
+				config[parentKey][childKey] = child.Value
+				local conn = child.Changed:Connect(function(newValue)
+					config[parentKey][childKey] = newValue
+				end)
+				table.insert(inst.connections, conn)
+			end
+			return
+		end
+
+		-- Differential type (string → diffType field)
+		local diffTypeParent = DIFF_TYPE_MAP[child.Name]
+		if diffTypeParent and config[diffTypeParent] then
+			config[diffTypeParent].diffType = child.Value
+			local conn = child.Changed:Connect(function(newValue)
+				config[diffTypeParent].diffType = newValue
+			end)
+			table.insert(inst.connections, conn)
+		end
+	end
+
+	for _, child in container:GetChildren() do
+		bindChild(child)
+	end
+
+	-- Watch for dynamically added LiveValues
+	local addedConn = container.ChildAdded:Connect(function(child)
+		bindChild(child)
+	end)
+	table.insert(inst.connections, addedConn)
+
+	setmetatable(inst, LiveValuesSync)
+	return inst
+end
+
+function LiveValuesSync:destroy()
+	for _, conn in self.connections do
+		conn:Disconnect()
+	end
+	table.clear(self.connections)
+end
+
+return LiveValuesSync
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0000000F"><Properties><string name="Name">Drivetrain</string><ProtectedString name="Source"><![CDATA[--[[
+	Drivetrain — Gear shifting, RPM simulation, and torque output.
+	
+	RPM is derived from wheel speed within the current gear ratio,
+	clamped to idle-redline range. Automatic shifting happens at
+	configurable RPM thresholds. Gear ratios are multiplied by the
+	final drive ratio for total reduction.
+]]
+
+local Drivetrain = {}
+Drivetrain.__index = Drivetrain
+
+export type DrivetrainState = {
+	currentGear: number,
+	currentRPM: number,
+	shiftCooldown: number,
+	isReversing: boolean,
+}
+
+local SHIFT_COOLDOWN_SEC = 0.25
+
+function Drivetrain.new(): DrivetrainState
+	return setmetatable({
+		currentGear = 1,
+		currentRPM = 800,
+		shiftCooldown = 0,
+		isReversing = false,
+	}, Drivetrain)
+end
+
+function Drivetrain.getTotalRatio(config: any, gear: number): number
+	if gear < 1 or gear > config.activeGearCount then
+		return config.gearRatios[1] * config.finalDriveRatio
+	end
+	return config.gearRatios[gear] * config.finalDriveRatio
+end
+
+function Drivetrain.update(state: DrivetrainState, config: any, wheelSpeed: number, throttle: number, dt: number)
+	state.shiftCooldown = math.max(0, state.shiftCooldown - dt)
+
+	-- Determine if reversing
+	state.isReversing = throttle < -0.1
+
+	local effectiveSpeed = math.abs(wheelSpeed)
+
+	-- Calculate RPM from wheel speed and current gear ratio
+	local totalRatio
+	if state.isReversing then
+		totalRatio = config.reverseGearRatio * config.finalDriveRatio
+	else
+		totalRatio = Drivetrain.getTotalRatio(config, state.currentGear)
+	end
+
+	-- RPM = wheelAngularVelocity * gearRatio
+	-- wheelAngularVelocity ≈ speed / wheelRadius
+	local wheelAngularSpeed = effectiveSpeed / math.max(config.wheelRadius, 0.1)
+	local rawRPM = wheelAngularSpeed * totalRatio * 60 / (2 * math.pi)
+
+	-- Blend with throttle-driven rev climb for responsiveness
+	local throttleBoost = math.abs(throttle) * config.redlineRPM * 0.15
+	local targetRPM = rawRPM + throttleBoost
+
+	targetRPM = math.clamp(targetRPM, config.idleRPM, config.redlineRPM)
+
+	-- Smooth RPM transitions
+	local rpmLerp = dt * 12
+	state.currentRPM = state.currentRPM + (targetRPM - state.currentRPM) * math.min(rpmLerp, 1)
+
+	-- Automatic gear shifting (forward only)
+	if not state.isReversing and state.shiftCooldown <= 0 then
+		if state.currentRPM >= config.shiftUpRPM and state.currentGear < config.activeGearCount then
+			state.currentGear += 1
+			state.shiftCooldown = SHIFT_COOLDOWN_SEC
+			-- RPM drop on upshift
+			local newRatio = Drivetrain.getTotalRatio(config, state.currentGear)
+			local oldRatio = Drivetrain.getTotalRatio(config, state.currentGear - 1)
+			state.currentRPM = state.currentRPM * (newRatio / oldRatio)
+		elseif state.currentRPM <= config.shiftDownRPM and state.currentGear > 1 then
+			state.currentGear -= 1
+			state.shiftCooldown = SHIFT_COOLDOWN_SEC
+			local newRatio = Drivetrain.getTotalRatio(config, state.currentGear)
+			local oldRatio = Drivetrain.getTotalRatio(config, state.currentGear + 1)
+			state.currentRPM = state.currentRPM * (newRatio / oldRatio)
+		end
+	end
+
+	state.currentRPM = math.clamp(state.currentRPM, config.idleRPM, config.redlineRPM)
+end
+
+function Drivetrain.getOutputTorque(state: DrivetrainState, config: any, throttle: number): number
+	local absThrottle = math.abs(throttle)
+
+	if absThrottle < 0.05 then
+		return 0
+	end
+
+	local totalRatio
+	if state.isReversing then
+		totalRatio = config.reverseGearRatio * config.finalDriveRatio
+	else
+		totalRatio = Drivetrain.getTotalRatio(config, state.currentGear)
+	end
+
+	-- Torque curve: peaks at ~60% of redline, falls off near redline
+	local rpmRange = config.redlineRPM - config.idleRPM
+	if rpmRange <= 0 then rpmRange = 1 end
+	local rpmNorm = (state.currentRPM - config.idleRPM) / rpmRange
+	local torqueCurve = 1 - (rpmNorm - 0.6)^2 * 1.5
+	torqueCurve = math.clamp(torqueCurve, 0.3, 1.0)
+
+	local baseTorque = state.isReversing and config.reverseTorque or config.maxTorque
+	local engineTorque = baseTorque * absThrottle * torqueCurve
+
+	return engineTorque * totalRatio * config.transmissionEfficiency
+end
+
+function Drivetrain.getRPMNormalized(state: DrivetrainState, config: any): number
+	local range = config.redlineRPM - config.idleRPM
+	if range <= 0 then return 0 end
+	return (state.currentRPM - config.idleRPM) / range
+end
+
+--[[
+	Differential torque split.
+	
+	Returns (leftFraction, rightFraction) that sum to 1.0.
+	`leftSpeed` / `rightSpeed` are longitudinal wheel speeds (signed).
+	`throttle` determines whether to use powerRamp or coastRamp.
+]]
+function Drivetrain.diffSplit(diff: any, leftSpeed: number, rightSpeed: number, throttle: number): (number, number)
+	local diffType = diff.diffType
+
+	if diffType == "locked" then
+		return 0.5, 0.5
+	end
+
+	if diffType == "open" then
+		local absL = math.abs(leftSpeed)
+		local absR = math.abs(rightSpeed)
+		local sum = absL + absR
+		if sum < 0.5 then
+			return 0.5, 0.5
+		end
+		return absR / sum, absL / sum
+	end
+
+	-- LSD: blend between open and locked based on speed difference and tuning params
+	local preload = diff.preload or 0
+	local ramp = if math.abs(throttle) > 0.05 then (diff.powerRamp or 1) else (diff.coastRamp or 0.5)
+
+	local absL = math.abs(leftSpeed)
+	local absR = math.abs(rightSpeed)
+	local sum = absL + absR
+
+	local openL, openR
+	if sum < 0.5 then
+		openL, openR = 0.5, 0.5
+	else
+		openL = absR / sum
+		openR = absL / sum
+	end
+
+	local speedDiff = math.abs(leftSpeed - rightSpeed)
+	local lockFactor = math.clamp(preload + speedDiff * ramp * 0.01, 0, 1)
+
+	local leftFrac = openL + (0.5 - openL) * lockFactor
+	local rightFrac = openR + (0.5 - openR) * lockFactor
+
+	return leftFrac, rightFrac
+end
+
+--[[
+	Determines the DifferentialDef for a given axleId.
+	axleId 1 = front, axleId 2 = rear. For AWD, center diff governs
+	front/rear torque split before per-axle diffs apply.
+]]
+function Drivetrain.getDiffForAxle(config: any, axleId: number): any
+	if axleId == 1 then
+		return config.frontDiff
+	end
+	return config.rearDiff
+end
+
+--[[
+	For AWD vehicles, compute (frontFraction, rearFraction) based on the
+	center differential. `frontSpeed` and `rearSpeed` are average axle speeds.
+]]
+function Drivetrain.centerSplit(config: any, frontSpeed: number, rearSpeed: number, throttle: number): (number, number)
+	return Drivetrain.diffSplit(config.centerDiff, frontSpeed, rearSpeed, throttle)
+end
+
+return Drivetrain
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX00000010"><Properties><string name="Name">ChassisPhysics</string><ProtectedString name="Source"><![CDATA[--[[
+	ChassisPhysics — Pure physics computation functions shared between
+	server (ChassisController) and client (ChassisClient).
+
+	These functions take data in and return results out. They never
+	reference Roblox services, perform raycasts, or apply forces.
+	The caller is responsible for raycasting, reading input, and
+	applying the returned forces/positions to the assembly.
+]]
+
+local ChassisPhysics = {}
+
+export type SuspensionInput = {
+	hitDistance: number?,
+	hitNormal: Vector3?,
+	rayOrigin: Vector3,
+	rayLength: number,
+	lastSuspensionLength: number,
+	hydraulicOffset: number?,
+}
+
+export type SuspensionResult = {
+	force: number,
+	onGround: boolean,
+	springLength: number,
+	contactPosition: Vector3,
+}
+
+function ChassisPhysics.computeSuspension(
+	input: SuspensionInput,
+	config: any,
+	wheelCount: number,
+	assemblyMass: number,
+	gravity: number,
+	dt: number
+): SuspensionResult
+	local safeDt = math.clamp(dt, 0.0005, 0.1)
+	local safeMass = math.max(assemblyMass, 1)
+	local effectiveRestLength = config.suspensionRestLength + (input.hydraulicOffset or 0)
+
+	if input.hitDistance then
+		local springLength = input.hitDistance - config.wheelRadius
+		springLength = math.clamp(springLength, 0, effectiveRestLength + config.suspensionMaxTravel)
+
+		local compression = effectiveRestLength - springLength
+		local springVelocity = (input.lastSuspensionLength - springLength) / safeDt
+		springVelocity = math.clamp(springVelocity, -500, 500)
+
+		local dampingCoeff
+		if springVelocity > 0 then
+			dampingCoeff = config.dampingCompression
+		else
+			dampingCoeff = config.dampingRebound
+		end
+
+		local weightPerWheel = safeMass * gravity / math.max(wheelCount, 1)
+		local force = weightPerWheel + (config.springStiffness * compression) + (dampingCoeff * springVelocity)
+		force = math.clamp(force, 0, weightPerWheel * config.maxSuspensionForceMultiplier)
+
+		return {
+			force = force,
+			onGround = true,
+			springLength = springLength,
+			contactPosition = input.rayOrigin + (-Vector3.yAxis) * input.hitDistance,
+		}
+	else
+		return {
+			force = 0,
+			onGround = false,
+			springLength = effectiveRestLength + config.suspensionMaxTravel,
+			contactPosition = input.rayOrigin + (-Vector3.yAxis) * input.rayLength,
+		}
+	end
+end
+
+function ChassisPhysics.computeAntiRoll(
+	leftOnGround: boolean,
+	rightOnGround: boolean,
+	leftSpringLength: number,
+	rightSpringLength: number,
+	antiRollStiffness: number
+): (number, number)
+	if not leftOnGround or not rightOnGround then
+		return 0, 0
+	end
+	local diff = leftSpringLength - rightSpringLength
+	local antiRollForce = diff * antiRollStiffness
+	return -antiRollForce, antiRollForce
+end
+
+export type LateralForceInput = {
+	lateralSpeed: number,
+	longitudinalSpeed: number,
+	suspensionForce: number,
+}
+
+function ChassisPhysics.computeLateralForce(input: LateralForceInput, config: any, surfaceFriction: number?): number
+	local surfMul = surfaceFriction or 1.0
+	local slipAngle = 0
+	if math.abs(input.longitudinalSpeed) > 0.5 then
+		slipAngle = math.deg(math.atan2(input.lateralSpeed, math.abs(input.longitudinalSpeed)))
+	end
+	local normalizedSlip = math.clamp(slipAngle / config.tireSlipAnglepeak, -1, 1)
+	local lateralForceNorm = math.sin(normalizedSlip * math.pi * 0.5)
+
+	local absLateralSpeed = math.abs(input.lateralSpeed)
+	local slideFalloff = 1
+	if absLateralSpeed > config.lateralFalloffSpeed then
+		slideFalloff = config.lateralFalloffSpeed / absLateralSpeed
+	end
+
+	local lateralForce = -lateralForceNorm * input.suspensionForce * config.tireFrictionCoefficient * config.lateralGripMultiplier * slideFalloff * surfMul
+	local maxLateral = input.suspensionForce * config.tireFrictionCoefficient * config.maxLateralForceClamp * surfMul
+	lateralForce = math.clamp(lateralForce, -maxLateral, maxLateral)
+
+	return lateralForce
+end
+
+function ChassisPhysics.computeDriveForce(
+	wheelTorque: number,
+	wheelRadius: number,
+	gripMultiplier: number,
+	surfaceFriction: number?
+): number
+	local surfMul = surfaceFriction or 1.0
+	return (wheelTorque / wheelRadius) * gripMultiplier * surfMul
+end
+
+function ChassisPhysics.computeBrakeForce(
+	brakeInput: number,
+	isFrontAxle: boolean,
+	config: any
+): number
+	local biasMultiplier = if isFrontAxle then config.brakeBiasFront * 2 else (1 - config.brakeBiasFront) * 2
+	return config.brakeTorque * brakeInput * biasMultiplier / config.wheelRadius
+end
+
+function ChassisPhysics.computeEngineBrakeForce(
+	longitudinalSpeed: number,
+	suspensionForce: number,
+	currentRPM: number,
+	config: any
+): number
+	if math.abs(longitudinalSpeed) <= 1 then
+		return 0
+	end
+	local engineBrakeForce = config.engineBrakingCoefficient * currentRPM / config.redlineRPM
+	return engineBrakeForce * suspensionForce * config.tireFrictionCoefficient
+end
+
+function ChassisPhysics.computeTcsMultiplier(
+	wheelLongitudinalSpeed: number,
+	chassisForwardSpeed: number,
+	config: any
+): (number, boolean)
+	local wheelRotSpeed = math.abs(wheelLongitudinalSpeed)
+	local chassisSpeed = math.abs(chassisForwardSpeed)
+	local slipRatio = 0
+	if chassisSpeed > 1 then
+		slipRatio = (wheelRotSpeed - chassisSpeed) / chassisSpeed
+	elseif wheelRotSpeed > 2 then
+		slipRatio = 1
+	end
+	if slipRatio > config.tcsSlipThreshold then
+		local excessSlip = slipRatio - config.tcsSlipThreshold
+		local multiplier = math.clamp(1 - excessSlip * config.tcsFadeRate, config.tcsMinTorqueFraction, 1)
+		return multiplier, true
+	end
+	return 1, false
+end
+
+function ChassisPhysics.shouldAbsPulse(
+	wheelLongitudinalSpeed: number,
+	chassisForwardSpeed: number,
+	config: any
+): boolean
+	if not config.absEnabled then
+		return false
+	end
+	if math.abs(wheelLongitudinalSpeed) <= 2 then
+		return false
+	end
+	local wheelRotSpeed = math.abs(wheelLongitudinalSpeed)
+	local chassisSpeed = math.abs(chassisForwardSpeed)
+	local slipRatio = 0
+	if chassisSpeed > 1 then
+		slipRatio = 1 - (wheelRotSpeed / math.max(chassisSpeed, 0.1))
+	end
+	return math.abs(slipRatio) > config.absSlipThreshold
+end
+
+export type WheelVisualInput = {
+	onGround: boolean,
+	contactPosition: Vector3,
+	suspensionOffset: Vector3,
+	isSteered: boolean,
+	steerAngle: number,
+	visualAngle: number,
+}
+
+function ChassisPhysics.computeWheelCFrame(
+	input: WheelVisualInput,
+	rootCF: CFrame,
+	upDir: Vector3,
+	config: any
+): CFrame
+	local bodyRot = rootCF - rootCF.Position
+	if input.onGround then
+		local visualPos = input.contactPosition + upDir * config.wheelRadius
+		local cf = CFrame.new(visualPos) * bodyRot
+		if input.isSteered then
+			cf = cf * CFrame.Angles(0, math.rad(input.steerAngle), 0)
+		end
+		cf = cf * CFrame.Angles(math.rad(input.visualAngle), 0, 0)
+		return cf
+	else
+		local worldOffset = rootCF:PointToWorldSpace(input.suspensionOffset)
+		local dropPos = worldOffset - upDir * config.suspensionRestLength
+		return CFrame.new(dropPos) * bodyRot
+	end
+end
+
+function ChassisPhysics.computeWheelCFrameSmoothed(
+	input: WheelVisualInput,
+	rootCF: CFrame,
+	upDir: Vector3,
+	config: any
+): CFrame
+	local bodyRot = rootCF - rootCF.Position
+	if input.onGround then
+		local rollDot = upDir:Dot(Vector3.yAxis)
+		local blendedUp = if rollDot > 0.7 then upDir else upDir:Lerp(Vector3.yAxis, 1 - rollDot).Unit
+		local visualPos = input.contactPosition + blendedUp * config.wheelRadius
+		local cf = CFrame.new(visualPos) * bodyRot
+		if input.isSteered then
+			cf = cf * CFrame.Angles(0, math.rad(input.steerAngle), 0)
+		end
+		cf = cf * CFrame.Angles(math.rad(input.visualAngle), 0, 0)
+		return cf
+	else
+		local worldOffset = rootCF:PointToWorldSpace(input.suspensionOffset)
+		local dropPos = worldOffset - upDir * config.suspensionRestLength
+		return CFrame.new(dropPos) * bodyRot
+	end
+end
+
+function ChassisPhysics.computeDownforce(speed: number, coefficient: number, dt: number): Vector3
+	if speed <= 10 then
+		return Vector3.zero
+	end
+	local safeDt = math.min(dt, 0.1)
+	return -Vector3.yAxis * coefficient * speed * speed * safeDt
+end
+
+function ChassisPhysics.computeDrag(velocity: Vector3, speed: number, coefficient: number, dt: number): Vector3
+	if speed <= 1 then
+		return Vector3.zero
+	end
+	local safeDt = math.min(dt, 0.1)
+	return -velocity.Unit * coefficient * speed * speed * safeDt
+end
+
+function ChassisPhysics.computeSteerAngle(
+	currentAngle: number,
+	steerInput: number,
+	speed: number,
+	config: any,
+	dt: number
+): number
+	-- Progressive speed-sensitive steering: mild reduction at low speed, stronger at high
+	local speedNorm = math.clamp(speed / config.maxSpeedStudsPerSec, 0, 1)
+	local speedFactor = 1 - speedNorm * speedNorm * 0.65
+	local targetAngle = steerInput * config.maxSteerAngle * speedFactor
+
+	if math.abs(steerInput) > 0.05 then
+		local rate = config.steerSpeed + speedNorm * 4
+		return currentAngle + (targetAngle - currentAngle) * math.min(dt * rate, 1)
+	else
+		return currentAngle + (0 - currentAngle) * math.min(dt * config.steerReturnSpeed, 1)
+	end
+end
+
+function ChassisPhysics.computeAngularDamping(
+	angularVelocity: Vector3,
+	coefficient: number,
+	dt: number
+): Vector3
+	local mag = angularVelocity.Magnitude
+	if mag <= 0.5 then
+		return angularVelocity
+	end
+	local safeDt = math.min(dt, 0.1)
+	local damping = math.max(1 - coefficient * safeDt, 0)
+	if mag > 8 then
+		damping = damping * math.max(1 - (mag - 8) * 0.05, 0.1)
+	end
+	local MAX_ANGULAR_SPEED = 12
+	if mag > MAX_ANGULAR_SPEED then
+		angularVelocity = angularVelocity.Unit * MAX_ANGULAR_SPEED
+	end
+	return angularVelocity * damping
+end
+
+-- Helper: apply anti-roll forces for a left/right wheel pair.
+-- Returns (leftForce, rightForce) impulse magnitudes along Y axis.
+function ChassisPhysics.computeAntiRollPair(
+	leftOnGround: boolean,
+	rightOnGround: boolean,
+	leftSpringLength: number,
+	rightSpringLength: number,
+	antiRollStiffness: number
+): (number, number)
+	return ChassisPhysics.computeAntiRoll(
+		leftOnGround, rightOnGround,
+		leftSpringLength, rightSpringLength,
+		antiRollStiffness
+	)
+end
+
+return ChassisPhysics
+]]></ProtectedString></Properties></Item><Item class="Script" referent="RBX00000011"><Properties><string name="Name">ChassisController</string><ProtectedString name="Source"><![CDATA[--[[
+	ChassisController — Main server script for raycast vehicle physics.
+	
+	Place this script inside the vehicle Model. The model structure:
+	  VehicleModel
+	    ├── Body (Model — the car body parts, contains PrimaryPart)
+	    ├── Wheels (Model — WheelFL, WheelFR, WheelRL, WheelRR)
+	    ├── DriverSeat (VehicleSeat)
+	    ├── LiveValues (Configuration — created by LiveValuesSync)
+	    └── ChassisController (this script)
+	    └── ChassisConfig (ModuleScript)
+	
+	Server runs suspension at all times (keeps car up + wheels positioned).
+	When a player sits, network ownership transfers to them and
+	the client takes over full physics for responsiveness.
+]]
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local vehicleModel = script.Parent
+local ChassisConfig = require(vehicleModel:WaitForChild("ChassisConfig", 10))
+local LiveValuesSync = require(vehicleModel:WaitForChild("LiveValuesSync", 10))
+local Drivetrain = require(vehicleModel:WaitForChild("Drivetrain", 10))
+local ChassisPhysics = require(vehicleModel:WaitForChild("ChassisPhysics", 10))
+
+local config = ChassisConfig.new()
+local driveState = Drivetrain.new()
+
+local body: Model = vehicleModel:WaitForChild("Body", 10)
+local wheelsFolder: Model = vehicleModel:WaitForChild("Wheels", 10)
+local driverSeat: Seat = vehicleModel:WaitForChild("DriverSeat", 10)
+
+assert(body, "Vehicle must have a Body model")
+assert(wheelsFolder, "Vehicle must have a Wheels model")
+assert(driverSeat, "Vehicle must have a DriverSeat")
+
+local root: BasePart = body.PrimaryPart or body:FindFirstChildWhichIsA("BasePart")
+assert(root, "Body must have a PrimaryPart or at least one BasePart")
+
+-- LiveValues setup
+local liveContainer = vehicleModel:FindFirstChild("LiveValues")
+if not liveContainer then
+	liveContainer = LiveValuesSync.createContainer(vehicleModel, config)
+end
+local liveSync = LiveValuesSync.bind(liveContainer, config)
+
+type WheelData = {
+	part: BasePart,
+	def: any,
+	lastSuspensionLength: number,
+	visualAngle: number,
+	groundHit: boolean,
+	contactNormal: Vector3,
+	suspensionForce: number,
+	localVelocity: Vector3,
+	hydraulicOffset: number,
+}
+
+local wheels: { WheelData } = {}
+
+for _, def in config.wheels do
+	local wheelPart = wheelsFolder:FindFirstChild(def.partName)
+	if wheelPart then
+		table.insert(wheels, {
+			part = wheelPart,
+			def = def,
+			lastSuspensionLength = config.suspensionRestLength,
+			visualAngle = 0,
+			groundHit = false,
+			contactNormal = Vector3.yAxis,
+			suspensionForce = 0,
+			localVelocity = Vector3.zero,
+			hydraulicOffset = 0,
+		})
+	else
+		warn("[Chassis] Wheel part not found: " .. def.partName)
+	end
+end
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.FilterDescendantsInstances = { vehicleModel }
+
+local currentSteerAngle = 0
+local isDriverSeated = false
+local currentDriver: Player? = nil
+local serverPhysicsConnection: RBXScriptConnection? = nil
+
+local function weldModel(model: Model)
+	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	if not primary then return end
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") and part ~= primary then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = primary
+			weld.Part1 = part
+			weld.Parent = part
+			part.Anchored = false
+			part.CanCollide = false
+		end
+	end
+end
+
+local function applyCenterOfMass()
+	local offset = config.centerOfMassOffset
+	if offset.Magnitude < 0.01 then return end
+
+	local comPart = Instance.new("Part")
+	comPart.Name = "CenterOfMass"
+	comPart.Size = Vector3.new(0.1, 0.1, 0.1)
+	comPart.Transparency = 1
+	comPart.CanCollide = false
+	comPart.Massless = false
+	comPart.CustomPhysicalProperties = PhysicalProperties.new(50, 0, 0, 0, 0)
+	comPart.CFrame = root.CFrame * CFrame.new(offset)
+	comPart.Parent = body
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = comPart
+	weld.Parent = comPart
+end
+
+local function castAndComputeSuspension(wheel: WheelData, dt: number): (number, boolean, Vector3, number)
+	local worldOffset = root.CFrame:PointToWorldSpace(wheel.def.suspensionOffset)
+	local effectiveRestLength = config.suspensionRestLength + wheel.hydraulicOffset
+	local rayLength = effectiveRestLength + config.wheelRadius + config.suspensionMaxTravel
+
+	local result = workspace:Raycast(worldOffset, -Vector3.yAxis * rayLength, rayParams)
+
+	local suspInput: ChassisPhysics.SuspensionInput = {
+		hitDistance = if result then (worldOffset - result.Position).Magnitude else nil,
+		hitNormal = if result then result.Normal else nil,
+		rayOrigin = worldOffset,
+		rayLength = rayLength,
+		lastSuspensionLength = wheel.lastSuspensionLength,
+		hydraulicOffset = wheel.hydraulicOffset,
+	}
+
+	local suspResult = ChassisPhysics.computeSuspension(
+		suspInput, config, #wheels, root.AssemblyMass, workspace.Gravity, dt
+	)
+
+	wheel.lastSuspensionLength = suspResult.springLength
+	wheel.groundHit = suspResult.onGround
+	wheel.contactNormal = if result then result.Normal else Vector3.yAxis
+	wheel.suspensionForce = suspResult.force
+
+	return suspResult.force, suspResult.onGround, if result then result.Position else suspResult.contactPosition, suspResult.springLength
+end
+
+local function setWheelCFrame(wheel: WheelData, cf: CFrame)
+	wheel.part.CFrame = cf
+	for _, child in wheel.part:GetChildren() do
+		if child:IsA("BasePart") then
+			child.CFrame = cf
+		end
+	end
+end
+
+local function positionWheel(wheel: WheelData, rootCF: CFrame, upDir: Vector3, contactPos: Vector3?, onGround: boolean)
+	local cf = ChassisPhysics.computeWheelCFrame({
+		onGround = onGround and contactPos ~= nil,
+		contactPosition = contactPos or Vector3.zero,
+		suspensionOffset = wheel.def.suspensionOffset,
+		isSteered = wheel.def.isSteered,
+		steerAngle = currentSteerAngle,
+		visualAngle = wheel.visualAngle,
+	}, rootCF, upDir, config)
+	setWheelCFrame(wheel, cf)
+end
+
+local function serverIdleStep(dt: number)
+	if isDriverSeated or dt <= 0 or dt > 0.5 then return end
+	if root.AssemblyMass <= 0 then return end
+
+	local rootCF = root.CFrame
+	local upDir = rootCF.UpVector
+
+	for _, wheel in wheels do
+		local suspForce, onGround, contactPos, springLen = castAndComputeSuspension(wheel, dt)
+
+		if onGround then
+			local attachPoint = rootCF:PointToWorldSpace(wheel.def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * suspForce * dt, attachPoint)
+		end
+
+		positionWheel(wheel, rootCF, upDir, contactPos, onGround)
+	end
+
+	if #wheels >= 4 then
+		local flAR, frAR = ChassisPhysics.computeAntiRoll(
+			wheels[1].groundHit, wheels[2].groundHit,
+			wheels[1].lastSuspensionLength, wheels[2].lastSuspensionLength,
+			config.antiRollStiffness
+		)
+		if flAR ~= 0 then
+			local fl_pos = rootCF:PointToWorldSpace(wheels[1].def.suspensionOffset)
+			local fr_pos = rootCF:PointToWorldSpace(wheels[2].def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * flAR * dt, fl_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * frAR * dt, fr_pos)
+		end
+		local rlAR, rrAR = ChassisPhysics.computeAntiRoll(
+			wheels[3].groundHit, wheels[4].groundHit,
+			wheels[3].lastSuspensionLength, wheels[4].lastSuspensionLength,
+			config.antiRollStiffness
+		)
+		if rlAR ~= 0 then
+			local rl_pos = rootCF:PointToWorldSpace(wheels[3].def.suspensionOffset)
+			local rr_pos = rootCF:PointToWorldSpace(wheels[4].def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rlAR * dt, rl_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rrAR * dt, rr_pos)
+		end
+	end
+end
+
+local function startServerPhysics()
+	if serverPhysicsConnection then return end
+	serverPhysicsConnection = RunService.Heartbeat:Connect(serverIdleStep)
+end
+
+local function stopServerPhysics()
+	if serverPhysicsConnection then
+		serverPhysicsConnection:Disconnect()
+		serverPhysicsConnection = nil
+	end
+end
+
+local function onOccupantChanged()
+	local humanoid = driverSeat.Occupant
+	if humanoid then
+		local character = humanoid.Parent
+		local player = Players:GetPlayerFromCharacter(character)
+		if player then
+			isDriverSeated = true
+			currentDriver = player
+
+			stopServerPhysics()
+
+			root:SetNetworkOwner(player)
+
+			for _, wheel in wheels do
+				wheel.part.Anchored = false
+				wheel.part.Massless = true
+				pcall(function() wheel.part:SetNetworkOwner(player) end)
+			end
+
+			local startEvent = vehicleModel:FindFirstChild("StartChassis")
+			if startEvent and startEvent:IsA("RemoteEvent") then
+				startEvent:FireClient(player, config, driveState.currentGear, driveState.currentRPM)
+			end
+		end
+	else
+		local prevDriver = currentDriver
+		isDriverSeated = false
+		currentDriver = nil
+
+		for _, wheel in wheels do
+			wheel.part.Anchored = true
+			wheel.part.Massless = false
+		end
+
+		pcall(function() root:SetNetworkOwner(nil) end)
+
+		if prevDriver then
+			local stopEvent = vehicleModel:FindFirstChild("StopChassis")
+			if stopEvent and stopEvent:IsA("RemoteEvent") then
+				stopEvent:FireClient(prevDriver)
+			end
+		end
+
+		startServerPhysics()
+	end
+end
+
+local function setupRemotes()
+	local startEvent = Instance.new("RemoteEvent")
+	startEvent.Name = "StartChassis"
+	startEvent.Parent = vehicleModel
+
+	local stopEvent = Instance.new("RemoteEvent")
+	stopEvent.Name = "StopChassis"
+	stopEvent.Parent = vehicleModel
+
+	local stateEvent = Instance.new("RemoteEvent")
+	stateEvent.Name = "ChassisState"
+	stateEvent.Parent = vehicleModel
+
+	local hydSyncEvent = Instance.new("RemoteEvent")
+	hydSyncEvent.Name = "HydraulicSync"
+	hydSyncEvent.Parent = vehicleModel
+	hydSyncEvent.OnServerEvent:Connect(function(player, offsets)
+		if player ~= currentDriver then return end
+		if typeof(offsets) ~= "table" then return end
+		for i, wheel in wheels do
+			local val = offsets[i]
+			if typeof(val) == "number" then
+				wheel.hydraulicOffset = math.clamp(val, -config.hydraulicMaxLift, config.hydraulicMaxLift)
+			end
+		end
+	end)
+end
+
+-- Initialize: keep root anchored until first physics frame
+weldModel(body)
+applyCenterOfMass()
+setupRemotes()
+
+for _, wheel in wheels do
+	wheel.part.Anchored = true
+	wheel.part.CanCollide = false
+	for _, child in wheel.part:GetChildren() do
+		if child:IsA("BasePart") then
+			child.Anchored = false
+			child.Massless = true
+			child.CanCollide = false
+		end
+	end
+end
+
+driverSeat.CanCollide = false
+root.CanCollide = false
+
+driverSeat:GetPropertyChangedSignal("Occupant"):Connect(onOccupantChanged)
+
+local prompt = driverSeat:FindFirstChildOfClass("ProximityPrompt")
+if prompt then
+	prompt.Triggered:Connect(function(player)
+		local char = player.Character
+		if char then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			if hum and not driverSeat.Occupant then
+				driverSeat:Sit(hum)
+			end
+		end
+	end)
+end
+
+local firstFrame = true
+local originalIdleStep = serverIdleStep
+serverIdleStep = function(dt: number)
+	if firstFrame then
+		firstFrame = false
+		root.Anchored = false
+		driverSeat.Anchored = false
+	end
+	originalIdleStep(dt)
+end
+
+startServerPhysics()
+print("[Chassis] Server initialized, idle suspension running")
+]]></ProtectedString></Properties></Item></Item>
+<Item class="LocalScript" referent="RBX00000012"><Properties><string name="Name">ChassisClient</string><ProtectedString name="Source"><![CDATA[--[[
+	ChassisClient — Client-side physics loop for responsive driving.
+	
+	Runs on the player who is sitting in the driver seat.
+	Network ownership is transferred to them by the server script.
+	All raycast suspension, drivetrain, steering, and force
+	application happen here for zero-latency feel.
+	
+	Place this as a LocalScript in StarterPlayerScripts.
+	DriverHUD should be a ModuleScript child of this script.
+]]
+
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local vehicleModel: Model = nil
+local config: any = nil
+local driverSeat: Seat = nil
+local root: BasePart = nil
+local wheelsFolder: Model = nil
+
+local ChassisConfig = nil
+local LiveValuesSync = nil
+local Drivetrain = nil
+local ChassisPhysics = nil
+
+local driveState = nil
+
+type WheelData = {
+	part: BasePart,
+	def: any,
+	lastSuspensionLength: number,
+	visualAngle: number,
+	groundHit: boolean,
+	contactNormal: Vector3,
+	suspensionForce: number,
+	localVelocity: Vector3,
+	surfaceMaterial: Enum.Material?,
+	hydraulicOffset: number,
+	hydraulicTarget: number,
+}
+
+local wheels: { WheelData } = {}
+local rayParams: RaycastParams = nil
+local currentSteerAngle = 0
+local physicsConnection: RBXScriptConnection? = nil
+local isActive = false
+local handbrakeInput = 0
+local absActive = false
+local tcsActive = false
+local absPulseTimer = 0
+
+local hud = nil
+local telemetryVisible = false
+local lastGForce = Vector3.zero
+local gForceSmoothFactor = 0.15
+
+-- Hydraulics state
+local hydraulicInputs = { 0, 0, 0, 0 } -- per-corner target direction: +1 raise, -1 lower, 0 idle
+local bounceMode = false
+local bounceIntensityLevel = 0 -- 0=off, 1=low, 2=med, 3=high
+local BOUNCE_AMPLITUDES = { 0, 0.5, 1.5, 3.0 }
+local bounceTimer = 0
+local hydraulicKeysHeld: { [Enum.KeyCode]: boolean } = {}
+local hydSyncTimer = 0
+local HYD_SYNC_INTERVAL = 0.2
+local savedJumpHeight: number? = nil
+local savedJumpPower: number? = nil
+
+local keysHeld: { [Enum.KeyCode]: boolean } = {}
+local function getThrottleInput(): number
+	local fwd = if keysHeld[Enum.KeyCode.W] then 1 else 0
+	local rev = if keysHeld[Enum.KeyCode.S] then 1 else 0
+	return fwd - rev
+end
+local function getSteerInput(): number
+	local left = if keysHeld[Enum.KeyCode.A] then 1 else 0
+	local right = if keysHeld[Enum.KeyCode.D] then 1 else 0
+	return left - right
+end
+
+local function updateHydraulicInputsFromKeys()
+	-- Pair keys: I/K = front/back, J/L = left/right
+	-- Corner keys: U/O = FL/FR, N/M = RL/RR
+	-- Wheel order: 1=FL, 2=FR, 3=RL, 4=RR
+	local targets = { 0, 0, 0, 0 }
+
+	-- Front pair (I = raise front, K = lower front)
+	if hydraulicKeysHeld[Enum.KeyCode.I] then targets[1] += 1; targets[2] += 1 end
+	if hydraulicKeysHeld[Enum.KeyCode.K] then targets[1] -= 1; targets[2] -= 1 end
+	-- Left/Right pair (J = raise left, L = raise right)
+	if hydraulicKeysHeld[Enum.KeyCode.J] then targets[1] += 1; targets[3] += 1 end
+	if hydraulicKeysHeld[Enum.KeyCode.L] then targets[2] += 1; targets[4] += 1 end
+	-- Individual corners
+	if hydraulicKeysHeld[Enum.KeyCode.U] then targets[1] += 1 end -- FL
+	if hydraulicKeysHeld[Enum.KeyCode.O] then targets[2] += 1 end -- FR
+	if hydraulicKeysHeld[Enum.KeyCode.N] then targets[3] += 1 end -- RL
+	if hydraulicKeysHeld[Enum.KeyCode.M] then targets[4] += 1 end -- RR
+
+	for i = 1, 4 do
+		hydraulicInputs[i] = math.clamp(targets[i], -1, 1)
+	end
+end
+
+local HYDRAULIC_KEYS = {
+	[Enum.KeyCode.I] = true, [Enum.KeyCode.K] = true,
+	[Enum.KeyCode.J] = true, [Enum.KeyCode.L] = true,
+	[Enum.KeyCode.U] = true, [Enum.KeyCode.O] = true,
+	[Enum.KeyCode.N] = true, [Enum.KeyCode.M] = true,
+}
+
+local function exitVehicle()
+	if not isActive or not driverSeat or not root then return end
+
+	local exitPos = root.CFrame * CFrame.new(6, 0, 0)
+	local char = player.Character
+	local hum = if char then char:FindFirstChildOfClass("Humanoid") else nil
+
+	if hum then
+		hum.Sit = false
+		task.delay(0.1, function()
+			if char and char.PrimaryPart then
+				char:PivotTo(CFrame.new(exitPos.Position + Vector3.new(0, 3, 0)))
+			end
+		end)
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.A
+		or input.KeyCode == Enum.KeyCode.S or input.KeyCode == Enum.KeyCode.D then
+		keysHeld[input.KeyCode] = true
+	end
+
+	if not isActive then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Space then
+		handbrakeInput = 1
+	elseif input.KeyCode == Enum.KeyCode.F then
+		exitVehicle()
+	elseif processed then
+		return
+	elseif input.KeyCode == Enum.KeyCode.T then
+		telemetryVisible = not telemetryVisible
+		if hud then
+			hud:setTelemetryVisible(telemetryVisible)
+		end
+	elseif input.KeyCode == Enum.KeyCode.B then
+		bounceMode = not bounceMode
+		if bounceMode and bounceIntensityLevel == 0 then
+			bounceIntensityLevel = 2
+		end
+		if not bounceMode then
+			bounceIntensityLevel = 0
+		end
+	elseif input.KeyCode == Enum.KeyCode.V then
+		if bounceMode then
+			bounceIntensityLevel = (bounceIntensityLevel % 3) + 1
+		end
+	elseif HYDRAULIC_KEYS[input.KeyCode] then
+		hydraulicKeysHeld[input.KeyCode] = true
+		updateHydraulicInputsFromKeys()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+	if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.A
+		or input.KeyCode == Enum.KeyCode.S or input.KeyCode == Enum.KeyCode.D then
+		keysHeld[input.KeyCode] = nil
+	end
+
+	if input.KeyCode == Enum.KeyCode.Space then
+		handbrakeInput = 0
+	end
+
+	if HYDRAULIC_KEYS[input.KeyCode] then
+		hydraulicKeysHeld[input.KeyCode] = nil
+		updateHydraulicInputsFromKeys()
+	end
+end)
+
+local function buildWheels()
+	wheels = {}
+	for _, def in config.wheels do
+		local wheelPart = wheelsFolder:FindFirstChild(def.partName)
+		if wheelPart then
+			table.insert(wheels, {
+				part = wheelPart,
+				def = def,
+				lastSuspensionLength = config.suspensionRestLength,
+				visualAngle = 0,
+				groundHit = false,
+				contactNormal = Vector3.yAxis,
+				suspensionForce = 0,
+				localVelocity = Vector3.zero,
+				hydraulicOffset = 0,
+				hydraulicTarget = 0,
+			})
+		else
+			warn("[ChassisClient] Wheel not found: " .. def.partName)
+		end
+	end
+end
+
+local function castAndComputeSuspension(wheel: WheelData, dt: number): (number, boolean, Vector3, number, Enum.Material?)
+	local worldOffset = root.CFrame:PointToWorldSpace(wheel.def.suspensionOffset)
+	local effectiveRestLength = config.suspensionRestLength + wheel.hydraulicOffset
+	local rayLength = effectiveRestLength + config.wheelRadius + config.suspensionMaxTravel
+
+	local result = workspace:Raycast(worldOffset, -Vector3.yAxis * rayLength, rayParams)
+
+	local suspResult = ChassisPhysics.computeSuspension({
+		hitDistance = if result then (worldOffset - result.Position).Magnitude else nil,
+		hitNormal = if result then result.Normal else nil,
+		rayOrigin = worldOffset,
+		rayLength = rayLength,
+		lastSuspensionLength = wheel.lastSuspensionLength,
+		hydraulicOffset = wheel.hydraulicOffset,
+	}, config, #wheels, root.AssemblyMass, workspace.Gravity, dt)
+
+	wheel.lastSuspensionLength = suspResult.springLength
+	wheel.groundHit = suspResult.onGround
+	wheel.contactNormal = if result then result.Normal else Vector3.yAxis
+	wheel.suspensionForce = suspResult.force
+	wheel.surfaceMaterial = if result then result.Material else nil
+
+	return suspResult.force, suspResult.onGround, if result then result.Position else suspResult.contactPosition, suspResult.springLength, if result then result.Material else nil
+end
+
+local function setWheelCFrame(wheel: WheelData, cf: CFrame)
+	wheel.part.CFrame = cf
+	for _, child in wheel.part:GetChildren() do
+		if child:IsA("BasePart") then child.CFrame = cf end
+	end
+end
+
+local function physicsStep(dt: number)
+	if not isActive or not root or dt <= 0 or dt > 0.5 then return end
+
+	local throttleInput = getThrottleInput()
+	local steerInput = getSteerInput()
+	local brakeInput = 0
+
+	local forwardSpeed = root.AssemblyLinearVelocity:Dot(root.CFrame.LookVector)
+	if (throttleInput > 0.1 and forwardSpeed < -2) or (throttleInput < -0.1 and forwardSpeed > 2) then
+		brakeInput = math.abs(throttleInput) * 0.7
+	end
+
+	-- Counter-steer assist: detect oversteer and blend corrective input
+	local lateralVel = root.AssemblyLinearVelocity:Dot(root.CFrame.RightVector)
+	local counterSteerBlend = 0
+	if math.abs(forwardSpeed) > 5 and math.abs(lateralVel) > 2 then
+		local slideRatio = lateralVel / math.max(math.abs(forwardSpeed), 1)
+		counterSteerBlend = math.clamp(slideRatio * config.counterSteerFactor, -1, 1)
+	end
+	steerInput = math.clamp(steerInput + counterSteerBlend, -1, 1)
+
+	if root.AssemblyMass <= 0 then return end
+
+	local rootCF = root.CFrame
+	local rootVelocity = root.AssemblyLinearVelocity
+	local upDir = rootCF.UpVector
+	local speed = rootVelocity.Magnitude
+
+	currentSteerAngle = ChassisPhysics.computeSteerAngle(currentSteerAngle, steerInput, speed, config, dt)
+
+	Drivetrain.update(driveState, config, forwardSpeed, throttleInput, dt)
+
+	-- Hydraulics: update per-wheel targets and animate offsets
+	bounceTimer += dt
+	for i, wheel in wheels do
+		local input = hydraulicInputs[i] or 0
+
+		if bounceMode and bounceIntensityLevel > 0 then
+			local amp = BOUNCE_AMPLITUDES[bounceIntensityLevel + 1] or 0
+			local phase = (i - 1) * math.pi * 0.5 -- stagger corners for visual flair
+			local bounceVal = math.sin(bounceTimer * config.hydraulicBounceFrequency * math.pi * 2 + phase) * amp
+			wheel.hydraulicTarget = bounceVal
+		else
+			wheel.hydraulicTarget += input * config.hydraulicPumpSpeed * dt
+			if input == 0 then
+				-- Gravity-assisted lower when no input held
+				wheel.hydraulicTarget = wheel.hydraulicTarget - wheel.hydraulicTarget * config.hydraulicLowerSpeed * dt * 0.3
+			end
+		end
+		wheel.hydraulicTarget = math.clamp(wheel.hydraulicTarget, -config.hydraulicMaxLift, config.hydraulicMaxLift)
+
+		-- Asymmetric animation: fast pump up, controlled descent
+		local diff = wheel.hydraulicTarget - wheel.hydraulicOffset
+		local speed
+		if diff > 0 then
+			speed = config.hydraulicPumpSpeed
+		else
+			speed = config.hydraulicLowerSpeed
+		end
+		wheel.hydraulicOffset += math.clamp(diff, -speed * dt, speed * dt)
+	end
+
+	type WheelFrame = {
+		wheel: WheelData,
+		onGround: boolean,
+		contactPos: Vector3,
+		wheelForward: Vector3,
+		wheelRight: Vector3,
+		longitudinalSpeed: number,
+		pointVelocity: Vector3,
+		suspForce: number,
+		surfaceFriction: number,
+	}
+	local wheelFrames: { WheelFrame } = {}
+
+	for i, wheel in wheels do
+		local suspForce, onGround, contactPos, springLen, hitMaterial = castAndComputeSuspension(wheel, dt)
+		local surfFriction = 1.0
+		if hitMaterial then
+			surfFriction = ChassisConfig.getSurfaceFriction(config, hitMaterial)
+		end
+		local wf: WheelFrame = {
+			wheel = wheel,
+			onGround = onGround,
+			contactPos = contactPos,
+			wheelForward = Vector3.zero,
+			wheelRight = Vector3.zero,
+			longitudinalSpeed = 0,
+			pointVelocity = Vector3.zero,
+			suspForce = suspForce,
+			surfaceFriction = surfFriction,
+		}
+
+		if onGround then
+			local attachPoint = rootCF:PointToWorldSpace(wheel.def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * suspForce * dt, attachPoint)
+
+			local wheelWorldCF = rootCF * CFrame.new(wheel.def.suspensionOffset)
+			if wheel.def.isSteered then
+				wheelWorldCF = wheelWorldCF * CFrame.Angles(0, math.rad(currentSteerAngle), 0)
+			end
+			wf.wheelRight = wheelWorldCF.RightVector
+			wf.wheelForward = wheelWorldCF.LookVector
+
+			local pointVelocity = root:GetVelocityAtPosition(attachPoint)
+			wf.pointVelocity = pointVelocity
+			local lateralSpeed = pointVelocity:Dot(wf.wheelRight)
+			local longitudinalSpeed = pointVelocity:Dot(wf.wheelForward)
+			wf.longitudinalSpeed = longitudinalSpeed
+			wheel.localVelocity = Vector3.new(lateralSpeed, 0, longitudinalSpeed)
+
+			local lateralForce = ChassisPhysics.computeLateralForce({
+				lateralSpeed = lateralSpeed,
+				longitudinalSpeed = longitudinalSpeed,
+				suspensionForce = suspForce,
+			}, config, wf.surfaceFriction)
+
+			if handbrakeInput > 0.5 and not wheel.def.isSteered then
+				lateralForce = lateralForce * 0.15
+			end
+
+			root:ApplyImpulseAtPosition(wf.wheelRight * lateralForce * dt, attachPoint)
+		end
+
+		wheelFrames[i] = wf
+	end
+
+	local axles: { [number]: { WheelFrame } } = {}
+	for _, wf in wheelFrames do
+		if wf.wheel.def.isDriven then
+			local aid = wf.wheel.def.axleId
+			if not axles[aid] then axles[aid] = {} end
+			table.insert(axles[aid], wf)
+		end
+	end
+
+	local driveTorque = Drivetrain.getOutputTorque(driveState, config, throttleInput)
+	local atSpeedLimit = math.abs(forwardSpeed) > config.maxSpeedStudsPerSec
+
+	local axleIds = {}
+	for aid in axles do
+		table.insert(axleIds, aid)
+	end
+	table.sort(axleIds)
+
+	local axleTorque: { [number]: number } = {}
+	if #axleIds == 1 then
+		axleTorque[axleIds[1]] = driveTorque
+	elseif #axleIds == 2 then
+		local frontAxle, rearAxle = axleIds[1], axleIds[2]
+		local frontAvgSpeed, rearAvgSpeed = 0, 0
+		for _, wf in axles[frontAxle] do frontAvgSpeed += wf.longitudinalSpeed end
+		frontAvgSpeed /= #axles[frontAxle]
+		for _, wf in axles[rearAxle] do rearAvgSpeed += wf.longitudinalSpeed end
+		rearAvgSpeed /= #axles[rearAxle]
+
+		local fFrac, rFrac = Drivetrain.centerSplit(config, frontAvgSpeed, rearAvgSpeed, throttleInput)
+		axleTorque[frontAxle] = driveTorque * fFrac
+		axleTorque[rearAxle] = driveTorque * rFrac
+	else
+		for _, aid in axleIds do
+			axleTorque[aid] = driveTorque / #axleIds
+		end
+	end
+
+	local wheelTorque: { [WheelData]: number } = {}
+	for aid, axleWheels in axles do
+		local diff = Drivetrain.getDiffForAxle(config, aid)
+		local tq = axleTorque[aid] or 0
+
+		if #axleWheels == 2 then
+			local lFrac, rFrac = Drivetrain.diffSplit(
+				diff,
+				axleWheels[1].longitudinalSpeed,
+				axleWheels[2].longitudinalSpeed,
+				throttleInput
+			)
+			wheelTorque[axleWheels[1].wheel] = tq * lFrac
+			wheelTorque[axleWheels[2].wheel] = tq * rFrac
+		else
+			for _, wf in axleWheels do
+				wheelTorque[wf.wheel] = tq / #axleWheels
+			end
+		end
+	end
+
+	absPulseTimer += dt * config.absCycleRate
+	local absPulseOn = (math.sin(absPulseTimer * math.pi * 2) > 0)
+
+	local anyAbsTriggered = false
+	local anyTcsTriggered = false
+
+	for i, wf in wheelFrames do
+		local wheel = wf.wheel
+		if wf.onGround then
+			local attachPoint = rootCF:PointToWorldSpace(wheel.def.suspensionOffset)
+
+			local tcsMultiplier = 1
+			if wheel.def.isDriven and config.tcsEnabled and math.abs(throttleInput) > 0.05 then
+				local mult, triggered = ChassisPhysics.computeTcsMultiplier(
+					wf.longitudinalSpeed, forwardSpeed, config
+				)
+				tcsMultiplier = mult
+				if triggered then anyTcsTriggered = true end
+			end
+
+			if wheel.def.isDriven and not atSpeedLimit then
+				local wTorque = (wheelTorque[wheel] or 0) * tcsMultiplier
+				local driveForce = ChassisPhysics.computeDriveForce(wTorque, config.wheelRadius, 1, wf.surfaceFriction)
+
+				local driveDir = wf.wheelForward
+				if throttleInput < 0 then
+					driveDir = -driveDir
+				end
+				root:ApplyImpulseAtPosition(driveDir * driveForce * dt * config.longitudinalGripMultiplier, attachPoint)
+			end
+
+			if wheel.def.isDriven and math.abs(throttleInput) < 0.05 and math.abs(wf.longitudinalSpeed) > 1 then
+				local engineBrakeForce = ChassisPhysics.computeEngineBrakeForce(
+					wf.longitudinalSpeed, wf.suspForce, driveState.currentRPM, config
+				)
+				local brakeDir = -wf.wheelForward * (if wf.longitudinalSpeed > 0 then 1 else -1)
+				root:ApplyImpulseAtPosition(brakeDir * engineBrakeForce * dt, attachPoint)
+			end
+
+			if brakeInput > 0.05 then
+				local isFrontAxle = (wheel.def.axleId == 1)
+				local brakeForce = ChassisPhysics.computeBrakeForce(brakeInput, isFrontAxle, config)
+
+				local applyBrake = true
+				if ChassisPhysics.shouldAbsPulse(wf.longitudinalSpeed, forwardSpeed, config) then
+					applyBrake = absPulseOn
+					anyAbsTriggered = true
+				end
+
+				if applyBrake then
+					local brakeDir = -wf.pointVelocity.Unit
+					if wf.pointVelocity.Magnitude < 1 then
+						brakeDir = Vector3.zero
+					end
+					root:ApplyImpulseAtPosition(brakeDir * brakeForce * dt, attachPoint)
+				end
+			end
+
+			if handbrakeInput > 0.5 and wheel.def.axleId == 2 then
+				local hbForce = config.handbrakeForce / config.wheelRadius
+				local brakeDir = -wf.pointVelocity.Unit
+				if wf.pointVelocity.Magnitude < 1 then
+					brakeDir = Vector3.zero
+				end
+				root:ApplyImpulseAtPosition(brakeDir * hbForce * dt, attachPoint)
+			end
+
+			local wheelSpinSpeed = wf.longitudinalSpeed / config.wheelRadius
+			wheel.visualAngle += math.deg(wheelSpinSpeed * dt)
+
+			local cf = ChassisPhysics.computeWheelCFrameSmoothed({
+				onGround = true,
+				contactPosition = wf.contactPos,
+				suspensionOffset = wheel.def.suspensionOffset,
+				isSteered = wheel.def.isSteered,
+				steerAngle = currentSteerAngle,
+				visualAngle = wheel.visualAngle,
+			}, rootCF, upDir, config)
+			setWheelCFrame(wheel, cf)
+		else
+			-- Decay wheel spin smoothly while airborne instead of snapping to 0
+			wheel.visualAngle = wheel.visualAngle * (1 - dt * 2)
+
+			local cf = ChassisPhysics.computeWheelCFrameSmoothed({
+				onGround = false,
+				contactPosition = Vector3.zero,
+				suspensionOffset = wheel.def.suspensionOffset,
+				isSteered = wheel.def.isSteered,
+				steerAngle = currentSteerAngle,
+				visualAngle = wheel.visualAngle,
+			}, rootCF, upDir, config)
+			setWheelCFrame(wheel, cf)
+		end
+	end
+
+	absActive = anyAbsTriggered
+	tcsActive = anyTcsTriggered
+
+	if #wheels >= 4 then
+		local flAR, frAR = ChassisPhysics.computeAntiRoll(
+			wheels[1].groundHit, wheels[2].groundHit,
+			wheels[1].lastSuspensionLength, wheels[2].lastSuspensionLength,
+			config.antiRollStiffness
+		)
+		if flAR ~= 0 then
+			local fl_pos = rootCF:PointToWorldSpace(wheels[1].def.suspensionOffset)
+			local fr_pos = rootCF:PointToWorldSpace(wheels[2].def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * flAR * dt, fl_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * frAR * dt, fr_pos)
+		end
+		local rlAR, rrAR = ChassisPhysics.computeAntiRoll(
+			wheels[3].groundHit, wheels[4].groundHit,
+			wheels[3].lastSuspensionLength, wheels[4].lastSuspensionLength,
+			config.antiRollStiffness
+		)
+		if rlAR ~= 0 then
+			local rl_pos = rootCF:PointToWorldSpace(wheels[3].def.suspensionOffset)
+			local rr_pos = rootCF:PointToWorldSpace(wheels[4].def.suspensionOffset)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rlAR * dt, rl_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rrAR * dt, rr_pos)
+		end
+	end
+
+	local downforceImpulse = ChassisPhysics.computeDownforce(speed, config.downforceCoefficient, dt)
+	if downforceImpulse.Magnitude > 0 then
+		root:ApplyImpulseAtPosition(downforceImpulse, rootCF.Position)
+	end
+
+	local dragImpulse = ChassisPhysics.computeDrag(rootVelocity, speed, config.dragCoefficient, dt)
+	if dragImpulse.Magnitude > 0 then
+		root:ApplyImpulseAtPosition(dragImpulse, rootCF.Position)
+	end
+
+	root.AssemblyAngularVelocity = ChassisPhysics.computeAngularDamping(
+		root.AssemblyAngularVelocity, config.angularDampingCoefficient, dt
+	)
+
+	if hud then
+		local speedMPH = math.abs(forwardSpeed) * 0.6818
+		local dominantSurface: string? = nil
+		local lowestFriction = 2.0
+		for _, wf in wheelFrames do
+			if wf.onGround and wf.wheel.surfaceMaterial then
+				if wf.surfaceFriction < lowestFriction then
+					lowestFriction = wf.surfaceFriction
+					dominantSurface = wf.wheel.surfaceMaterial.Name
+				end
+			end
+		end
+		local hydraulicsActive = false
+		for _, w in wheels do
+			if math.abs(w.hydraulicOffset) > 0.05 then
+				hydraulicsActive = true
+				break
+			end
+		end
+		hud:update(speedMPH, driveState.currentGear, driveState.currentRPM, config.redlineRPM, driveState.isReversing, absActive, tcsActive, dominantSurface, hydraulicsActive, bounceMode, bounceIntensityLevel)
+
+		if telemetryVisible then
+			local lateralAccel = rootVelocity:Dot(rootCF.RightVector)
+			local longAccel = forwardSpeed
+			local gravity = workspace.Gravity
+			local instantGForce = Vector3.new(
+				root.AssemblyLinearVelocity:Dot(rootCF.RightVector),
+				0,
+				forwardSpeed
+			)
+			local accel = (instantGForce - lastGForce) / math.max(dt, 0.001)
+			local gLateral = accel.X / gravity
+			local gLongitudinal = accel.Z / gravity
+			lastGForce = instantGForce
+
+			gLateral = math.clamp(gLateral * gForceSmoothFactor, -2, 2)
+			gLongitudinal = math.clamp(gLongitudinal * gForceSmoothFactor, -2, 2)
+
+			local totalSuspForce = 0
+			for _, wf in wheelFrames do
+				if wf.onGround then totalSuspForce += wf.suspForce end
+			end
+
+			local wheelTelemetry = {}
+			for i, wf in wheelFrames do
+				local wheel = wf.wheel
+				local latSpeed = if wf.onGround then wheel.localVelocity.X else 0
+				local lonSpeed = wf.longitudinalSpeed
+				local slipAngle = 0
+				if math.abs(lonSpeed) > 0.5 then
+					slipAngle = math.deg(math.atan2(latSpeed, math.abs(lonSpeed)))
+				end
+				local slipRatio = 0
+				if math.abs(forwardSpeed) > 1 then
+					slipRatio = (math.abs(lonSpeed) - math.abs(forwardSpeed)) / math.abs(forwardSpeed)
+				end
+				local compression = config.suspensionRestLength - wheel.lastSuspensionLength
+				local weightFrac = if totalSuspForce > 0 then wf.suspForce / totalSuspForce else 0.25
+
+				wheelTelemetry[i] = {
+					suspCompression = compression,
+					contactForce = wf.suspForce,
+					slipAngle = slipAngle,
+					slipRatio = slipRatio,
+					surfaceMaterial = if wheel.surfaceMaterial then wheel.surfaceMaterial.Name else "---",
+					onGround = wf.onGround,
+					weightFraction = weightFrac,
+				}
+			end
+
+			hud:updateTelemetry({
+				gLateral = gLateral,
+				gLongitudinal = gLongitudinal,
+				speed = speedMPH,
+				rpm = driveState.currentRPM,
+				gear = driveState.currentGear,
+				steerAngle = currentSteerAngle,
+				wheels = wheelTelemetry,
+			})
+		end
+	end
+
+	-- Sync hydraulic offsets to server periodically
+	hydSyncTimer += dt
+	if hydSyncTimer >= HYD_SYNC_INTERVAL then
+		hydSyncTimer = 0
+		local hydSyncEvent = vehicleModel and vehicleModel:FindFirstChild("HydraulicSync")
+		if hydSyncEvent and hydSyncEvent:IsA("RemoteEvent") then
+			local offsets = {}
+			for i, w in wheels do
+				offsets[i] = w.hydraulicOffset
+			end
+			hydSyncEvent:FireServer(offsets)
+		end
+	end
+
+end
+
+local function findVehicleModel(seat: Instance): Model?
+	local model = seat.Parent
+	while model do
+		if model:FindFirstChild("ChassisConfig") and model:FindFirstChild("Body") and model:FindFirstChild("Wheels") then
+			return model
+		end
+		if model == workspace then break end
+		model = model.Parent
+	end
+	return nil
+end
+
+local function startDriving(vModel: Model, initialConfig: any, gear: number?, rpm: number?)
+	if isActive then return end
+
+	vehicleModel = vModel
+	driverSeat = vModel:FindFirstChild("DriverSeat")
+	if not driverSeat then
+		for _, desc in vModel:GetDescendants() do
+			if desc:IsA("Seat") then
+				driverSeat = desc
+				break
+			end
+		end
+	end
+
+	local bodyModel = vModel:FindFirstChild("Body")
+	if not bodyModel then
+		warn("[ChassisClient] No Body model found in vehicle")
+		return
+	end
+	root = bodyModel.PrimaryPart or bodyModel:FindFirstChildWhichIsA("BasePart")
+	if not root then
+		warn("[ChassisClient] No root part found in Body")
+		return
+	end
+	wheelsFolder = vModel:FindFirstChild("Wheels")
+	if not wheelsFolder then
+		warn("[ChassisClient] No Wheels model found in vehicle")
+		return
+	end
+
+	local configModule = vModel:FindFirstChild("ChassisConfig")
+	if not configModule then
+		warn("[ChassisClient] ChassisConfig not found in vehicle model")
+		return
+	end
+	local lvsModule = vModel:FindFirstChild("LiveValuesSync")
+	if not lvsModule then
+		warn("[ChassisClient] LiveValuesSync not found in vehicle model")
+		return
+	end
+	local dtModule = vModel:FindFirstChild("Drivetrain")
+	if not dtModule then
+		warn("[ChassisClient] Drivetrain not found in vehicle model")
+		return
+	end
+	local cpModule = vModel:FindFirstChild("ChassisPhysics")
+	if not cpModule then
+		warn("[ChassisClient] ChassisPhysics not found in vehicle model")
+		return
+	end
+
+	ChassisConfig = require(configModule)
+	LiveValuesSync = require(lvsModule)
+	Drivetrain = require(dtModule)
+	ChassisPhysics = require(cpModule)
+
+	config = ChassisConfig.new(initialConfig)
+	driveState = Drivetrain.new()
+	if gear then driveState.currentGear = gear end
+	if rpm then driveState.currentRPM = rpm end
+
+	local liveContainer = vModel:FindFirstChild("LiveValues")
+	if liveContainer then
+		LiveValuesSync.bind(liveContainer, config)
+	end
+
+	rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { vehicleModel }
+
+	buildWheels()
+
+	local hudModule = script:FindFirstChild("DriverHUD")
+	if hudModule then
+		local DriverHUD = require(hudModule)
+		hud = DriverHUD.new(playerGui)
+	else
+		warn("[ChassisClient] DriverHUD module not found as child of this script")
+	end
+
+	local char = player.Character
+	if char then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			savedJumpHeight = hum.JumpHeight
+			savedJumpPower = hum.JumpPower
+			hum.JumpHeight = 0
+			hum.JumpPower = 0
+		end
+	end
+
+	handbrakeInput = 0
+	isActive = true
+	physicsConnection = RunService.Heartbeat:Connect(physicsStep)
+	print("[ChassisClient] Driving started")
+end
+
+local function stopDriving()
+	isActive = false
+	if physicsConnection then
+		physicsConnection:Disconnect()
+		physicsConnection = nil
+	end
+	if hud then
+		hud:destroy()
+		hud = nil
+	end
+
+	local char = player.Character
+	if char then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			if savedJumpHeight then hum.JumpHeight = savedJumpHeight end
+			if savedJumpPower then hum.JumpPower = savedJumpPower end
+		end
+	end
+	savedJumpHeight = nil
+	savedJumpPower = nil
+
+	vehicleModel = nil
+	config = nil
+	driveState = nil
+	handbrakeInput = 0
+	bounceMode = false
+	bounceIntensityLevel = 0
+	bounceTimer = 0
+	hydraulicInputs = { 0, 0, 0, 0 }
+	table.clear(hydraulicKeysHeld)
+	print("[ChassisClient] Driving stopped")
+end
+
+local function setupSeatListener()
+	local function onCharacter(character)
+		local humanoid = character:WaitForChild("Humanoid", 10)
+		if not humanoid then return end
+
+		humanoid.Seated:Connect(function(seated, seat)
+			if seated and seat and (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then
+				local vModel = findVehicleModel(seat)
+				if vModel then
+					task.defer(function()
+						startDriving(vModel, nil, nil, nil)
+					end)
+				else
+					warn("[ChassisClient] Sat in seat but could not find vehicle model with ChassisConfig/Body/Wheels")
+				end
+			elseif not seated and isActive then
+				stopDriving()
+			end
+		end)
+	end
+
+	if player.Character then
+		onCharacter(player.Character)
+	end
+	player.CharacterAdded:Connect(onCharacter)
+end
+
+setupSeatListener()
+print("[ChassisClient] Seat listener ready")
+]]></ProtectedString></Properties><Item class="ModuleScript" referent="RBX00000013"><Properties><string name="Name">DriverHUD</string><ProtectedString name="Source"><![CDATA[--[[
+	DriverHUD — In-vehicle dashboard UI with speedometer, RPM gauge,
+	gear display, and speed readout. Appears when the player sits
+	in the driver seat, disappears when they exit.
+	
+	All UI is created programmatically — no RBXM dependencies.
+	Gauges use circular arc rendering via UIStroke on frames.
+]]
+
+local TweenService = game:GetService("TweenService")
+
+local DriverHUD = {}
+DriverHUD.__index = DriverHUD
+
+local GAUGE_TWEEN_INFO = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local function createRoundFrame(parent, name, size, pos, bgColor, transparency)
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.Size = size
+	frame.Position = pos
+	frame.BackgroundColor3 = bgColor or Color3.fromRGB(20, 20, 25)
+	frame.BackgroundTransparency = transparency or 0
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = frame
+
+	return frame
+end
+
+local function createLabel(parent, name, text, size, pos, textColor, textSize, font)
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.Size = size
+	label.Position = pos
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = textColor or Color3.fromRGB(255, 255, 255)
+	label.TextSize = textSize or 24
+	label.Font = font or Enum.Font.GothamBold
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Parent = parent
+	return label
+end
+
+local function createNeedleFrame(parent, name, pivotPos, length, color)
+	local container = Instance.new("Frame")
+	container.Name = name
+	container.Size = UDim2.new(0, 4, 0, length)
+	container.Position = pivotPos
+	container.AnchorPoint = Vector2.new(0.5, 1)
+	container.BackgroundColor3 = color or Color3.fromRGB(255, 60, 60)
+	container.BackgroundTransparency = 0
+	container.BorderSizePixel = 0
+	container.Rotation = 0
+	container.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 2)
+	corner.Parent = container
+
+	return container
+end
+
+local function createGaugeArc(parent, centerX, centerY, radius, startAngle, endAngle, segments, color, thickness)
+	-- Render gauge tick marks around an arc
+	local totalAngle = endAngle - startAngle
+	for i = 0, segments do
+		local angle = startAngle + (totalAngle * i / segments)
+		local rad = math.rad(angle)
+		local tickLen = (i % 2 == 0) and 12 or 6
+		local tickWidth = (i % 2 == 0) and 2 or 1
+
+		local x = centerX + math.sin(rad) * radius
+		local y = centerY - math.cos(rad) * radius
+
+		local tick = Instance.new("Frame")
+		tick.Size = UDim2.new(0, tickWidth, 0, tickLen)
+		tick.Position = UDim2.new(0, x, 0, y)
+		tick.AnchorPoint = Vector2.new(0.5, 0)
+		tick.BackgroundColor3 = color or Color3.fromRGB(180, 180, 180)
+		tick.BackgroundTransparency = 0
+		tick.BorderSizePixel = 0
+		tick.Rotation = angle
+		tick.Parent = parent
+	end
+end
+
+function DriverHUD.new(playerGui: PlayerGui)
+	local self = setmetatable({}, DriverHUD)
+
+	-- Main ScreenGui
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "DriverHUD"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 10
+	gui.Parent = playerGui
+
+	self.gui = gui
+
+	-- Container at bottom-right
+	local container = Instance.new("Frame")
+	container.Name = "DashContainer"
+	container.Size = UDim2.new(0, 420, 0, 220)
+	container.Position = UDim2.new(1, -440, 1, -240)
+	container.BackgroundTransparency = 1
+	container.Parent = gui
+
+	-- RPM Gauge (left circular gauge)
+	local rpmGauge = createRoundFrame(container, "RPMGauge",
+		UDim2.new(0, 190, 0, 190),
+		UDim2.new(0, 0, 0, 15),
+		Color3.fromRGB(15, 15, 20), 0)
+
+	local rpmStroke = Instance.new("UIStroke")
+	rpmStroke.Thickness = 3
+	rpmStroke.Color = Color3.fromRGB(60, 60, 70)
+	rpmStroke.Parent = rpmGauge
+
+	createGaugeArc(rpmGauge, 95, 95, 75, -135, 135, 18, Color3.fromRGB(120, 120, 130), 2)
+
+	-- RPM redline zone ticks
+	for i = 15, 18 do
+		local angle = -135 + (270 * i / 18)
+		local rad = math.rad(angle)
+		local x = 95 + math.sin(rad) * 75
+		local y = 95 - math.cos(rad) * 75
+		local tick = Instance.new("Frame")
+		tick.Size = UDim2.new(0, 3, 0, 14)
+		tick.Position = UDim2.new(0, x, 0, y)
+		tick.AnchorPoint = Vector2.new(0.5, 0)
+		tick.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+		tick.BorderSizePixel = 0
+		tick.Rotation = angle
+		tick.Parent = rpmGauge
+	end
+
+	self.rpmNeedle = createNeedleFrame(rpmGauge, "RPMNeedle",
+		UDim2.new(0, 95, 0, 95), 65, Color3.fromRGB(255, 70, 70))
+	self.rpmNeedle.Rotation = -135
+
+	createLabel(rpmGauge, "RPMLabel", "RPM", UDim2.new(1, 0, 0, 20),
+		UDim2.new(0, 0, 0.7, 0), Color3.fromRGB(140, 140, 150), 14, Enum.Font.Gotham)
+
+	self.rpmValueLabel = createLabel(rpmGauge, "RPMValue", "0", UDim2.new(1, 0, 0, 22),
+		UDim2.new(0, 0, 0.52, 0), Color3.fromRGB(255, 255, 255), 18, Enum.Font.GothamBold)
+
+	-- Speedometer (right circular gauge)
+	local speedGauge = createRoundFrame(container, "SpeedGauge",
+		UDim2.new(0, 190, 0, 190),
+		UDim2.new(0, 225, 0, 15),
+		Color3.fromRGB(15, 15, 20), 0)
+
+	local speedStroke = Instance.new("UIStroke")
+	speedStroke.Thickness = 3
+	speedStroke.Color = Color3.fromRGB(60, 60, 70)
+	speedStroke.Parent = speedGauge
+
+	createGaugeArc(speedGauge, 95, 95, 75, -135, 135, 14, Color3.fromRGB(120, 120, 130), 2)
+
+	self.speedNeedle = createNeedleFrame(speedGauge, "SpeedNeedle",
+		UDim2.new(0, 95, 0, 95), 65, Color3.fromRGB(80, 180, 255))
+	self.speedNeedle.Rotation = -135
+
+	self.speedValueLabel = createLabel(speedGauge, "SpeedValue", "0", UDim2.new(1, 0, 0, 28),
+		UDim2.new(0, 0, 0.42, 0), Color3.fromRGB(255, 255, 255), 28, Enum.Font.GothamBold)
+
+	createLabel(speedGauge, "SpeedUnit", "MPH", UDim2.new(1, 0, 0, 16),
+		UDim2.new(0, 0, 0.6, 0), Color3.fromRGB(140, 140, 150), 14, Enum.Font.Gotham)
+
+	-- Gear display (center between gauges)
+	local gearFrame = createRoundFrame(container, "GearDisplay",
+		UDim2.new(0, 56, 0, 56),
+		UDim2.new(0, 182, 0, 85),
+		Color3.fromRGB(25, 25, 35), 0)
+
+	local gearStroke = Instance.new("UIStroke")
+	gearStroke.Thickness = 2
+	gearStroke.Color = Color3.fromRGB(80, 180, 255)
+	gearStroke.Parent = gearFrame
+
+	self.gearLabel = createLabel(gearFrame, "GearText", "1", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(80, 180, 255), 32, Enum.Font.GothamBold)
+
+	-- ABS indicator
+	local absFrame = createRoundFrame(container, "ABSIndicator",
+		UDim2.new(0, 42, 0, 22),
+		UDim2.new(0, 168, 0, 150),
+		Color3.fromRGB(40, 40, 50), 0)
+
+	self.absLabel = createLabel(absFrame, "ABSText", "ABS", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(80, 80, 90), 12, Enum.Font.GothamBold)
+
+	self.absFrame = absFrame
+
+	-- TCS indicator
+	local tcsFrame = createRoundFrame(container, "TCSIndicator",
+		UDim2.new(0, 42, 0, 22),
+		UDim2.new(0, 214, 0, 150),
+		Color3.fromRGB(40, 40, 50), 0)
+
+	self.tcsLabel = createLabel(tcsFrame, "TCSText", "TCS", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(80, 80, 90), 12, Enum.Font.GothamBold)
+
+	self.tcsFrame = tcsFrame
+
+	-- Hydraulics indicator (shows mode + bounce status)
+	local hydFrame = createRoundFrame(container, "HydraulicIndicator",
+		UDim2.new(0, 60, 0, 22),
+		UDim2.new(0, 130, 0, 150),
+		Color3.fromRGB(40, 40, 50), 0)
+
+	self.hydLabel = createLabel(hydFrame, "HydText", "HYD", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(80, 80, 90), 10, Enum.Font.GothamBold)
+
+	self.hydFrame = hydFrame
+
+	-- Bounce mode indicator
+	local bounceFrame = createRoundFrame(container, "BounceIndicator",
+		UDim2.new(0, 50, 0, 22),
+		UDim2.new(0, 260, 0, 150),
+		Color3.fromRGB(40, 40, 50), 0)
+
+	self.bounceLabel = createLabel(bounceFrame, "BounceText", "BNC", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(80, 80, 90), 10, Enum.Font.GothamBold)
+
+	self.bounceFrame = bounceFrame
+
+	-- Surface type indicator (between indicators and bottom of gauges)
+	local surfaceFrame = createRoundFrame(container, "SurfaceIndicator",
+		UDim2.new(0, 100, 0, 22),
+		UDim2.new(0, 160, 0, 180),
+		Color3.fromRGB(40, 40, 50), 0)
+
+	self.surfaceLabel = createLabel(surfaceFrame, "SurfaceText", "---", UDim2.new(1, 0, 1, 0),
+		UDim2.new(0, 0, 0, 0), Color3.fromRGB(140, 140, 150), 11, Enum.Font.Gotham)
+
+	self.surfaceFrame = surfaceFrame
+
+	-- Telemetry overlay (hidden by default, toggled with T)
+	local telemetryPanel = Instance.new("Frame")
+	telemetryPanel.Name = "TelemetryPanel"
+	telemetryPanel.Size = UDim2.new(0, 340, 0, 280)
+	telemetryPanel.Position = UDim2.new(0, 20, 0.5, -140)
+	telemetryPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+	telemetryPanel.BackgroundTransparency = 0.25
+	telemetryPanel.BorderSizePixel = 0
+	telemetryPanel.Visible = false
+	telemetryPanel.Parent = gui
+
+	local telCorner = Instance.new("UICorner")
+	telCorner.CornerRadius = UDim.new(0, 8)
+	telCorner.Parent = telemetryPanel
+
+	local telStroke = Instance.new("UIStroke")
+	telStroke.Thickness = 1
+	telStroke.Color = Color3.fromRGB(50, 50, 60)
+	telStroke.Parent = telemetryPanel
+
+	createLabel(telemetryPanel, "TelTitle", "TELEMETRY", UDim2.new(1, 0, 0, 18),
+		UDim2.new(0, 0, 0, 4), Color3.fromRGB(80, 180, 255), 11, Enum.Font.GothamBold)
+
+	-- Per-wheel data: FL(top-left), FR(top-right), RL(bottom-left), RR(bottom-right)
+	local wheelPositions = {
+		UDim2.new(0, 10, 0, 28),   -- FL
+		UDim2.new(0, 175, 0, 28),  -- FR
+		UDim2.new(0, 10, 0, 140),  -- RL
+		UDim2.new(0, 175, 0, 140), -- RR
+	}
+	local wheelNames = { "FL", "FR", "RL", "RR" }
+
+	self.wheelLabels = {}
+	for i = 1, 4 do
+		local wFrame = Instance.new("Frame")
+		wFrame.Name = "Wheel" .. wheelNames[i]
+		wFrame.Size = UDim2.new(0, 155, 0, 105)
+		wFrame.Position = wheelPositions[i]
+		wFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+		wFrame.BackgroundTransparency = 0.3
+		wFrame.BorderSizePixel = 0
+		wFrame.Parent = telemetryPanel
+
+		local wCorner = Instance.new("UICorner")
+		wCorner.CornerRadius = UDim.new(0, 4)
+		wCorner.Parent = wFrame
+
+		createLabel(wFrame, "Name", wheelNames[i], UDim2.new(0, 30, 0, 14),
+			UDim2.new(0, 4, 0, 2), Color3.fromRGB(80, 180, 255), 10, Enum.Font.GothamBold)
+
+		local labels = {}
+		local lineY = 18
+		local lineH = 13
+		for _, field in { "Susp", "Force", "Slip\u{b0}", "SlipR", "Surf", "Wt%" } do
+			local fieldLabel = createLabel(wFrame, field .. "Label", field,
+				UDim2.new(0, 40, 0, lineH), UDim2.new(0, 4, 0, lineY),
+				Color3.fromRGB(100, 100, 110), 9, Enum.Font.Gotham)
+			fieldLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+			local valLabel = createLabel(wFrame, field .. "Val", "---",
+				UDim2.new(0, 100, 0, lineH), UDim2.new(0, 48, 0, lineY),
+				Color3.fromRGB(200, 200, 210), 9, Enum.Font.GothamBold)
+			valLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+			labels[field] = valLabel
+			lineY += lineH + 1
+		end
+
+		self.wheelLabels[i] = labels
+	end
+
+	-- G-force crosshair (center between wheel quadrants)
+	local gForceFrame = Instance.new("Frame")
+	gForceFrame.Name = "GForcePanel"
+	gForceFrame.Size = UDim2.new(0, 80, 0, 80)
+	gForceFrame.Position = UDim2.new(0.5, -40, 0.5, -16)
+	gForceFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+	gForceFrame.BackgroundTransparency = 0.2
+	gForceFrame.BorderSizePixel = 0
+	gForceFrame.Parent = telemetryPanel
+
+	local gCorner = Instance.new("UICorner")
+	gCorner.CornerRadius = UDim.new(0.5, 0)
+	gCorner.Parent = gForceFrame
+
+	local gStroke = Instance.new("UIStroke")
+	gStroke.Thickness = 1
+	gStroke.Color = Color3.fromRGB(50, 50, 60)
+	gStroke.Parent = gForceFrame
+
+	-- Crosshair lines
+	local hLine = Instance.new("Frame")
+	hLine.Size = UDim2.new(1, -10, 0, 1)
+	hLine.Position = UDim2.new(0, 5, 0.5, 0)
+	hLine.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	hLine.BorderSizePixel = 0
+	hLine.Parent = gForceFrame
+
+	local vLine = Instance.new("Frame")
+	vLine.Size = UDim2.new(0, 1, 1, -10)
+	vLine.Position = UDim2.new(0.5, 0, 0, 5)
+	vLine.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	vLine.BorderSizePixel = 0
+	vLine.Parent = gForceFrame
+
+	-- G-force dot
+	local gDot = Instance.new("Frame")
+	gDot.Name = "GDot"
+	gDot.Size = UDim2.new(0, 8, 0, 8)
+	gDot.Position = UDim2.new(0.5, -4, 0.5, -4)
+	gDot.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+	gDot.BorderSizePixel = 0
+	gDot.Parent = gForceFrame
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(0.5, 0)
+	dotCorner.Parent = gDot
+
+	self.gDot = gDot
+	self.gForceFrame = gForceFrame
+
+	createLabel(gForceFrame, "GLabel", "G", UDim2.new(0, 16, 0, 12),
+		UDim2.new(1, -18, 0, 2), Color3.fromRGB(100, 100, 110), 9, Enum.Font.GothamBold)
+
+	-- Vehicle data bar at bottom of telemetry
+	local dataBar = Instance.new("Frame")
+	dataBar.Name = "DataBar"
+	dataBar.Size = UDim2.new(1, -20, 0, 22)
+	dataBar.Position = UDim2.new(0, 10, 1, -28)
+	dataBar.BackgroundTransparency = 1
+	dataBar.Parent = telemetryPanel
+
+	self.telSteerLabel = createLabel(dataBar, "Steer", "STR: 0°",
+		UDim2.new(0.33, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+		Color3.fromRGB(180, 180, 190), 10, Enum.Font.Gotham)
+
+	self.telGLatLabel = createLabel(dataBar, "GLat", "G-Lat: 0.00",
+		UDim2.new(0.33, 0, 1, 0), UDim2.new(0.33, 0, 0, 0),
+		Color3.fromRGB(180, 180, 190), 10, Enum.Font.Gotham)
+
+	self.telGLonLabel = createLabel(dataBar, "GLon", "G-Lon: 0.00",
+		UDim2.new(0.33, 0, 1, 0), UDim2.new(0.66, 0, 0, 0),
+		Color3.fromRGB(180, 180, 190), 10, Enum.Font.Gotham)
+
+	self.telemetryPanel = telemetryPanel
+
+	return self
+end
+
+local SURFACE_COLORS: { [string]: Color3 } = {
+	Asphalt = Color3.fromRGB(140, 140, 150),
+	Concrete = Color3.fromRGB(140, 140, 150),
+	Grass = Color3.fromRGB(80, 180, 80),
+	LeafyGrass = Color3.fromRGB(60, 160, 60),
+	Sand = Color3.fromRGB(210, 180, 100),
+	Snow = Color3.fromRGB(200, 220, 255),
+	Ice = Color3.fromRGB(120, 200, 255),
+	Glacier = Color3.fromRGB(120, 200, 255),
+	Mud = Color3.fromRGB(140, 100, 60),
+	Ground = Color3.fromRGB(160, 130, 80),
+	Wood = Color3.fromRGB(180, 140, 80),
+	WoodPlanks = Color3.fromRGB(180, 140, 80),
+	Metal = Color3.fromRGB(160, 160, 170),
+	Cobblestone = Color3.fromRGB(150, 150, 140),
+	Brick = Color3.fromRGB(180, 120, 100),
+}
+
+function DriverHUD:update(speedMPH: number, gear: number, rpm: number, redlineRPM: number, isReversing: boolean, absActive: boolean?, tcsActive: boolean?, surfaceName: string?, hydraulicsActive: boolean?, bounceMode: boolean?, bounceIntensity: number?)
+	-- Speed needle: 0-200 MPH mapped to -135° to 135° (270° sweep)
+	local speedNorm = math.clamp(speedMPH / 200, 0, 1)
+	local speedAngle = -135 + speedNorm * 270
+	self.speedNeedle.Rotation = speedAngle
+
+	self.speedValueLabel.Text = tostring(math.floor(speedMPH))
+
+	-- Smooth RPM display to avoid jittery readout
+	local safeRedline = math.max(redlineRPM, 1)
+	if not self._smoothRPM then self._smoothRPM = rpm end
+	self._smoothRPM = self._smoothRPM + (rpm - self._smoothRPM) * 0.3
+
+	local rpmNorm = math.clamp(self._smoothRPM / safeRedline, 0, 1)
+	local rpmAngle = -135 + rpmNorm * 270
+	self.rpmNeedle.Rotation = rpmAngle
+
+	self.rpmValueLabel.Text = tostring(math.floor(self._smoothRPM / 100) * 100)
+
+	-- RPM needle color: intensify near redline with pulsing
+	if rpmNorm > 0.92 then
+		local pulse = 0.5 + 0.5 * math.sin(tick() * 12)
+		local r = math.floor(255 * (0.7 + 0.3 * pulse))
+		self.rpmNeedle.BackgroundColor3 = Color3.fromRGB(r, 20, 20)
+	elseif rpmNorm > 0.85 then
+		self.rpmNeedle.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
+	else
+		self.rpmNeedle.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+	end
+
+	-- Gear display
+	if isReversing then
+		self.gearLabel.Text = "R"
+		self.gearLabel.TextColor3 = Color3.fromRGB(255, 100, 80)
+	else
+		self.gearLabel.Text = tostring(gear)
+		self.gearLabel.TextColor3 = Color3.fromRGB(80, 180, 255)
+	end
+
+	-- ABS indicator: amber when active
+	if absActive then
+		self.absFrame.BackgroundColor3 = Color3.fromRGB(60, 45, 10)
+		self.absLabel.TextColor3 = Color3.fromRGB(255, 190, 40)
+	else
+		self.absFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		self.absLabel.TextColor3 = Color3.fromRGB(80, 80, 90)
+	end
+
+	-- TCS indicator: amber when active
+	if tcsActive then
+		self.tcsFrame.BackgroundColor3 = Color3.fromRGB(60, 45, 10)
+		self.tcsLabel.TextColor3 = Color3.fromRGB(255, 190, 40)
+	else
+		self.tcsFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		self.tcsLabel.TextColor3 = Color3.fromRGB(80, 80, 90)
+	end
+
+	-- Hydraulics indicator: cyan when active
+	if hydraulicsActive then
+		self.hydFrame.BackgroundColor3 = Color3.fromRGB(10, 45, 60)
+		self.hydLabel.TextColor3 = Color3.fromRGB(40, 200, 255)
+		self.hydLabel.Text = "HYD"
+	else
+		self.hydFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		self.hydLabel.TextColor3 = Color3.fromRGB(80, 80, 90)
+		self.hydLabel.Text = "HYD"
+	end
+
+	-- Bounce indicator: shows intensity level
+	local BOUNCE_NAMES = { [0] = "OFF", [1] = "LOW", [2] = "MED", [3] = "HIGH" }
+	local bLevel = bounceIntensity or 0
+	if bounceMode and bLevel > 0 then
+		self.bounceFrame.BackgroundColor3 = Color3.fromRGB(50, 20, 60)
+		self.bounceLabel.TextColor3 = Color3.fromRGB(220, 100, 255)
+		self.bounceLabel.Text = BOUNCE_NAMES[bLevel] or "BNC"
+	else
+		self.bounceFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+		self.bounceLabel.TextColor3 = Color3.fromRGB(80, 80, 90)
+		self.bounceLabel.Text = "OFF"
+	end
+
+	-- Surface indicator
+	if surfaceName then
+		self.surfaceLabel.Text = surfaceName
+		local color = SURFACE_COLORS[surfaceName] or Color3.fromRGB(140, 140, 150)
+		self.surfaceLabel.TextColor3 = color
+	else
+		self.surfaceLabel.Text = "---"
+		self.surfaceLabel.TextColor3 = Color3.fromRGB(80, 80, 90)
+	end
+end
+
+function DriverHUD:setTelemetryVisible(visible: boolean)
+	if self.telemetryPanel then
+		self.telemetryPanel.Visible = visible
+	end
+end
+
+local function colorForValue(value: number, greenThreshold: number, yellowThreshold: number, invert: boolean?): Color3
+	local absVal = math.abs(value)
+	if invert then
+		if absVal <= greenThreshold then return Color3.fromRGB(80, 200, 80) end
+		if absVal <= yellowThreshold then return Color3.fromRGB(255, 200, 40) end
+		return Color3.fromRGB(255, 70, 70)
+	else
+		if absVal >= greenThreshold then return Color3.fromRGB(80, 200, 80) end
+		if absVal >= yellowThreshold then return Color3.fromRGB(255, 200, 40) end
+		return Color3.fromRGB(255, 70, 70)
+	end
+end
+
+function DriverHUD:updateTelemetry(data: any)
+	if not self.telemetryPanel or not self.telemetryPanel.Visible then return end
+
+	for i = 1, math.min(#data.wheels, 4) do
+		local wd = data.wheels[i]
+		local labels = self.wheelLabels[i]
+		if not labels then continue end
+
+		labels["Susp"].Text = string.format("%.2f", wd.suspCompression)
+		labels["Susp"].TextColor3 = colorForValue(wd.suspCompression, 0, 0.5, true)
+
+		labels["Force"].Text = string.format("%.0f", wd.contactForce)
+		labels["Force"].TextColor3 = if wd.onGround then Color3.fromRGB(200, 200, 210) else Color3.fromRGB(255, 70, 70)
+
+		labels["Slip\u{b0}"].Text = string.format("%.1f°", wd.slipAngle)
+		labels["Slip\u{b0}"].TextColor3 = colorForValue(wd.slipAngle, 0, 6, true)
+
+		labels["SlipR"].Text = string.format("%.2f", wd.slipRatio)
+		labels["SlipR"].TextColor3 = colorForValue(wd.slipRatio, 0, 0.15, true)
+
+		labels["Surf"].Text = wd.surfaceMaterial
+		local surfColor = SURFACE_COLORS[wd.surfaceMaterial]
+		labels["Surf"].TextColor3 = surfColor or Color3.fromRGB(140, 140, 150)
+
+		local wtPct = wd.weightFraction * 100
+		labels["Wt%"].Text = string.format("%.0f%%", wtPct)
+		labels["Wt%"].TextColor3 = colorForValue(wtPct - 25, 0, 10, true)
+	end
+
+	-- G-force dot position (map ±2G to the circle area)
+	local gRadius = 32
+	local dotX = math.clamp(data.gLateral / 2, -1, 1) * gRadius
+	local dotY = math.clamp(-data.gLongitudinal / 2, -1, 1) * gRadius
+	self.gDot.Position = UDim2.new(0.5, dotX - 4, 0.5, dotY - 4)
+
+	local gMag = math.sqrt(data.gLateral * data.gLateral + data.gLongitudinal * data.gLongitudinal)
+	if gMag > 1.5 then
+		self.gDot.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+	elseif gMag > 0.8 then
+		self.gDot.BackgroundColor3 = Color3.fromRGB(255, 200, 40)
+	else
+		self.gDot.BackgroundColor3 = Color3.fromRGB(80, 200, 80)
+	end
+
+	self.telSteerLabel.Text = string.format("STR: %.1f°", data.steerAngle)
+	self.telGLatLabel.Text = string.format("G-Lat: %.2f", data.gLateral)
+	self.telGLonLabel.Text = string.format("G-Lon: %.2f", data.gLongitudinal)
+end
+
+function DriverHUD:destroy()
+	if self.gui then
+		self.gui:Destroy()
+		self.gui = nil
+	end
+end
+
+return DriverHUD
+]]></ProtectedString></Properties></Item></Item>
+<Item class="ModuleScript" referent="RBX00000014"><Properties><string name="Name">ExternalTuner</string><ProtectedString name="Source"><![CDATA[--[[
+	ExternalTuner — Example script showing how external code can
+	modify the chassis's LiveValues in real-time.
+	
+	Drop this into ServerScriptService or any Script context.
+	It finds the vehicle's LiveValues container and writes to it.
+	The chassis picks up changes instantly — no restart needed.
+	
+	This demonstrates the external script interface requirement:
+	any script can read/write ValueBase objects under LiveValues
+	to tune the chassis on the fly.
+]]
+
+local function waitForVehicle(): Model
+	local vehicle = workspace:WaitForChild("TestVehicle", 30)
+	assert(vehicle, "TestVehicle not found in workspace")
+	return vehicle
+end
+
+local function getOrCreateValue(container: Configuration, name: string, valueType: string, default: any): ValueBase
+	local existing = container:FindFirstChild(name)
+	if existing then return existing end
+
+	local obj
+	if valueType == "Number" then
+		obj = Instance.new("NumberValue")
+	elseif valueType == "Int" then
+		obj = Instance.new("IntValue")
+	elseif valueType == "String" then
+		obj = Instance.new("StringValue")
+	elseif valueType == "Bool" then
+		obj = Instance.new("BoolValue")
+	else
+		obj = Instance.new("NumberValue")
+	end
+
+	obj.Name = name
+	obj.Value = default
+	obj.Parent = container
+	return obj
+end
+
+-- Example: adjust suspension stiffness over time (sinusoidal test)
+local function runSuspensionTest(liveValues: Configuration)
+	print("[ExternalTuner] Starting suspension stiffness oscillation test")
+	local baseStiffness = 85
+	local amplitude = 30
+	local stiffnessVal = getOrCreateValue(liveValues, "SpringStiffness", "Number", baseStiffness)
+
+	-- Oscillate for 20 seconds then restore
+	local startTime = tick()
+	while tick() - startTime < 20 do
+		local t = tick() - startTime
+		stiffnessVal.Value = baseStiffness + math.sin(t * 0.5) * amplitude
+		task.wait(0.1)
+	end
+
+	stiffnessVal.Value = baseStiffness
+	print("[ExternalTuner] Suspension test complete, restored to default")
+end
+
+-- Example: switch between comfort and sport mode
+local function setMode(liveValues: Configuration, mode: string)
+	if mode == "comfort" then
+		getOrCreateValue(liveValues, "SpringStiffness", "Number", 85).Value = 60
+		getOrCreateValue(liveValues, "DampingCompression", "Number", 4.5).Value = 3.0
+		getOrCreateValue(liveValues, "DampingRebound", "Number", 5.5).Value = 3.5
+		getOrCreateValue(liveValues, "MaxSteerAngle", "Number", 35).Value = 40
+		getOrCreateValue(liveValues, "AntiRollStiffness", "Number", 30).Value = 15
+		print("[ExternalTuner] Switched to COMFORT mode")
+
+	elseif mode == "sport" then
+		getOrCreateValue(liveValues, "SpringStiffness", "Number", 85).Value = 120
+		getOrCreateValue(liveValues, "DampingCompression", "Number", 4.5).Value = 6.0
+		getOrCreateValue(liveValues, "DampingRebound", "Number", 5.5).Value = 7.0
+		getOrCreateValue(liveValues, "MaxSteerAngle", "Number", 35).Value = 28
+		getOrCreateValue(liveValues, "AntiRollStiffness", "Number", 30).Value = 50
+		getOrCreateValue(liveValues, "MaxTorque", "Number", 450).Value = 550
+		print("[ExternalTuner] Switched to SPORT mode")
+
+	elseif mode == "drift" then
+		getOrCreateValue(liveValues, "SpringStiffness", "Number", 85).Value = 90
+		getOrCreateValue(liveValues, "DampingCompression", "Number", 4.5).Value = 4.0
+		getOrCreateValue(liveValues, "DampingRebound", "Number", 5.5).Value = 5.0
+		getOrCreateValue(liveValues, "TireFriction", "Number", 1.6).Value = 0.9
+		getOrCreateValue(liveValues, "LateralGrip", "Number", 1.0).Value = 0.5
+		getOrCreateValue(liveValues, "MaxTorque", "Number", 450).Value = 500
+		getOrCreateValue(liveValues, "CounterSteerFactor", "Number", 0.3).Value = 0.6
+		print("[ExternalTuner] Switched to DRIFT mode")
+	end
+end
+
+-- API for external scripts to use
+local ExternalTunerAPI = {}
+
+function ExternalTunerAPI.setDriveMode(mode: string)
+	local vehicle = workspace:FindFirstChild("TestVehicle")
+	if not vehicle then return end
+	local liveValues = vehicle:FindFirstChild("LiveValues")
+	if not liveValues then return end
+	setMode(liveValues, mode)
+end
+
+function ExternalTunerAPI.setValue(valueName: string, newValue: any)
+	local vehicle = workspace:FindFirstChild("TestVehicle")
+	if not vehicle then return end
+	local liveValues = vehicle:FindFirstChild("LiveValues")
+	if not liveValues then return end
+	local valObj = liveValues:FindFirstChild(valueName)
+	if valObj then
+		valObj.Value = newValue
+	end
+end
+
+function ExternalTunerAPI.getValue(valueName: string): any?
+	local vehicle = workspace:FindFirstChild("TestVehicle")
+	if not vehicle then return nil end
+	local liveValues = vehicle:FindFirstChild("LiveValues")
+	if not liveValues then return nil end
+	local valObj = liveValues:FindFirstChild(valueName)
+	if valObj then
+		return valObj.Value
+	end
+	return nil
+end
+
+return ExternalTunerAPI
+]]></ProtectedString></Properties></Item>
+</roblox>
