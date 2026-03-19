@@ -256,3 +256,43 @@ getProgressionRemote.OnServerInvoke = function(player: Player)
 		xpNeeded = xpNeeded,
 	}
 end
+
+-- RemoteFunction for clients to get/set input settings
+local getInputSettingsRemote = Instance.new("RemoteFunction")
+getInputSettingsRemote.Name = "GetInputSettings"
+getInputSettingsRemote.Parent = ReplicatedStorage
+
+getInputSettingsRemote.OnServerInvoke = function(player: Player)
+	local profile = Profiles[player]
+	if not profile then return {} end
+	return profile.Data.settings or {}
+end
+
+local setInputSettingsRemote = Instance.new("RemoteFunction")
+setInputSettingsRemote.Name = "SetInputSettings"
+setInputSettingsRemote.Parent = ReplicatedStorage
+
+local VALID_SETTINGS = {
+	steerMode = "string",
+	steerSensitivity = "number",
+	buttonOpacity = "number",
+	buttonScale = "number",
+	autoGas = "boolean",
+	tiltDeadzone = "number",
+}
+
+setInputSettingsRemote.OnServerInvoke = function(player: Player, newSettings: { [string]: any })
+	local profile = Profiles[player]
+	if not profile then return false end
+
+	if type(newSettings) ~= "table" then return false end
+
+	local settings = profile.Data.settings or {}
+	for key, expectedType in VALID_SETTINGS do
+		if newSettings[key] ~= nil and type(newSettings[key]) == expectedType then
+			settings[key] = newSettings[key]
+		end
+	end
+	profile.Data.settings = settings
+	return true
+end

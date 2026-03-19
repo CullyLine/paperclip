@@ -117,7 +117,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | `RoundController.server.luau` | 3-2-1-GO countdown, 120s race timer, progress tracking, finish detection. Calls VehicleSpawner |
 | `PreRoundServer.server.luau` | Server-side vehicle selection (exclusivity, random assignment) |
 | `VehicleSpawner.luau` | Clones TemplateVehicle, places at spawn points, manages vehicle lifecycle. API: `spawnVehicles`, `lockAll`, `unlockAll`, `cleanup`, `teleportVehicle`, `anchorVehicle`, `resetVehicle`, `getVehicleForPlayer`, `getActiveVehicles` |
-| `ProfileManager.server.luau` | ProfileService wrapper — handles player data (load/save/get/set) |
+| `ProfileManager.server.luau` | ProfileService wrapper — handles player data (load/save/get/set), input settings persistence via GetInputSettings/SetInputSettings RemoteFunctions |
 | `TemplateVehicleBuilder.server.luau` | Runs once at server start — builds the modular damage-ready TemplateVehicle in ReplicatedStorage (see Vehicle Hierarchy above) |
 | `WheelReplication.server.luau` | Receives visual-wheel CFrame updates from owning clients (~10 Hz) and writes them to replicated VisualWheels parts inside the vehicle model. Rate-limited server-side at ~12 Hz per player |
 
@@ -128,7 +128,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | `Bootstrap.client.luau` | Entry point LocalScript — requires all client modules |
 | `ChassisClient.luau` | Client-side raycast chassis. Detects seat entry, runs suspension + drive physics on Heartbeat, creates/positions visual wheels, auto-cleans up on vehicle destruction or unseat. Exports driving state API for CameraController. Uses `DownhillConfig` + `DownhillPhysics` |
 | `CameraController.luau` | Custom chase camera — smooth follow with velocity look-ahead, speed-dependent FOV (70→85), impact shake, rear-view (C key / mobile button), right-click free-look orbit. Auto-activates/deactivates with driving state |
-| `InputManager.luau` | Input abstraction — keyboard, mobile touch controls (auto-detected), gamepad (sticks + triggers). Touch controls appear only while driving and are destroyed on exit |
+| `InputManager.luau` | Input abstraction — keyboard, mobile touch controls (auto-detected), gamepad (sticks + triggers). Mobile supports 3 steering modes (buttons/joystick/tilt), adjustable sensitivity/opacity/scale, auto-gas toggle. Settings loaded from ProfileManager on drive start |
 | `HubController.luau` | Hub UI management, Play queue toggle, camera control |
 | `PreRoundController.luau` | Vehicle selection UI logic, countdown display |
 | `DriverHUD.luau` | In-race HUD updates (placement, timer, leaderboard) |
@@ -166,7 +166,22 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 
 Set `DEBUG_ENABLED = false` to silence.
 
+## Mobile Input Settings
+
+The `InputManager` supports configurable mobile controls via the `settings` table (persisted in ProfileManager):
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `steerMode` | string | `"buttons"` | `"buttons"` (L/R arrows), `"joystick"` (virtual analog stick), or `"tilt"` (accelerometer) |
+| `steerSensitivity` | number | `1.0` | Steering responsiveness multiplier (0.5–2.0) |
+| `buttonOpacity` | number | `0.7` | Touch button visibility (0.0–1.0) |
+| `buttonScale` | number | `1.0` | Touch button size multiplier (0.5–2.0) |
+| `autoGas` | boolean | `false` | Always-on throttle (hides GAS button, shows AUTO indicator) |
+| `tiltDeadzone` | number | `0.08` | Ignore accelerometer tilt below this threshold |
+
+Settings are loaded from the server via `GetInputSettings` RemoteFunction when driving starts, and saved via `SetInputSettings`.
+
 ## Known Limitations / Future Work
 
 - **Destruction system** — BodyPanels have Health attributes but no damage/detachment logic yet
-- **Mobile input refinement** — touch controls work but could benefit from sensitivity tuning, opacity settings, or a virtual joystick option
+- **Settings UI** — mobile input settings need an in-game settings panel (currently only settable via code/API)

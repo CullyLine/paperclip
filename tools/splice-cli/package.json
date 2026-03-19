@@ -1,0 +1,16 @@
+{
+  "name": "splice-cli",
+  "version": "1.0.0",
+  "description": "CLI tool for searching, claiming, and downloading sounds from Splice",
+  "type": "module",
+  "main": "splice.mjs",
+  "bin": {
+    "splice-cli": "./splice.mjs"
+  },
+  "scripts": {
+    "start": "node splice.mjs"
+  },
+  "dependencies": {
+    "open": "^10.2.0"
+  }
+}

@@ -27,6 +27,7 @@ local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
 local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
 local DownhillPhysics = require(DMRep:WaitForChild("DownhillPhysics"))
 
+local cachedInputSettings: { [string]: any }? = nil
 local wheelReplicationEvent: RemoteEvent = nil
 local REPLICATION_INTERVAL = 1 / 10
 local lastReplicationTime = 0
@@ -451,7 +452,19 @@ local function startDriving(vModel: Model)
 	wheelReplicationEvent = ReplicatedStorage:FindFirstChild("WheelReplication") :: RemoteEvent
 	lastReplicationTime = 0
 
-	input = InputManager.new()
+	if not cachedInputSettings then
+		local getSettings = ReplicatedStorage:FindFirstChild("GetInputSettings") :: RemoteFunction?
+		if getSettings then
+			local ok, result = pcall(function()
+				return getSettings:InvokeServer()
+			end)
+			if ok and type(result) == "table" then
+				cachedInputSettings = result
+			end
+		end
+	end
+
+	input = InputManager.new(cachedInputSettings)
 	currentSteerAngle = 0
 	debugTimer = 0
 	isActive = true
