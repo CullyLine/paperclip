@@ -225,6 +225,11 @@ local function onRaceEnd(raceResults: any?)
 
 	broadcastState(STATES.Results)
 
+	-- Unload every racing player's character so they don't fall through the world when the map is removed
+	for _, player in getRacingPlayerList() do
+		despawnCharacter(player)
+	end
+
 	MapBuilder.cleanup()
 
 	showResultsEvent:FireAllClients(raceResults)

@@ -1,4 +1,9 @@
 --[[
+	⚠️ DEPRECATED — This module is NOT currently used by Downhill Madness.
+	The active chassis uses a flat drive force model (no gears/RPM).
+	See DownhillConfig.luau driveForce / reverseForce / maxSpeed instead.
+	Kept as reference for the original Polaris-based approach.
+
 	Drivetrain — Gear shifting, RPM simulation, and torque output.
 	
 	RPM is derived from wheel speed within the current gear ratio,

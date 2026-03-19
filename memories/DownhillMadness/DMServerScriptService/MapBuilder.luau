@@ -24,6 +24,13 @@ local ROAD_THICK    = 8
 local SLOPE_DROP    = 400
 local WALL_HEIGHT   = 60
 local WALL_THICK    = 12
+local WALL_OVERLAP  = 8   -- how much wall/barriers sit onto the road (positive = overlap)
+
+-- Sections: road split lengthwise for themed obstacles (~400 studs each)
+local SECTION_LENGTH   = 400
+local NUM_SECTIONS     = math.floor(ROAD_LENGTH / SECTION_LENGTH)
+local BARRIER_ZONE_W   = 80   -- width of dense natural barrier on each side of road
+local BARRIER_DENSITY  = 0.45 -- fill factor for barrier parts
 
 local START_Y       = SLOPE_DROP / 2
 local FINISH_Y      = -SLOPE_DROP / 2
@@ -50,6 +57,9 @@ local C = {
 	hayBale    = Color3.fromRGB(200, 180, 100),
 	powerUp    = Color3.fromRGB(80, 220, 255),
 	spawn      = Color3.fromRGB(50, 180, 80),
+	barrierRock = Color3.fromRGB(100, 95, 85),
+	barrierBush = Color3.fromRGB(50, 90, 50),
+	barrierTree = Color3.fromRGB(60, 45, 35),
 }
 
 -- Hub lighting defaults (restored on cleanup)
@@ -184,6 +194,19 @@ local function applyHubLighting()
 	atmo.Parent = Lighting
 end
 
+-- Section themes: each section gets one theme for coherent obstacle set
+local SECTION_THEMES = { "boulders", "ice", "bumpy", "ramps", "mud", "barriers", "mixed" }
+local function getSectionTheme(sectionIndex: number): string
+	local i = ((sectionIndex - 1) % #SECTION_THEMES) + 1
+	return SECTION_THEMES[i]
+end
+
+local function sectionZRange(sectionIndex: number): (number, number)
+	local zStart = -ROAD_LENGTH / 2 + (sectionIndex - 1) * SECTION_LENGTH
+	local zEnd = zStart + SECTION_LENGTH
+	return zStart, zEnd
+end
+
 -- ═══════════════════════════════════════════════════════════════════
 -- BUILD
 -- ═══════════════════════════════════════════════════════════════════
@@ -230,9 +253,9 @@ function MapBuilder.build()
 		})
 	end
 
-	-- 2. TERRAIN BORDERS
+	-- 2. TERRAIN BORDERS (wall slightly overlaps road so barrier feels closer)
 	for _, side in { -1, 1 } do
-		local xPos = side * (ROAD_WIDTH / 2 + WALL_THICK / 2)
+		local xPos = side * (ROAD_WIDTH / 2 - WALL_OVERLAP + WALL_THICK / 2)
 
 		makePart({
 			Name     = side == -1 and "WallLeft" or "WallRight",
@@ -253,6 +276,65 @@ function MapBuilder.build()
 			Material = Enum.Material.Grass,
 			Parent   = terrainFolder,
 		})
+	end
+
+	-- 2b. DENSE NATURAL BARRIERS along both sides (hard to fall off)
+	local barriersFolder = Instance.new("Folder")
+	barriersFolder.Name = "SideBarriers"
+	barriersFolder.Parent = map
+
+	local barrierStepZ = 12
+	local barrierStepX = 10
+	local barrierCount = 0
+	for _, side in { -1, 1 } do
+		-- barrier zone closer to road, overlapping a bit (inner edge at ROAD_WIDTH/2 - WALL_OVERLAP)
+		local xBase = side * (ROAD_WIDTH / 2 - WALL_OVERLAP + BARRIER_ZONE_W / 2)
+		for z = -ROAD_LENGTH / 2, ROAD_LENGTH / 2 - barrierStepZ, barrierStepZ do
+			for xOff = 0, BARRIER_ZONE_W - barrierStepX, barrierStepX do
+				if rng:NextNumber() > (1 - BARRIER_DENSITY) then
+					local x = xBase + side * (xOff - BARRIER_ZONE_W / 2)
+					local y = roadY(z) + ROAD_THICK / 2
+					barrierCount += 1
+					local kind = rng:NextInteger(1, 3)
+					if kind == 1 then
+						local sz = rng:NextNumber(6, 14)
+						makePart({
+							Name     = "BarrierRock_" .. barrierCount,
+							Shape   = Enum.PartType.Ball,
+							Size    = Vector3.new(sz, sz, sz),
+							CFrame  = CFrame.new(x, y + sz / 2, z),
+							Color   = C.barrierRock,
+							Material = Enum.Material.Slate,
+							Parent  = barriersFolder,
+						})
+					elseif kind == 2 then
+						local h = rng:NextNumber(8, 18)
+						local r = rng:NextNumber(2, 4)
+						makePart({
+							Name     = "BarrierTree_" .. barrierCount,
+							Shape   = Enum.PartType.Cylinder,
+							Size    = Vector3.new(h, r * 2, r * 2),
+							CFrame  = CFrame.new(x, y + h / 2, z) * CFrame.Angles(0, 0, math.rad(90)),
+							Color   = C.barrierTree,
+							Material = Enum.Material.Wood,
+							Parent  = barriersFolder,
+						})
+					else
+						local sx = rng:NextNumber(5, 12)
+						local sy = rng:NextNumber(3, 7)
+						local sz = rng:NextNumber(5, 12)
+						makePart({
+							Name     = "BarrierBush_" .. barrierCount,
+							Size    = Vector3.new(sx, sy, sz),
+							CFrame  = CFrame.new(x, y + sy / 2, z),
+							Color   = C.barrierBush,
+							Material = Enum.Material.Grass,
+							Parent  = barriersFolder,
+						})
+					end
+				end
+			end
+		end
 	end
 
 	-- 3. START PLATFORM + BANNER
@@ -356,30 +438,23 @@ function MapBuilder.build()
 			Material = Enum.Material.Neon,
 			Transparency = 0.6,
 			CanCollide = false,
+			CanQuery = false,
 			Parent = spawnsFolder,
 		})
 		spawnPart:SetAttribute("SpawnIndex", i)
 	end
 
-	-- 6. OBSTACLES
+	-- 6. OBSTACLES (section-based: each section has one theme)
 	local obstaclesFolder = Instance.new("Folder")
 	obstaclesFolder.Name = "Obstacles"
 	obstaclesFolder.Parent = map
 
-	local ZONE_COUNT   = 10
-	local ZONE_LENGTH  = ROAD_LENGTH / ZONE_COUNT
-	local MIN_OBS      = 3
-	local MAX_OBS      = 12
-	local halfWidth    = ROAD_WIDTH / 2 - 15
+	local halfWidth = ROAD_WIDTH / 2 - 15
+	local pitch = math.atan(SLOPE_DROP / ROAD_LENGTH)
 
-	local function zoneZ(zone: number, t: number): number
-		local zStart = -ROAD_LENGTH / 2 + (zone - 1) * ZONE_LENGTH
-		return zStart + t * ZONE_LENGTH
-	end
-
-	local function randomRoadPos(zone: number): (number, number, number)
-		local t = rng:NextNumber(0.05, 0.95)
-		local z = zoneZ(zone, t)
+	local function randomPosInSection(sectionIndex: number): (number, number, number)
+		local zStart, zEnd = sectionZRange(sectionIndex)
+		local z = rng:NextNumber(zStart + SECTION_LENGTH * 0.05, zEnd - SECTION_LENGTH * 0.05)
 		local x = rng:NextNumber(-halfWidth, halfWidth)
 		local y = roadY(z) + ROAD_THICK / 2
 		return x, y, z
@@ -387,14 +462,15 @@ function MapBuilder.build()
 
 	local obstacleCount = 0
 
-	for zone = 1, ZONE_COUNT do
-		local density = MIN_OBS + math.floor((zone / ZONE_COUNT) * (MAX_OBS - MIN_OBS))
+	for sectionIndex = 1, NUM_SECTIONS do
+		local theme = getSectionTheme(sectionIndex)
+		local zStart, zEnd = sectionZRange(sectionIndex)
+		local sectionCenterZ = (zStart + zEnd) / 2
+		local sectionY = roadY(sectionCenterZ) + ROAD_THICK / 2
 
-		for _ = 1, density do
-			local obsType = rng:NextInteger(1, 7)
-			local x, y, z = randomRoadPos(zone)
-
-			if obsType == 1 then
+		if theme == "boulders" then
+			for _ = 1, rng:NextInteger(8, 14) do
+				local x, y, z = randomPosInSection(sectionIndex)
 				local size = rng:NextNumber(5, 12)
 				makePart({
 					Name     = "Boulder_" .. obstacleCount,
@@ -405,40 +481,71 @@ function MapBuilder.build()
 					Material = Enum.Material.Slate,
 					Parent   = obstaclesFolder,
 				})
+				obstacleCount += 1
+			end
 
-			elseif obsType == 2 then
-				local width = rng:NextNumber(14, 28)
-				local height = rng:NextNumber(3, 7)
-				local depth = rng:NextNumber(10, 20)
+		elseif theme == "ice" then
+			local icePart = makePart({
+				Name       = "IceZone_Section" .. sectionIndex,
+				Size       = Vector3.new(ROAD_WIDTH - 30, 0.3, SECTION_LENGTH - 20),
+				CFrame     = CFrame.new(0, sectionY + 0.15, sectionCenterZ) * CFrame.Angles(pitch, 0, 0),
+				Color      = C.ice,
+				Material   = Enum.Material.Ice,
+				Parent     = obstaclesFolder,
+				CanCollide = false,
+			})
+			CollectionService:AddTag(icePart, "IceZone")
+			obstacleCount += 1
+
+		elseif theme == "bumpy" then
+			-- Dense grid so the whole section is bumpy (full width and length)
+			local gridStep = 14
+			for z = zStart + 15, zEnd - 15, gridStep do
+				for x = -halfWidth, halfWidth, gridStep do
+					if rng:NextNumber() > 0.08 then
+						local jitterX = x + rng:NextNumber(-3, 3)
+						local y = roadY(z) + ROAD_THICK / 2
+						local bumpH = rng:NextNumber(1.5, 4)
+						local bumpW = rng:NextNumber(4, 10)
+						makePart({
+							Name     = "Bump_" .. obstacleCount,
+							Size     = Vector3.new(bumpW, bumpH, bumpW),
+							CFrame   = CFrame.new(jitterX, y + bumpH / 2, z),
+							Color    = C.boulder,
+							Material = Enum.Material.Concrete,
+							Parent   = obstaclesFolder,
+						})
+						obstacleCount += 1
+					end
+				end
+			end
+
+		elseif theme == "ramps" then
+			for _ = 1, rng:NextInteger(5, 9) do
+				local x, y, z = randomPosInSection(sectionIndex)
+				local width = rng:NextNumber(22, 38)
+				local height = rng:NextNumber(5, 10)
+				local depth = rng:NextNumber(16, 28)
 				local yaw = rng:NextNumber(-15, 15)
+				-- Ramp slope faces downhill (+Z): no extra pi so wedge points correct way
 				makeWedge({
 					Name     = "Ramp_" .. obstacleCount,
 					Size     = Vector3.new(width, height, depth),
 					CFrame   = CFrame.new(x, y + height / 2, z)
-						* CFrame.Angles(pitch, math.rad(yaw) + math.pi, 0),
+						* CFrame.Angles(pitch, math.rad(yaw), 0),
 					Color    = C.ramp,
 					Material = Enum.Material.Concrete,
 					Parent   = obstaclesFolder,
 				})
+				obstacleCount += 1
+			end
 
-			elseif obsType == 3 then
-				local logLen = rng:NextNumber(20, 60)
-				local logRad = rng:NextNumber(2, 4)
-				local yaw = rng:NextNumber(-30, 30)
-				makePart({
-					Name     = "Log_" .. obstacleCount,
-					Shape    = Enum.PartType.Cylinder,
-					Size     = Vector3.new(logLen, logRad * 2, logRad * 2),
-					CFrame   = CFrame.new(x, y + logRad, z)
-						* CFrame.Angles(0, math.rad(yaw), math.rad(90)),
-					Color    = C.log,
-					Material = Enum.Material.Wood,
-					Parent   = obstaclesFolder,
-				})
-
-			elseif obsType == 4 then
-				local sx = rng:NextNumber(20, 50)
-				local sz = rng:NextNumber(20, 50)
+		elseif theme == "mud" then
+			local numPatches = rng:NextInteger(3, 6)
+			for _ = 1, numPatches do
+				local x, y, z = randomPosInSection(sectionIndex)
+				local sx = rng:NextNumber(25, 55)
+				local sz = rng:NextNumber(25, 55)
 				local mudPart = makePart({
 					Name       = "MudZone_" .. obstacleCount,
 					Size       = Vector3.new(sx, 0.3, sz),
@@ -449,29 +556,20 @@ function MapBuilder.build()
 					CanCollide = false,
 				})
 				CollectionService:AddTag(mudPart, "MudZone")
+				obstacleCount += 1
+			end
 
-			elseif obsType == 5 then
-				local sx = rng:NextNumber(20, 50)
-				local sz = rng:NextNumber(20, 50)
-				local icePart = makePart({
-					Name       = "IceZone_" .. obstacleCount,
-					Size       = Vector3.new(sx, 0.3, sz),
-					CFrame     = CFrame.new(x, y + 0.15, z) * CFrame.Angles(pitch, 0, 0),
-					Color      = C.ice,
-					Material   = Enum.Material.Ice,
-					Parent     = obstaclesFolder,
-					CanCollide = false,
-				})
-				CollectionService:AddTag(icePart, "IceZone")
-
-			elseif obsType == 6 then
+		elseif theme == "barriers" then
+			for _ = 1, rng:NextInteger(4, 7) do
+				local x, y, z = randomPosInSection(sectionIndex)
 				local count = rng:NextInteger(2, 5)
 				for b = 1, count do
 					local bx = x + (b - 1) * rng:NextNumber(4, 7)
+					local by = roadY(z) + ROAD_THICK / 2
 					makePart({
 						Name     = "Barrier_" .. obstacleCount .. "_" .. b,
 						Size     = Vector3.new(2, 4, 1),
-						CFrame   = CFrame.new(bx, y + 2, z),
+						CFrame   = CFrame.new(bx, by + 2, z),
 						Color    = C.barrier,
 						Material = Enum.Material.SmoothPlastic,
 						Parent   = obstaclesFolder,
@@ -479,30 +577,43 @@ function MapBuilder.build()
 					makePart({
 						Name     = "BarrierStripe_" .. obstacleCount .. "_" .. b,
 						Size     = Vector3.new(2, 0.6, 1),
-						CFrame   = CFrame.new(bx, y + 4.3, z),
+						CFrame   = CFrame.new(bx, by + 4.3, z),
 						Color    = C.barrierStr,
 						Material = Enum.Material.Neon,
 						Parent   = obstaclesFolder,
 					})
 				end
-
-			elseif obsType == 7 then
-				local radius = rng:NextNumber(3, 5)
-				local length = rng:NextNumber(4, 8)
-				local yaw = rng:NextNumber(0, 360)
-				makePart({
-					Name     = "HayBale_" .. obstacleCount,
-					Shape    = Enum.PartType.Cylinder,
-					Size     = Vector3.new(length, radius * 2, radius * 2),
-					CFrame   = CFrame.new(x, y + radius, z)
-						* CFrame.Angles(0, math.rad(yaw), math.rad(90)),
-					Color    = C.hayBale,
-					Material = Enum.Material.Fabric,
-					Parent   = obstaclesFolder,
-				})
+				obstacleCount += 1
 			end
 
-			obstacleCount += 1
+		else
+			-- "mixed": variety in this section
+			local types = { "boulder", "ramp", "log", "hay", "barrier" }
+			for _ = 1, rng:NextInteger(6, 12) do
+				local x, y, z = randomPosInSection(sectionIndex)
+				local choice = types[rng:NextInteger(1, #types)]
+				if choice == "boulder" then
+					local size = rng:NextNumber(5, 12)
+					makePart({ Name = "Boulder_" .. obstacleCount, Shape = Enum.PartType.Ball, Size = Vector3.new(size, size, size), CFrame = CFrame.new(x, y + size / 2, z), Color = C.boulder, Material = Enum.Material.Slate, Parent = obstaclesFolder })
+				elseif choice == "ramp" then
+					local width, height, depth = rng:NextNumber(14, 24), rng:NextNumber(3, 6), rng:NextNumber(10, 18)
+					makeWedge({ Name = "Ramp_" .. obstacleCount, Size = Vector3.new(width, height, depth), CFrame = CFrame.new(x, y + height / 2, z) * CFrame.Angles(pitch, math.rad(rng:NextNumber(-15, 15)), 0), Color = C.ramp, Material = Enum.Material.Concrete, Parent = obstaclesFolder })
+				elseif choice == "log" then
+					local logLen, logRad = rng:NextNumber(20, 50), rng:NextNumber(2, 4)
+					makePart({ Name = "Log_" .. obstacleCount, Shape = Enum.PartType.Cylinder, Size = Vector3.new(logLen, logRad * 2, logRad * 2), CFrame = CFrame.new(x, y + logRad, z) * CFrame.Angles(0, math.rad(rng:NextNumber(-30, 30)), math.rad(90)), Color = C.log, Material = Enum.Material.Wood, Parent = obstaclesFolder })
+				elseif choice == "hay" then
+					local radius, length = rng:NextNumber(3, 5), rng:NextNumber(4, 8)
+					makePart({ Name = "HayBale_" .. obstacleCount, Shape = Enum.PartType.Cylinder, Size = Vector3.new(length, radius * 2, radius * 2), CFrame = CFrame.new(x, y + radius, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), math.rad(90)), Color = C.hayBale, Material = Enum.Material.Fabric, Parent = obstaclesFolder })
+				else
+					local count = rng:NextInteger(2, 4)
+					for b = 1, count do
+						local bx = x + (b - 1) * rng:NextNumber(4, 6)
+						makePart({ Name = "Barrier_" .. obstacleCount .. "_" .. b, Size = Vector3.new(2, 4, 1), CFrame = CFrame.new(bx, y + 2, z), Color = C.barrier, Material = Enum.Material.SmoothPlastic, Parent = obstaclesFolder })
+						makePart({ Name = "BarrierStripe_" .. obstacleCount .. "_" .. b, Size = Vector3.new(2, 0.6, 1), CFrame = CFrame.new(bx, y + 4.3, z), Color = C.barrierStr, Material = Enum.Material.Neon, Parent = obstaclesFolder })
+					end
+				end
+				obstacleCount += 1
+			end
 		end
 	end
 
@@ -545,8 +656,10 @@ function MapBuilder.build()
 
 	print("[MapBuilder] Test map generated under Workspace.Map")
 	print("  Road: " .. ROAD_WIDTH .. " wide x " .. ROAD_LENGTH .. " long, " .. SLOPE_DROP .. " stud drop")
+	print("  Sections: " .. NUM_SECTIONS .. " x " .. SECTION_LENGTH .. " studs (themed obstacles)")
+	print("  Side barriers: dense natural barrier " .. BARRIER_ZONE_W .. " studs each side")
 	print("  Spawn points: 16 (single row, 200-stud spread)")
-	print("  Obstacles: " .. obstacleCount .. " placed across " .. ZONE_COUNT .. " zones")
+	print("  Obstacles: " .. obstacleCount .. " (section-themed)")
 	print("  Power-up spawns: " .. POWERUP_COUNT)
 end
 

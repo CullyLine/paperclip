@@ -1,19 +1,17 @@
 --[[
-	ChassisClient — Client-side physics loop for Downhill Madness.
-	
-	Based on the Polaris chassis system. Runs on the player who is
-	sitting in the driver seat. Network ownership is transferred to
-	them by VehicleSpawner. All raycast suspension, drivetrain,
-	steering, and force application happen here for zero-latency feel.
-	
-	Differences from stock Polaris:
-	  - Modules required from DMReplicatedStorage (not vehicle model)
-	  - Uses InputManager for input abstraction
-	  - Humanoid.Seated detection (not RemoteEvent start/stop)
-	  - Cylinder wheel parts use native X-axis orientation (no extra rotation needed)
-	  - No built-in DriverHUD (DM has its own UI)
-	  - No hydraulics input/sync
-	  - Sets workspace.Gravity from config on start, restores on stop
+	ChassisClient — Client-side raycast chassis for Downhill Madness.
+
+	Sits in StarterPlayerScripts. Detects when the local player sits
+	in a vehicle, takes over physics via Heartbeat, and stops when
+	they stand up.
+
+	Uses DownhillConfig + DownhillPhysics (no Drivetrain, no LiveValues).
+	All 4 wheels are driven (AWD). Simple flat drive force model.
+
+	Visual wheels are separate Anchored parts living outside the vehicle
+	assembly. Positioned on RenderStepped (not Heartbeat) so they always
+	read the latest chassis CFrame right before the frame renders.
+	No welds, no constraints, no physics — zero jitter.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -24,415 +22,371 @@ local player = Players.LocalPlayer
 
 local InputManager = require(script.Parent:WaitForChild("InputManager"))
 
-local DMReplicatedStorage = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
-local ChassisConfig = require(DMReplicatedStorage:WaitForChild("ChassisConfig"))
-local ChassisPhysics = require(DMReplicatedStorage:WaitForChild("ChassisPhysics"))
-local Drivetrain = require(DMReplicatedStorage:WaitForChild("Drivetrain"))
-local LiveValuesSync = require(DMReplicatedStorage:WaitForChild("LiveValuesSync"))
+local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
+local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
+local DownhillPhysics = require(DMRep:WaitForChild("DownhillPhysics"))
 
 local input: any = nil
 local vehicleModel: Model = nil
-local config: any = nil
-local driveState: any = nil
+local cfg: any = nil
 local root: BasePart = nil
 local wheelsFolder: Model = nil
 
 type WheelData = {
-	part: BasePart,   -- physical (welded), never touched
-	visual: BasePart, -- anchored proxy, CFrame updated each frame (reparented off assembly)
+	part: BasePart,
+	visual: BasePart,
 	def: any,
-	pendingCFrame: CFrame?, -- applied in RenderStepped to avoid rubber-banding
-	lastSuspensionLength: number,
-	visualAngle: number,
+	lastSpringLen: number,
+	spinAngle: number,
 	groundHit: boolean,
-	contactNormal: Vector3,
-	suspensionForce: number,
-	localVelocity: Vector3,
+	suspForce: number,
 	surfaceMaterial: Enum.Material?,
 }
 
 local wheels: { WheelData } = {}
+local visualWheelFolder: Folder = nil
 local rayParams: RaycastParams = nil
 local currentSteerAngle = 0
-local physicsConnection: RBXScriptConnection? = nil
-local renderConnection: RBXScriptConnection? = nil
+local physicsConn: RBXScriptConnection? = nil
+local vehicleDestroyConn: RBXScriptConnection? = nil
 local isActive = false
-local absPulseTimer = 0
+local savedGravity: number = 196.2
+
+local DEBUG_ENABLED = true
+local debugTimer = 0
+local DEBUG_INTERVAL = 0.5
+
+----------------------------------------------------------------
+-- Visual wheel creation / destruction
+----------------------------------------------------------------
+
+local function createVisualWheel(templatePart: BasePart): BasePart
+	local vis = templatePart:Clone()
+	vis.Name = templatePart.Name .. "_Visual"
+	vis.Transparency = 0
+	vis.Anchored = true
+	vis.CanCollide = false
+	vis.CanQuery = false
+	vis.Massless = true
+
+	for _, child in vis:GetChildren() do
+		if child:IsA("WeldConstraint") or child:IsA("Weld") then
+			child:Destroy()
+		end
+	end
+
+	vis.Parent = visualWheelFolder
+	return vis
+end
+
+local function destroyVisualWheels()
+	if visualWheelFolder then
+		visualWheelFolder:Destroy()
+		visualWheelFolder = nil
+	end
+end
+
+----------------------------------------------------------------
+-- Wheel building
+----------------------------------------------------------------
 
 local function buildWheels()
 	wheels = {}
-	local wheelVisualsFolder = vehicleModel and vehicleModel:FindFirstChild("WheelVisuals")
-	for _, def in config.wheels do
-		local wheelPart = wheelsFolder:FindFirstChild(def.partName)
-			or wheelsFolder:WaitForChild(def.partName, 5)
-		-- Visual may be under wheel (first sit) or already in WheelVisuals (re-entry)
-		local visualPart = wheelPart and (wheelPart:FindFirstChild("Visual")
-			or (wheelVisualsFolder and wheelVisualsFolder:FindFirstChild(def.partName .. "_Visual")))
-		if wheelPart and visualPart and visualPart:IsA("BasePart") then
-			table.insert(wheels, {
-				part = wheelPart,
-				visual = visualPart,
-				def = def,
-				pendingCFrame = nil,
-				lastSuspensionLength = config.suspensionRestLength,
-				visualAngle = 0,
-				groundHit = false,
-				contactNormal = Vector3.yAxis,
-				suspensionForce = 0,
-				localVelocity = Vector3.zero,
-			})
-		elseif wheelPart then
-			warn("[ChassisClient] Wheel " .. def.partName .. " missing Visual child")
-		else
-			warn("[ChassisClient] Wheel not found after 5s: " .. def.partName)
+
+	destroyVisualWheels()
+	visualWheelFolder = Instance.new("Folder")
+	visualWheelFolder.Name = "VisualWheels_" .. player.Name
+	visualWheelFolder.Parent = workspace
+
+	for _, def in cfg.wheels do
+		local part = wheelsFolder:FindFirstChild(def.name)
+			or wheelsFolder:WaitForChild(def.name, 5)
+		if not part then
+			warn("[ChassisClient] Wheel missing: " .. def.name)
+			continue
 		end
+
+		local visual = createVisualWheel(part)
+
+		table.insert(wheels, {
+			part = part,
+			visual = visual,
+			def = def,
+			lastSpringLen = cfg.suspRestLength,
+			spinAngle = 0,
+			groundHit = false,
+			suspForce = 0,
+			surfaceMaterial = nil,
+		})
 	end
 end
 
-local function castAndComputeSuspension(wheel: WheelData, dt: number): (number, boolean, Vector3, number, Enum.Material?)
-	local worldOffset = root.CFrame:PointToWorldSpace(wheel.def.suspensionOffset)
-	local rayLength = config.suspensionRestLength + config.wheelRadius + config.suspensionMaxTravel
-
-	local result = workspace:Raycast(worldOffset, -Vector3.yAxis * rayLength, rayParams)
-
-	local suspResult = ChassisPhysics.computeSuspension({
-		hitDistance = if result then (worldOffset - result.Position).Magnitude else nil,
-		hitNormal = if result then result.Normal else nil,
-		rayOrigin = worldOffset,
-		rayLength = rayLength,
-		lastSuspensionLength = wheel.lastSuspensionLength,
-		hydraulicOffset = 0,
-	}, config, #wheels, root.AssemblyMass, workspace.Gravity, dt)
-
-	wheel.lastSuspensionLength = suspResult.springLength
-	wheel.groundHit = suspResult.onGround
-	wheel.contactNormal = if result then result.Normal else Vector3.yAxis
-	wheel.suspensionForce = suspResult.force
-	wheel.surfaceMaterial = if result then result.Material else nil
-
-	return suspResult.force, suspResult.onGround, if result then result.Position else suspResult.contactPosition, suspResult.springLength, if result then result.Material else nil
+local function resolveRoot(vModel: Model): BasePart?
+	local body = vModel:FindFirstChild("Body")
+	if body then
+		local ch = body:FindFirstChild("Chassis") or body.PrimaryPart
+		if ch then return ch end
+		for _, c in body:GetChildren() do
+			if c:IsA("BasePart") then return c end
+		end
+	end
+	return vModel.PrimaryPart
 end
 
--- Store CFrame for RenderStepped (avoids rubber-band from parent/assembly updates)
-local function setWheelCFrame(wheel: WheelData, cf: CFrame)
-	wheel.pendingCFrame = cf
+----------------------------------------------------------------
+-- Debug helper
+----------------------------------------------------------------
+
+local function vec3str(v: Vector3): string
+	return string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z)
 end
 
-local function applyWheelCFrames()
+----------------------------------------------------------------
+-- Visual wheel positioning — called at the end of physicsStep
+-- with a FRESH root.CFrame read (not the stale one from the top
+-- of the function). Runs on Heartbeat in the same frame as
+-- the physics so there's zero lag.
+----------------------------------------------------------------
+
+local function updateVisualWheels()
+	if not root or not root.Parent then return end
+
+	local freshCF = root.CFrame
+	local bodyRot = freshCF - freshCF.Position
+
 	for _, wheel in wheels do
-		if wheel.pendingCFrame then
-			wheel.visual.CFrame = wheel.pendingCFrame
-			for _, child in wheel.visual:GetChildren() do
-				if child:IsA("BasePart") then child.CFrame = wheel.pendingCFrame end
-			end
+		if not wheel.visual or not wheel.visual.Parent then continue end
+
+		local mountWorld = freshCF:PointToWorldSpace(wheel.def.offset)
+		local visualPos = mountWorld + Vector3.new(0, -wheel.lastSpringLen, 0)
+
+		local cf = CFrame.new(visualPos) * bodyRot
+
+		if wheel.def.isSteered then
+			cf = cf * CFrame.Angles(0, math.rad(currentSteerAngle), 0)
 		end
+
+		cf = cf * CFrame.Angles(math.rad(wheel.spinAngle), 0, 0)
+
+		wheel.visual.CFrame = cf
 	end
 end
+
+----------------------------------------------------------------
+-- Physics step (Heartbeat — after physics sim)
+----------------------------------------------------------------
 
 local function physicsStep(dt: number)
 	if not isActive or not root or dt <= 0 or dt > 0.5 then return end
 	if root.Anchored then return end
 
-	local inputState = input:getState()
-	local throttleInput = inputState.throttle
-	local steerInput = -inputState.steer
-	local handbrakeInput = inputState.handbrake
-	local brakeInput = 0
-
-	local forwardSpeed = root.AssemblyLinearVelocity:Dot(root.CFrame.LookVector)
-	if (throttleInput > 0.1 and forwardSpeed < -2) or (throttleInput < -0.1 and forwardSpeed > 2) then
-		brakeInput = math.abs(throttleInput) * 0.7
-	end
-
-	-- Counter-steer assist
-	local lateralVel = root.AssemblyLinearVelocity:Dot(root.CFrame.RightVector)
-	if math.abs(forwardSpeed) > 5 and math.abs(lateralVel) > 2 then
-		local slideRatio = lateralVel / math.max(math.abs(forwardSpeed), 1)
-		local counterSteerBlend = math.clamp(slideRatio * config.counterSteerFactor, -1, 1)
-		steerInput = math.clamp(steerInput + counterSteerBlend, -1, 1)
-	end
-
-	if root.AssemblyMass <= 0 then return end
+	local state = input:getState()
+	local throttle = state.throttle
+	local steer = -state.steer
+	local handbrake = state.handbrake
 
 	local rootCF = root.CFrame
-	local rootVelocity = root.AssemblyLinearVelocity
-	local upDir = rootCF.UpVector
-	local speed = rootVelocity.Magnitude
+	local velocity = root.AssemblyLinearVelocity
+	local speed = velocity.Magnitude
+	local forwardSpeed = velocity:Dot(rootCF.LookVector)
+	local mass = root.AssemblyMass
+	if mass <= 0 then return end
 
-	currentSteerAngle = ChassisPhysics.computeSteerAngle(currentSteerAngle, steerInput, speed, config, dt)
+	-- Counter-steer assist
+	local lateralVel = velocity:Dot(rootCF.RightVector)
+	if math.abs(forwardSpeed) > 5 and math.abs(lateralVel) > 2 then
+		local slide = lateralVel / math.max(math.abs(forwardSpeed), 1)
+		steer = math.clamp(steer + slide * cfg.counterSteerFactor, -1, 1)
+	end
 
-	Drivetrain.update(driveState, config, forwardSpeed, throttleInput, dt)
+	currentSteerAngle = DownhillPhysics.steerAngle(currentSteerAngle, steer, speed, cfg, dt)
 
-	type WheelFrame = {
-		wheel: WheelData,
-		onGround: boolean,
-		contactPos: Vector3,
-		wheelForward: Vector3,
-		wheelRight: Vector3,
-		longitudinalSpeed: number,
-		pointVelocity: Vector3,
-		suspForce: number,
-		surfaceFriction: number,
-	}
-	local wheelFrames: { WheelFrame } = {}
+	-- Per-wheel suspension + lateral grip
+	local groundedCount = 0
+
+	-- Debug throttle
+	local shouldDebug = false
+	if DEBUG_ENABLED then
+		debugTimer += dt
+		if debugTimer >= DEBUG_INTERVAL then
+			debugTimer = 0
+			shouldDebug = true
+		end
+	end
+
+	if shouldDebug then
+		print("===== [ChassisDebug] =====")
+		print(string.format("  Root pos: %s  vel: %s  speed: %.1f  fwdSpd: %.1f",
+			vec3str(rootCF.Position), vec3str(velocity), speed, forwardSpeed))
+		print(string.format("  Mass: %.1f  Gravity: %.1f  SteerAngle: %.1f",
+			mass, workspace.Gravity, currentSteerAngle))
+	end
 
 	for i, wheel in wheels do
-		local suspForce, onGround, contactPos, springLen, hitMaterial = castAndComputeSuspension(wheel, dt)
-		local surfFriction = 1.0
-		if hitMaterial then
-			surfFriction = ChassisConfig.getSurfaceFriction(config, hitMaterial)
+		local worldOffset = rootCF:PointToWorldSpace(wheel.def.offset)
+		local rayLen = cfg.suspRestLength + cfg.wheelRadius + cfg.suspMaxTravel
+
+		local hit = workspace:Raycast(worldOffset, -Vector3.yAxis * rayLen, rayParams)
+		local hitDist: number? = if hit then (worldOffset - hit.Position).Magnitude else nil
+
+		local susp = DownhillPhysics.suspension(
+			hitDist, worldOffset, rayLen,
+			wheel.lastSpringLen, cfg, #wheels, mass, workspace.Gravity, dt
+		)
+
+		wheel.lastSpringLen = susp.springLength
+		wheel.groundHit = susp.onGround
+		wheel.suspForce = susp.force
+
+		if shouldDebug then
+			local mountWorld = rootCF:PointToWorldSpace(wheel.def.offset)
+			local logicalPos = mountWorld + Vector3.new(0, -susp.springLength, 0)
+			local visualPos = if wheel.visual and wheel.visual.Parent
+				then wheel.visual.Position
+				else Vector3.zero
+
+			print(string.format("  [%s] grounded=%s  hitDist=%s  springLen=%.3f  suspForce=%.0f",
+				wheel.def.name,
+				tostring(susp.onGround),
+				if hitDist then string.format("%.3f", hitDist) else "nil",
+				susp.springLength,
+				susp.force
+			))
+			print(string.format("       mount=%s  logical=%s  visual=%s  delta=%.4f",
+				vec3str(mountWorld),
+				vec3str(logicalPos),
+				vec3str(visualPos),
+				(logicalPos - visualPos).Magnitude
+			))
 		end
-		local wf: WheelFrame = {
-			wheel = wheel,
-			onGround = onGround,
-			contactPos = contactPos,
-			wheelForward = Vector3.zero,
-			wheelRight = Vector3.zero,
-			longitudinalSpeed = 0,
-			pointVelocity = Vector3.zero,
-			suspForce = suspForce,
-			surfaceFriction = surfFriction,
-		}
 
-		if onGround then
-			local attachPoint = rootCF:PointToWorldSpace(wheel.def.suspensionOffset)
-			root:ApplyImpulseAtPosition(Vector3.yAxis * suspForce * dt, attachPoint)
+		wheel.surfaceMaterial = if hit then hit.Material else nil
 
-			local wheelWorldCF = rootCF * CFrame.new(wheel.def.suspensionOffset)
+		if susp.onGround then
+			groundedCount += 1
+			local attachPt = rootCF:PointToWorldSpace(wheel.def.offset)
+
+			root:ApplyImpulseAtPosition(Vector3.yAxis * susp.force * dt, attachPt)
+
+			local wheelCF = rootCF * CFrame.new(wheel.def.offset)
 			if wheel.def.isSteered then
-				wheelWorldCF = wheelWorldCF * CFrame.Angles(0, math.rad(currentSteerAngle), 0)
+				wheelCF = wheelCF * CFrame.Angles(0, math.rad(currentSteerAngle), 0)
 			end
-			wf.wheelRight = wheelWorldCF.RightVector
-			wf.wheelForward = wheelWorldCF.LookVector
+			local wheelRight = wheelCF.RightVector
+			local wheelFwd = wheelCF.LookVector
 
-			local pointVelocity = root:GetVelocityAtPosition(attachPoint)
-			wf.pointVelocity = pointVelocity
-			local lateralSpeed = pointVelocity:Dot(wf.wheelRight)
-			local longitudinalSpeed = pointVelocity:Dot(wf.wheelForward)
-			wf.longitudinalSpeed = longitudinalSpeed
-			wheel.localVelocity = Vector3.new(lateralSpeed, 0, longitudinalSpeed)
+			local ptVel = root:GetVelocityAtPosition(attachPt)
+			local latSpeed = ptVel:Dot(wheelRight)
+			local lonSpeed = ptVel:Dot(wheelFwd)
 
-			local lateralForce = ChassisPhysics.computeLateralForce({
-				lateralSpeed = lateralSpeed,
-				longitudinalSpeed = longitudinalSpeed,
-				suspensionForce = suspForce,
-			}, config, wf.surfaceFriction)
-
-			if wheel.def.isSteered and (config.frontLateralGripMultiplier or 1) ~= 1 then
-				lateralForce = lateralForce * (config.frontLateralGripMultiplier or 1)
-			end
-			if handbrakeInput > 0.5 and not wheel.def.isSteered then
-				lateralForce = lateralForce * 0.15
+			local surfFric = 1.0
+			if hit then
+				surfFric = DownhillConfig.getSurfaceFriction(cfg, hit.Material)
 			end
 
-			root:ApplyImpulseAtPosition(wf.wheelRight * lateralForce * dt, attachPoint)
-		end
-
-		wheelFrames[i] = wf
-	end
-
-	-- Drivetrain torque distribution via differentials
-	local axles: { [number]: { WheelFrame } } = {}
-	for _, wf in wheelFrames do
-		if wf.wheel.def.isDriven then
-			local aid = wf.wheel.def.axleId
-			if not axles[aid] then axles[aid] = {} end
-			table.insert(axles[aid], wf)
-		end
-	end
-
-	local driveTorque = Drivetrain.getOutputTorque(driveState, config, throttleInput)
-	local atSpeedLimit = math.abs(forwardSpeed) > config.maxSpeedStudsPerSec
-
-	local axleIds = {}
-	for aid in axles do
-		table.insert(axleIds, aid)
-	end
-	table.sort(axleIds)
-
-	local axleTorque: { [number]: number } = {}
-	if #axleIds == 1 then
-		axleTorque[axleIds[1]] = driveTorque
-	elseif #axleIds == 2 then
-		local frontAxle, rearAxle = axleIds[1], axleIds[2]
-		local frontAvgSpeed, rearAvgSpeed = 0, 0
-		for _, wf in axles[frontAxle] do frontAvgSpeed += wf.longitudinalSpeed end
-		frontAvgSpeed /= #axles[frontAxle]
-		for _, wf in axles[rearAxle] do rearAvgSpeed += wf.longitudinalSpeed end
-		rearAvgSpeed /= #axles[rearAxle]
-
-		local fFrac, rFrac = Drivetrain.centerSplit(config, frontAvgSpeed, rearAvgSpeed, throttleInput)
-		axleTorque[frontAxle] = driveTorque * fFrac
-		axleTorque[rearAxle] = driveTorque * rFrac
-	else
-		for _, aid in axleIds do
-			axleTorque[aid] = driveTorque / #axleIds
-		end
-	end
-
-	local wheelTorque: { [WheelData]: number } = {}
-	for aid, axleWheels in axles do
-		local diff = Drivetrain.getDiffForAxle(config, aid)
-		local tq = axleTorque[aid] or 0
-
-		if #axleWheels == 2 then
-			local lFrac, rFrac = Drivetrain.diffSplit(
-				diff,
-				axleWheels[1].longitudinalSpeed,
-				axleWheels[2].longitudinalSpeed,
-				throttleInput
+			local gripMul = if wheel.def.isSteered then cfg.lateralGripFront else cfg.lateralGrip
+			local latForce = DownhillPhysics.lateralForce(
+				latSpeed, lonSpeed, susp.force, gripMul, cfg, surfFric
 			)
-			wheelTorque[axleWheels[1].wheel] = tq * lFrac
-			wheelTorque[axleWheels[2].wheel] = tq * rFrac
-		else
-			for _, wf in axleWheels do
-				wheelTorque[wf.wheel] = tq / #axleWheels
+			if handbrake > 0.5 and not wheel.def.isSteered then
+				latForce = latForce * cfg.handbrakeGripFactor
 			end
+			root:ApplyImpulseAtPosition(wheelRight * latForce * dt, attachPt)
+
+			local atLimit = math.abs(forwardSpeed) > cfg.maxSpeed
+			if not atLimit then
+				if math.abs(throttle) > 0.05 then
+					local force = if throttle > 0 then cfg.driveForce else cfg.reverseForce
+					local perWheel = force * math.abs(throttle) * surfFric / #wheels
+					local dir = if throttle > 0 then wheelFwd else -wheelFwd
+					root:ApplyImpulseAtPosition(dir * perWheel * dt, attachPt)
+				end
+			end
+
+			if (throttle > 0.1 and forwardSpeed < -2) or (throttle < -0.1 and forwardSpeed > 2) then
+				local brakeMag = cfg.brakeForce * math.abs(throttle) * 0.7 / #wheels
+				local brakeDir = if ptVel.Magnitude > 1 then -ptVel.Unit else Vector3.zero
+				root:ApplyImpulseAtPosition(brakeDir * brakeMag * dt, attachPt)
+			end
+
+			if math.abs(throttle) < 0.05 and math.abs(lonSpeed) > 1 then
+				local ebForce = cfg.engineBraking * susp.force
+				local ebDir = -wheelFwd * (if lonSpeed > 0 then 1 else -1)
+				root:ApplyImpulseAtPosition(ebDir * ebForce * dt, attachPt)
+			end
+
+			if handbrake > 0.5 and not wheel.def.isSteered then
+				local hbMag = cfg.brakeForce * 0.6 / 2
+				local hbDir = if ptVel.Magnitude > 1 then -ptVel.Unit else Vector3.zero
+				root:ApplyImpulseAtPosition(hbDir * hbMag * dt, attachPt)
+			end
+
+			local spinRate = lonSpeed / math.max(cfg.wheelRadius, 0.1)
+			wheel.spinAngle += math.deg(spinRate * dt)
+		else
+			wheel.spinAngle = wheel.spinAngle * (1 - dt * 2)
 		end
 	end
 
-	absPulseTimer += dt * config.absCycleRate
-	local absPulseOn = (math.sin(absPulseTimer * math.pi * 2) > 0)
-
-	for i, wf in wheelFrames do
-		local wheel = wf.wheel
-		if wf.onGround then
-			local attachPoint = rootCF:PointToWorldSpace(wheel.def.suspensionOffset)
-
-			-- TCS
-			local tcsMultiplier = 1
-			if wheel.def.isDriven and config.tcsEnabled and math.abs(throttleInput) > 0.05 then
-				local mult, _ = ChassisPhysics.computeTcsMultiplier(
-					wf.longitudinalSpeed, forwardSpeed, config
-				)
-				tcsMultiplier = mult
-			end
-
-			-- Drive force
-			if wheel.def.isDriven and not atSpeedLimit then
-				local wTorque = (wheelTorque[wheel] or 0) * tcsMultiplier
-				local driveForce = ChassisPhysics.computeDriveForce(wTorque, config.wheelRadius, 1, wf.surfaceFriction)
-
-				local driveDir = wf.wheelForward
-				if throttleInput < 0 then
-					driveDir = -driveDir
-				end
-				root:ApplyImpulseAtPosition(driveDir * driveForce * dt * config.longitudinalGripMultiplier, attachPoint)
-			end
-
-			-- Engine braking
-			if wheel.def.isDriven and math.abs(throttleInput) < 0.05 and math.abs(wf.longitudinalSpeed) > 1 then
-				local engineBrakeForce = ChassisPhysics.computeEngineBrakeForce(
-					wf.longitudinalSpeed, wf.suspForce, driveState.currentRPM, config
-				)
-				local brakeDir = -wf.wheelForward * (if wf.longitudinalSpeed > 0 then 1 else -1)
-				root:ApplyImpulseAtPosition(brakeDir * engineBrakeForce * dt, attachPoint)
-			end
-
-			-- Brake force
-			if brakeInput > 0.05 then
-				local isFrontAxle = (wheel.def.axleId == 1)
-				local brakeForce = ChassisPhysics.computeBrakeForce(brakeInput, isFrontAxle, config)
-
-				local applyBrake = true
-				if ChassisPhysics.shouldAbsPulse(wf.longitudinalSpeed, forwardSpeed, config) then
-					applyBrake = absPulseOn
-				end
-
-				if applyBrake then
-					local brakeDir = -wf.pointVelocity.Unit
-					if wf.pointVelocity.Magnitude < 1 then
-						brakeDir = Vector3.zero
-					end
-					root:ApplyImpulseAtPosition(brakeDir * brakeForce * dt, attachPoint)
-				end
-			end
-
-			-- Handbrake on rear wheels
-			if handbrakeInput > 0.5 and wheel.def.axleId == 2 then
-				local hbForce = config.handbrakeForce / config.wheelRadius
-				local brakeDir = -wf.pointVelocity.Unit
-				if wf.pointVelocity.Magnitude < 1 then
-					brakeDir = Vector3.zero
-				end
-				root:ApplyImpulseAtPosition(brakeDir * hbForce * dt, attachPoint)
-			end
-
-			-- Wheel spin visual
-			local wheelSpinSpeed = wf.longitudinalSpeed / config.wheelRadius
-			wheel.visualAngle += math.deg(wheelSpinSpeed * dt)
-
-			local cf = ChassisPhysics.computeWheelCFrameSmoothed({
-				onGround = true,
-				contactPosition = wf.contactPos,
-				suspensionOffset = wheel.def.suspensionOffset,
-				isSteered = wheel.def.isSteered,
-				steerAngle = currentSteerAngle,
-				visualAngle = wheel.visualAngle,
-			}, rootCF, upDir, config)
-			setWheelCFrame(wheel, cf)
-		else
-			wheel.visualAngle = wheel.visualAngle * (1 - dt * 2)
-
-			local cf = ChassisPhysics.computeWheelCFrameSmoothed({
-				onGround = false,
-				contactPosition = Vector3.zero,
-				suspensionOffset = wheel.def.suspensionOffset,
-				isSteered = wheel.def.isSteered,
-				steerAngle = currentSteerAngle,
-				visualAngle = wheel.visualAngle,
-			}, rootCF, upDir, config)
-			setWheelCFrame(wheel, cf)
-		end
-	end
-
-	-- Anti-roll bars
 	if #wheels >= 4 then
-		local flAR, frAR = ChassisPhysics.computeAntiRoll(
+		local flAR, frAR = DownhillPhysics.antiRoll(
 			wheels[1].groundHit, wheels[2].groundHit,
-			wheels[1].lastSuspensionLength, wheels[2].lastSuspensionLength,
-			config.antiRollStiffness
+			wheels[1].lastSpringLen, wheels[2].lastSpringLen,
+			cfg.antiRollStiffness
 		)
 		if flAR ~= 0 then
-			local fl_pos = rootCF:PointToWorldSpace(wheels[1].def.suspensionOffset)
-			local fr_pos = rootCF:PointToWorldSpace(wheels[2].def.suspensionOffset)
-			root:ApplyImpulseAtPosition(Vector3.yAxis * flAR * dt, fl_pos)
-			root:ApplyImpulseAtPosition(Vector3.yAxis * frAR * dt, fr_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * flAR * dt, rootCF:PointToWorldSpace(wheels[1].def.offset))
+			root:ApplyImpulseAtPosition(Vector3.yAxis * frAR * dt, rootCF:PointToWorldSpace(wheels[2].def.offset))
 		end
-		local rlAR, rrAR = ChassisPhysics.computeAntiRoll(
+
+		local rlAR, rrAR = DownhillPhysics.antiRoll(
 			wheels[3].groundHit, wheels[4].groundHit,
-			wheels[3].lastSuspensionLength, wheels[4].lastSuspensionLength,
-			config.antiRollStiffness
+			wheels[3].lastSpringLen, wheels[4].lastSpringLen,
+			cfg.antiRollStiffness
 		)
 		if rlAR ~= 0 then
-			local rl_pos = rootCF:PointToWorldSpace(wheels[3].def.suspensionOffset)
-			local rr_pos = rootCF:PointToWorldSpace(wheels[4].def.suspensionOffset)
-			root:ApplyImpulseAtPosition(Vector3.yAxis * rlAR * dt, rl_pos)
-			root:ApplyImpulseAtPosition(Vector3.yAxis * rrAR * dt, rr_pos)
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rlAR * dt, rootCF:PointToWorldSpace(wheels[3].def.offset))
+			root:ApplyImpulseAtPosition(Vector3.yAxis * rrAR * dt, rootCF:PointToWorldSpace(wheels[4].def.offset))
 		end
 	end
 
-	-- Downforce — very low cap so suspension is never overwhelmed (prevents chassis sinking)
-	local downforceImpulse = ChassisPhysics.computeDownforce(speed, config.downforceCoefficient, dt)
-	if downforceImpulse.Magnitude > 0 then
-		local maxDownforceMagnitude = root.AssemblyMass * workspace.Gravity * dt * 0.12
-		if downforceImpulse.Magnitude > maxDownforceMagnitude then
-			downforceImpulse = downforceImpulse.Unit * maxDownforceMagnitude
+	if groundedCount == 0 then
+		local airImpulse = DownhillPhysics.airControl(
+			steer, throttle, root.AssemblyAngularVelocity, rootCF, cfg, dt
+		)
+		root:ApplyImpulseAtPosition(airImpulse, rootCF.Position)
+	end
+
+	local df = DownhillPhysics.downforce(speed, cfg.downforceCoeff, dt)
+	if df.Magnitude > 0 then
+		local maxDF = mass * workspace.Gravity * dt * 0.12
+		if df.Magnitude > maxDF then
+			df = df.Unit * maxDF
 		end
-		root:ApplyImpulseAtPosition(downforceImpulse, rootCF.Position)
+		root:ApplyImpulseAtPosition(df, rootCF.Position)
 	end
 
-	-- Aerodynamic drag
-	local dragImpulse = ChassisPhysics.computeDrag(rootVelocity, speed, config.dragCoefficient, dt)
-	if dragImpulse.Magnitude > 0 then
-		root:ApplyImpulseAtPosition(dragImpulse, rootCF.Position)
+	local dragImp = DownhillPhysics.drag(velocity, speed, cfg.dragCoeff, dt)
+	if dragImp.Magnitude > 0 then
+		root:ApplyImpulseAtPosition(dragImp, rootCF.Position)
 	end
 
-	-- Angular damping
-	root.AssemblyAngularVelocity = ChassisPhysics.computeAngularDamping(
-		root.AssemblyAngularVelocity, config.angularDampingCoefficient, dt
+	root.AssemblyAngularVelocity = DownhillPhysics.angularDamp(
+		root.AssemblyAngularVelocity, cfg.angularDamping, dt
 	)
+
+	if shouldDebug then
+		print(string.format("  Grounded: %d/%d", groundedCount, #wheels))
+		print("=========================")
+	end
+
+	-- Position visual wheels using a FRESH CFrame read (after all impulses)
+	updateVisualWheels()
 end
+
+----------------------------------------------------------------
+-- Start / Stop driving
+----------------------------------------------------------------
 
 local function findVehicleModel(seat: Instance): Model?
 	local model = seat.Parent
@@ -446,124 +400,101 @@ local function findVehicleModel(seat: Instance): Model?
 	return nil
 end
 
+local stopDriving -- forward declaration, assigned below startDriving
+
 local function startDriving(vModel: Model)
-	if isActive then return end
+	if isActive then
+		stopDriving()
+	end
 
 	vehicleModel = vModel
+	root = resolveRoot(vModel)
+	if not root then
+		warn("[ChassisClient] No root part found")
+		return
+	end
 
-	local bodyModel = vModel:FindFirstChild("Body")
-	if not bodyModel then
-		warn("[ChassisClient] No Body model found")
-		return
-	end
-	-- Robust root: by name, then PrimaryPart, then any BasePart in Body, then vehicle-level PrimaryPart
-	root = bodyModel:FindFirstChild("Chassis") or bodyModel:FindFirstChild("CarBody")
-		or bodyModel.PrimaryPart
-	if not root then
-		for _, child in bodyModel:GetChildren() do
-			if child:IsA("BasePart") then root = child break end
-		end
-	end
-	if not root then
-		for _, desc in bodyModel:GetDescendants() do
-			if desc:IsA("BasePart") then root = desc break end
-		end
-	end
-	if not root and vModel.PrimaryPart then
-		root = vModel.PrimaryPart
-	end
-	if not root then
-		warn("[ChassisClient] No root part in Body")
-		return
-	end
 	wheelsFolder = vModel:FindFirstChild("Wheels")
 	if not wheelsFolder then
 		warn("[ChassisClient] No Wheels model found")
 		return
 	end
 
-	config = ChassisConfig.new()
-	driveState = Drivetrain.new()
+	cfg = DownhillConfig.new()
 
-	workspace.Gravity = config.gravity
+	savedGravity = workspace.Gravity
+	workspace.Gravity = cfg.gravity
 
-	-- LiveValues hot-tuning support
-	local liveContainer = vModel:FindFirstChild("LiveValues")
-	if liveContainer then
-		LiveValuesSync.bind(liveContainer, config)
-	end
-
-	-- Hide character from all spatial queries while driving
 	if player.Character then
 		for _, desc in player.Character:GetDescendants() do
-			if desc:IsA("BasePart") then
-				desc.CanQuery = false
-			end
+			if desc:IsA("BasePart") then desc.CanQuery = false end
 		end
 	end
 
 	rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.FilterDescendantsInstances = { vehicleModel }
+	if player.Character then
+		table.insert(rayParams.FilterDescendantsInstances, player.Character)
+	end
 
 	buildWheels()
 
-	-- Reparent visuals off the physical wheels so the weld/assembly doesn't pull them back (only if still under wheel)
-	local wheelVisualsFolder = vehicleModel:FindFirstChild("WheelVisuals")
-	if not wheelVisualsFolder then
-		wheelVisualsFolder = Instance.new("Folder")
-		wheelVisualsFolder.Name = "WheelVisuals"
-		wheelVisualsFolder.Parent = vehicleModel
-	end
-	for _, wheel in wheels do
-		if wheel.visual.Parent ~= wheelVisualsFolder then
-			wheel.visual.Name = wheel.def.partName .. "_Visual"
-			wheel.visual.Parent = wheelVisualsFolder
-		end
+	if visualWheelFolder then
+		table.insert(rayParams.FilterDescendantsInstances, visualWheelFolder)
 	end
 
 	input = InputManager.new()
-	absPulseTimer = 0
+	currentSteerAngle = 0
+	debugTimer = 0
 	isActive = true
-	physicsConnection = RunService.Heartbeat:Connect(physicsStep)
-	-- Apply wheel positions right before render so they don't get overwritten by assembly
-	renderConnection = RunService.RenderStepped:Connect(applyWheelCFrames)
+
+	physicsConn = RunService.Heartbeat:Connect(physicsStep)
+
+	-- Auto-cleanup if the vehicle is destroyed (e.g. round ends, server calls cleanup)
+	vehicleDestroyConn = root.AncestryChanged:Connect(function(_, newParent)
+		if isActive and (not newParent or not root:IsDescendantOf(workspace)) then
+			stopDriving()
+		end
+	end)
 end
 
-local function stopDriving()
+stopDriving = function()
 	isActive = false
-	if physicsConnection then
-		physicsConnection:Disconnect()
-		physicsConnection = nil
+	if physicsConn then
+		physicsConn:Disconnect()
+		physicsConn = nil
 	end
-	if renderConnection then
-		renderConnection:Disconnect()
-		renderConnection = nil
+	if vehicleDestroyConn then
+		vehicleDestroyConn:Disconnect()
+		vehicleDestroyConn = nil
 	end
 	if input then
 		input:destroy()
 		input = nil
 	end
 
-	-- Restore character to be queryable
+	destroyVisualWheels()
+	wheels = {}
+
 	if player.Character then
 		for _, desc in player.Character:GetDescendants() do
-			if desc:IsA("BasePart") then
-				desc.CanQuery = true
-			end
+			if desc:IsA("BasePart") then desc.CanQuery = true end
 		end
 	end
 
-	workspace.Gravity = 196.2
+	workspace.Gravity = savedGravity
 
 	vehicleModel = nil
-	config = nil
-	driveState = nil
+	cfg = nil
 	root = nil
 	wheelsFolder = nil
 	currentSteerAngle = 0
-	absPulseTimer = 0
 end
+
+----------------------------------------------------------------
+-- Seat detection
+----------------------------------------------------------------
 
 local function setupSeatListener()
 	local function onCharacter(character)

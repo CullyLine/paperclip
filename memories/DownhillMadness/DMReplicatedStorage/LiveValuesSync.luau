@@ -1,4 +1,9 @@
 --[[
+	⚠️ DEPRECATED — This module is NOT currently used by Downhill Madness.
+	The active chassis (DownhillConfig.luau) uses a simple flat table
+	with no live-tuning bridge. Kept as reference for the original
+	Polaris-based approach.
+
 	LiveValuesSync — Bridges ValueBase instances on the vehicle model
 	to the runtime ChassisConfig table. Changes to any LiveValue are
 	reflected in the config instantly via .Changed connections.

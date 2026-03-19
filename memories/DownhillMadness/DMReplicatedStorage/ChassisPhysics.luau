@@ -1,4 +1,8 @@
 --[[
+	⚠️ DEPRECATED — This module is NOT currently used by Downhill Madness.
+	The active chassis system uses DownhillPhysics.luau instead.
+	Kept as reference for the original Polaris-based approach.
+
 	ChassisPhysics — Pure physics computation functions shared between
 	server (ChassisController) and client (ChassisClient).
 

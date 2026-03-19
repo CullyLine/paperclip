@@ -1,15 +1,18 @@
 --[[
-	VehicleSpawner — Spawns, locks, unlocks, and cleans up vehicles per round.
+	VehicleSpawner — Spawns, locks, unlocks, teleports, and cleans up vehicles.
 
 	ModuleScript required by RoundController.
 
-	- Clones ReplicatedStorage.TemplateVehicle for each player
-	- Welds all body parts to chassis (Polaris-style)
-	- Places at VehicleSpawn1-16 on the start platform
-	- Assigns network ownership to respective players
-	- Seats players via Seat or VehicleSeat
-	- Lock = Anchored chassis until GO signal
-	- Cleans up all spawned vehicles on round end
+	API:
+	  .spawnVehicles(players) → { SpawnedVehicle }
+	  .lockAll()              — anchor all vehicles
+	  .unlockAll()            — unanchor + set network ownership
+	  .cleanup()              — destroy all vehicles
+	  .teleportVehicle(vehicle, cframe) — safe teleport with physics reset
+	  .anchorVehicle(vehicle, anchored) — anchor/unanchor entire vehicle
+	  .resetVehicle(vehicle)  — zero all velocity
+	  .getVehicleForPlayer(player) → SpawnedVehicle?
+	  .getActiveVehicles() → { SpawnedVehicle }
 ]]
 
 local Players = game:GetService("Players")
@@ -26,10 +29,13 @@ type SpawnedVehicle = {
 
 local activeVehicles: { SpawnedVehicle } = {}
 
+----------------------------------------------------------------
+-- Internal helpers
+----------------------------------------------------------------
+
 local function getSpawnPoints(): { BasePart }
 	local mapFolder = workspace:FindFirstChild("Map")
 	if not mapFolder then return {} end
-
 	local spawnsFolder = mapFolder:FindFirstChild("SpawnPoints")
 	if not spawnsFolder then return {} end
 
@@ -40,12 +46,23 @@ local function getSpawnPoints(): { BasePart }
 			table.insert(points, spawn)
 		end
 	end
-
 	return points
 end
 
 local function getTemplate(): Model?
 	return ReplicatedStorage:FindFirstChild("TemplateVehicle") :: Model?
+end
+
+local function getChassisFromVehicle(vehicle: Model): BasePart?
+	local body = vehicle:FindFirstChild("Body")
+	if body then
+		local ch = body:FindFirstChild("Chassis") or body.PrimaryPart
+		if ch then return ch end
+		for _, child in body:GetChildren() do
+			if child:IsA("BasePart") then return child end
+		end
+	end
+	return vehicle.PrimaryPart
 end
 
 local function weldBodyParts(bodyModel: Model)
@@ -64,16 +81,20 @@ local function weldBodyParts(bodyModel: Model)
 end
 
 local function findSeat(vehicle: Model): Instance?
-	local seat = vehicle:FindFirstChild("VehicleSeat")
-		or vehicle:FindFirstChild("DriverSeat")
+	local seat = vehicle:FindFirstChild("DriverSeat")
+		or vehicle:FindFirstChild("VehicleSeat")
 	if seat then return seat end
 	for _, desc in vehicle:GetDescendants() do
-		if desc:IsA("VehicleSeat") or desc:IsA("Seat") then
+		if desc:IsA("Seat") or desc:IsA("VehicleSeat") then
 			return desc
 		end
 	end
 	return nil
 end
+
+----------------------------------------------------------------
+-- Public API
+----------------------------------------------------------------
 
 function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
 	VehicleSpawner.cleanup()
@@ -90,27 +111,20 @@ function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
 		return {}
 	end
 
-	for i, player in players do
+	for i, plr in players do
 		if i > #spawnPoints then break end
-		if not player:IsDescendantOf(Players) then continue end
+		if not plr:IsDescendantOf(Players) then continue end
 
 		local spawnPoint = spawnPoints[i]
 		local vehicle = template:Clone()
-		vehicle.Name = "Vehicle_" .. player.Name
-
-		-- DM uses VehicleSpawner + ChassisClient only; Polaris ChassisController
-		-- calls SetNetworkOwner on sit, which errors when chassis is still Anchored.
-		local chassisController = vehicle:FindFirstChild("ChassisController")
-		if chassisController then
-			chassisController:Destroy()
-		end
+		vehicle.Name = "Vehicle_" .. plr.Name
 
 		local bodyModel = vehicle:FindFirstChild("Body") :: Model?
-		local chassis = bodyModel and (bodyModel:FindFirstChild("Chassis") or bodyModel.PrimaryPart or bodyModel:FindFirstChildWhichIsA("BasePart")) :: BasePart?
+		local chassis = bodyModel and getChassisFromVehicle(vehicle) :: BasePart?
 		local seat = findSeat(vehicle)
 
 		if not chassis or not seat then
-			warn("[VehicleSpawner] Vehicle missing Chassis or seat for " .. player.Name)
+			warn("[VehicleSpawner] Vehicle missing Chassis or seat for " .. plr.Name)
 			vehicle:Destroy()
 			continue
 		end
@@ -119,41 +133,37 @@ function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
 			bodyModel.PrimaryPart = chassis
 			weldBodyParts(bodyModel)
 		end
-		-- So client can fall back to vehicle.PrimaryPart for root
 		vehicle.PrimaryPart = chassis
 
-		local spawnCF = spawnPoint.CFrame * CFrame.new(0, 3, 0)
+		local spawnCF = spawnPoint.CFrame * CFrame.new(0, 2, 0)
 		vehicle:PivotTo(spawnCF)
 
 		chassis.Anchored = true
-
 		vehicle.Parent = workspace
 
-		if not player.Character or not player.Character:FindFirstChildOfClass("Humanoid") then
-			player:LoadCharacter()
+		if not plr.Character or not plr.Character:FindFirstChildOfClass("Humanoid") then
+			plr:LoadCharacter()
 			task.wait(0.5)
 		end
 
-		local character = player.Character
+		local character = plr.Character
 		if character then
 			local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if rootPart then
 				rootPart.CFrame = spawnCF + Vector3.new(0, 5, 0)
 			end
-
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
 			if humanoid then
 				seat:Sit(humanoid)
 			end
 		end
 
-		local spawned: SpawnedVehicle = {
+		table.insert(activeVehicles, {
 			model = vehicle,
-			player = player,
+			player = plr,
 			chassis = chassis,
 			seat = seat,
-		}
-		table.insert(activeVehicles, spawned)
+		})
 	end
 
 	return activeVehicles
@@ -162,50 +172,81 @@ end
 function VehicleSpawner.lockAll()
 	for _, sv in activeVehicles do
 		if sv.chassis and sv.chassis.Parent then
-			sv.chassis.Anchored = true
+			VehicleSpawner.anchorVehicle(sv.model, true)
 		end
 	end
-end
-
-local function getChassisFromVehicle(vehicle: Model): BasePart?
-	local body = vehicle:FindFirstChild("Body")
-	if not body then return vehicle.PrimaryPart end
-	local ch = body:FindFirstChild("Chassis") or body:FindFirstChild("CarBody") or body.PrimaryPart
-	if ch then return ch end
-	for _, child in body:GetChildren() do
-		if child:IsA("BasePart") then return child end
-	end
-	return vehicle.PrimaryPart
 end
 
 function VehicleSpawner.unlockAll()
 	for _, sv in activeVehicles do
 		local vehicle = sv.model
 		if not vehicle or not vehicle.Parent then continue end
-		-- Resolve chassis from model (same logic as client) so we unanchor the part client uses as root
+
 		local chassis = getChassisFromVehicle(vehicle)
 		if not chassis then continue end
-		chassis.Anchored = false
 		sv.chassis = chassis
 
-		-- Defer SetNetworkOwner so the unanchor is processed first (avoids
-		-- "cannot be called on Anchored parts" error).
+		VehicleSpawner.anchorVehicle(vehicle, false)
+		VehicleSpawner.resetVehicle(vehicle)
+
 		if sv.player and sv.player:IsDescendantOf(Players) then
-			local player = sv.player
+			local plr = sv.player
 			task.defer(function()
 				pcall(function()
-					chassis:SetNetworkOwner(player)
+					chassis:SetNetworkOwner(plr)
 				end)
 			end)
 		end
 	end
 end
 
-function VehicleSpawner.getVehicleForPlayer(player: Player): SpawnedVehicle?
+--- Teleport a vehicle safely: anchor → move → reset velocity → unanchor.
+function VehicleSpawner.teleportVehicle(vehicle: Model, targetCF: CFrame)
+	local chassis = getChassisFromVehicle(vehicle)
+	if not chassis then return end
+
+	VehicleSpawner.anchorVehicle(vehicle, true)
+	task.wait() -- let anchor propagate
+
+	vehicle:PivotTo(targetCF)
+
+	task.wait() -- let position propagate
+
+	VehicleSpawner.resetVehicle(vehicle)
+	VehicleSpawner.anchorVehicle(vehicle, false)
+
+	-- Restore network ownership to the player who owns this vehicle
 	for _, sv in activeVehicles do
-		if sv.player == player then
-			return sv
+		if sv.model == vehicle and sv.player and sv.player:IsDescendantOf(Players) then
+			task.defer(function()
+				pcall(function()
+					chassis:SetNetworkOwner(sv.player)
+				end)
+			end)
+			break
 		end
+	end
+end
+
+--- Anchor or unanchor the entire vehicle assembly.
+function VehicleSpawner.anchorVehicle(vehicle: Model, anchored: boolean)
+	local chassis = getChassisFromVehicle(vehicle)
+	if chassis then
+		chassis.Anchored = anchored
+	end
+end
+
+--- Zero out all linear and angular velocity on the vehicle.
+function VehicleSpawner.resetVehicle(vehicle: Model)
+	local chassis = getChassisFromVehicle(vehicle)
+	if not chassis then return end
+	chassis.AssemblyLinearVelocity = Vector3.zero
+	chassis.AssemblyAngularVelocity = Vector3.zero
+end
+
+function VehicleSpawner.getVehicleForPlayer(plr: Player): SpawnedVehicle?
+	for _, sv in activeVehicles do
+		if sv.player == plr then return sv end
 	end
 	return nil
 end

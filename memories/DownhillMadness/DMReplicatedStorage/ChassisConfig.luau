@@ -1,4 +1,8 @@
 --[[
+	⚠️ DEPRECATED — This module is NOT currently used by Downhill Madness.
+	The active chassis system uses DownhillConfig.luau + DownhillPhysics.luau instead.
+	Kept as reference for the original Polaris-based approach.
+
 	ChassisConfig — Single source of truth for all vehicle tuning parameters.
 	
 	Based on the Polaris chassis system with DM-specific tuning:
