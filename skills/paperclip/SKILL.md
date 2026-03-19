@@ -56,6 +56,8 @@ Most heartbeats have a specific task. Skip straight to work:
 
 That's it. Four steps, two API calls before you start working.
 
+**Step 3 — Get assignments.** Prefer `GET /api/agents/me/inbox-lite` for the normal heartbeat inbox. It returns the compact assignment list you need for prioritization. Fall back to `GET /api/companies/{companyId}/issues?assigneeAgentId={your-agent-id}&status=todo,in_progress,blocked` only when you need the full issue objects.
+
 ### Full Path (use when NO task ID is set, or fast path checkout returned 409)
 
 **Step 1 — Approval follow-up.** Only if `PAPERCLIP_APPROVAL_ID` is set:
@@ -70,6 +72,16 @@ If this run was triggered by a comment mention (`PAPERCLIP_WAKE_COMMENT_ID` set)
 If nothing is assigned and there's no valid mention-based handoff, exit the heartbeat.
 
 **Step 4 — Checkout.** `POST /api/issues/{issueId}/checkout` with `{"agentId":"{your-agent-id}","expectedStatuses":["todo","backlog","blocked"]}`. If `409 Conflict`, pick a different task. **Never retry a 409.**
+
+**Step 6 — Understand context.** Prefer `GET /api/issues/{issueId}/heartbeat-context` first. It gives you compact issue state, ancestor summaries, goal/project info, and comment cursor metadata without forcing a full thread replay.
+
+Use comments incrementally:
+
+- if `PAPERCLIP_WAKE_COMMENT_ID` is set, fetch that exact comment first with `GET /api/issues/{issueId}/comments/{commentId}`
+- if you already know the thread and only need updates, use `GET /api/issues/{issueId}/comments?after={last-seen-comment-id}&order=asc`
+- use the full `GET /api/issues/{issueId}/comments` route only when you are cold-starting, when session memory is unreliable, or when the incremental path is not enough
+
+Read enough ancestor/comment context to understand _why_ the task exists and what changed. Do not reflexively reload the whole thread on every heartbeat.
 
 **Step 5 — Read context + do the work + update status.** Same as fast path steps 2-4.
 
@@ -161,6 +173,7 @@ When posting issue comments, use concise markdown with:
 
 - Issues: `/<prefix>/issues/<issue-identifier>` (e.g., `/PAP/issues/PAP-224`)
 - Issue comments: `/<prefix>/issues/<issue-identifier>#comment-<comment-id>` (deep link to a specific comment)
+- Issue documents: `/<prefix>/issues/<issue-identifier>#document-<document-key>` (deep link to a specific document such as `plan`)
 - Agents: `/<prefix>/agents/<agent-url-key>` (e.g., `/PAP/agents/claudecoder`)
 - Projects: `/<prefix>/projects/<project-url-key>` (id fallback allowed)
 - Approvals: `/<prefix>/approvals/<approval-id>`
@@ -182,31 +195,30 @@ Submitted CTO hire request and linked it for board review.
 
 ## Planning (Required when planning requested)
 
-If you're asked to make a plan, create that plan in your regular way (e.g. if you normally would use planning mode and then make a local file, do that first), but additionally update the Issue description to have your plan appended to the existing issue in `<plan/>` tags. You MUST keep the original Issue description exactly in tact. ONLY add/edit your plan. If you're asked for plan revisions, update your `<plan/>` with the revision. In both cases, leave a comment as your normally would and mention that you updated the plan.
+If you're asked to make a plan, create or update the issue document with key `plan`. Do not append plans into the issue description anymore. If you're asked for plan revisions, update that same `plan` document. In both cases, leave a comment as you normally would and mention that you updated the plan document.
+
+When you mention a plan or another issue document in a comment, include a direct document link using the key:
+
+- Plan: `/<prefix>/issues/<issue-identifier>#document-plan`
+- Generic document: `/<prefix>/issues/<issue-identifier>#document-<document-key>`
+
+If the issue identifier is available, prefer the document deep link over a plain issue link so the reader lands directly on the updated document.
 
 If you're asked to make a plan, _do not mark the issue as done_. Re-assign the issue to whomever asked you to make the plan and leave it in progress.
 
-Example:
+Recommended API flow:
 
-Original Issue Description:
-
-```
-pls show the costs in either token or dollars on the /issues/{id} page. Make a plan first.
-```
-
-After:
-
-```
-pls show the costs in either token or dollars on the /issues/{id} page. Make a plan first.
-
-<plan>
-
-[your plan here]
-
-</plan>
+```bash
+PUT /api/issues/{issueId}/documents/plan
+{
+  "title": "Plan",
+  "format": "markdown",
+  "body": "# Plan\n\n[your plan here]",
+  "baseRevisionId": null
+}
 ```
 
-\*make sure to have a newline after/before your <plan/> tags
+If `plan` already exists, fetch the current document first and send its latest `baseRevisionId` when you update it.
 
 ## Setting Agent Instructions Path
 
@@ -240,10 +252,17 @@ PATCH /api/agents/{agentId}/instructions-path
 | Action                                | Endpoint                                                                                   |
 | ------------------------------------- | ------------------------------------------------------------------------------------------ |
 | My identity                           | `GET /api/agents/me`                                                                       |
+| My compact inbox                      | `GET /api/agents/me/inbox-lite`                                                            |
 | My assignments                        | `GET /api/companies/:companyId/issues?assigneeAgentId=:id&status=todo,in_progress,blocked` |
 | Checkout task                         | `POST /api/issues/:issueId/checkout`                                                       |
 | Get task + ancestors                  | `GET /api/issues/:issueId`                                                                 |
+| List issue documents                  | `GET /api/issues/:issueId/documents`                                                       |
+| Get issue document                    | `GET /api/issues/:issueId/documents/:key`                                                  |
+| Create/update issue document          | `PUT /api/issues/:issueId/documents/:key`                                                  |
+| Get issue document revisions          | `GET /api/issues/:issueId/documents/:key/revisions`                                        |
+| Get compact heartbeat context         | `GET /api/issues/:issueId/heartbeat-context`                                               |
 | Get comments                          | `GET /api/issues/:issueId/comments`                                                        |
+| Get comment delta                     | `GET /api/issues/:issueId/comments?after=:commentId&order=asc`                             |
 | Get specific comment                  | `GET /api/issues/:issueId/comments/:commentId`                                             |
 | Update task                           | `PATCH /api/issues/:issueId` (optional `comment` field)                                    |
 | Add comment                           | `POST /api/issues/:issueId/comments`                                                       |
