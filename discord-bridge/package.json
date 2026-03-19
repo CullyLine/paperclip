@@ -1,0 +1,13 @@
+{
+  "name": "paperclip-discord-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "ws": "^8.18.0"
+  }
+}

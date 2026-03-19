@@ -89,25 +89,33 @@ export function Dashboard() {
   );
 
   const selfGovData = (ceoAgent?.metadata as Record<string, unknown> | null)?.selfGoverning as
-    | { expiresAt: string }
+    | { expiresAt: string; condition?: string }
     | null
     | undefined;
   const selfGovExpiresAt = selfGovData?.expiresAt ?? null;
+  const selfGovCondition = selfGovData?.condition ?? null;
   const selfGovRemaining = useLiveCountdown(selfGovExpiresAt);
   const selfGoverning = selfGovRemaining > 0;
 
   const [selectedHours, setSelectedHours] = useState(6);
+  const [conditionText, setConditionText] = useState("");
+  const [sgMode, setSgMode] = useState<"timer" | "condition">("timer");
 
   const startSelfGoverning = useMutation({
-    mutationFn: async (hours: number) => {
+    mutationFn: async (args: { hours: number; condition?: string }) => {
       if (!ceoAgent) return;
-      const expiresAt = new Date(Date.now() + hours * 3600_000).toISOString();
+      const expiresAt = new Date(Date.now() + args.hours * 3600_000).toISOString();
+      const sgPayload: Record<string, unknown> = { expiresAt };
+      if (args.condition?.trim()) {
+        sgPayload.condition = args.condition.trim();
+      }
       await agentsApi.update(ceoAgent.id, {
-        metadata: { ...(ceoAgent.metadata as Record<string, unknown> | null ?? {}), selfGoverning: { expiresAt } },
+        metadata: { ...(ceoAgent.metadata as Record<string, unknown> | null ?? {}), selfGoverning: sgPayload },
       }, selectedCompanyId ?? undefined);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      setConditionText("");
     },
   });
 
@@ -357,36 +365,116 @@ export function Dashboard() {
             )}
           </div>
 
+          {selfGoverning && selfGovCondition && (
+            <div className="mt-2 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300">
+              <span className="font-medium">Goal:</span> {selfGovCondition}
+            </div>
+          )}
+
           {!selfGoverning && (
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
+            <div className="mt-3 pt-3 border-t border-border/50 space-y-3">
               <div className="flex items-center gap-1">
-                {DURATION_PRESETS.map((p) => (
+                <button
+                  onClick={() => setSgMode("timer")}
+                  className={cn(
+                    "px-3 py-1 text-xs font-medium transition-colors",
+                    sgMode === "timer"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  Timer
+                </button>
+                <button
+                  onClick={() => setSgMode("condition")}
+                  className={cn(
+                    "px-3 py-1 text-xs font-medium transition-colors",
+                    sgMode === "condition"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  Until condition
+                </button>
+              </div>
+
+              {sgMode === "timer" && (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    {DURATION_PRESETS.map((p) => (
+                      <button
+                        key={p.hours}
+                        onClick={() => setSelectedHours(p.hours)}
+                        className={cn(
+                          "px-2.5 py-1 text-xs font-medium transition-colors",
+                          selectedHours === p.hours
+                            ? "bg-emerald-500 text-white"
+                            : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                   <button
-                    key={p.hours}
-                    onClick={() => setSelectedHours(p.hours)}
+                    onClick={() => startSelfGoverning.mutate({ hours: selectedHours })}
+                    disabled={startSelfGoverning.isPending}
                     className={cn(
-                      "px-2.5 py-1 text-xs font-medium transition-colors",
-                      selectedHours === p.hours
-                        ? "bg-emerald-500 text-white"
-                        : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                      "ml-auto flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
+                      "bg-emerald-500 text-white hover:bg-emerald-600",
+                      "disabled:opacity-50 disabled:cursor-not-allowed"
                     )}
                   >
-                    {p.label}
+                    <Crown className="h-3 w-3" />
+                    {startSelfGoverning.isPending ? "Starting…" : "Start"}
                   </button>
-                ))}
-              </div>
-              <button
-                onClick={() => startSelfGoverning.mutate(selectedHours)}
-                disabled={startSelfGoverning.isPending}
-                className={cn(
-                  "ml-auto flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
-                  "bg-emerald-500 text-white hover:bg-emerald-600",
-                  "disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-              >
-                <Crown className="h-3 w-3" />
-                {startSelfGoverning.isPending ? "Starting…" : "Start"}
-              </button>
+                </div>
+              )}
+
+              {sgMode === "condition" && (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={conditionText}
+                    onChange={(e) => setConditionText(e.target.value)}
+                    placeholder="e.g. CEO is highly confident M2 is complete"
+                    className="w-full px-3 py-2 text-sm border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] text-muted-foreground flex-1">
+                      Max runtime safety limit:
+                    </p>
+                    <div className="flex items-center gap-1">
+                      {DURATION_PRESETS.map((p) => (
+                        <button
+                          key={p.hours}
+                          onClick={() => setSelectedHours(p.hours)}
+                          className={cn(
+                            "px-2 py-0.5 text-[10px] font-medium transition-colors",
+                            selectedHours === p.hours
+                              ? "bg-emerald-500 text-white"
+                              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => startSelfGoverning.mutate({ hours: selectedHours, condition: conditionText })}
+                      disabled={startSelfGoverning.isPending || !conditionText.trim()}
+                      className={cn(
+                        "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
+                        "bg-emerald-500 text-white hover:bg-emerald-600",
+                        "disabled:opacity-50 disabled:cursor-not-allowed"
+                      )}
+                    >
+                      <Crown className="h-3 w-3" />
+                      {startSelfGoverning.isPending ? "Starting…" : "Start"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
