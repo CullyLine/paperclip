@@ -529,4 +529,32 @@ end
 
 setupSeatListener()
 
-return true
+local ChassisClient = {}
+
+function ChassisClient.isDriving(): boolean
+	return isActive
+end
+
+function ChassisClient.getRootPart(): BasePart?
+	return root
+end
+
+function ChassisClient.getSpeed(): number
+	if not root or not root.Parent then return 0 end
+	return root.AssemblyLinearVelocity.Magnitude
+end
+
+function ChassisClient.getVelocity(): Vector3
+	if not root or not root.Parent then return Vector3.zero end
+	return root.AssemblyLinearVelocity
+end
+
+function ChassisClient.getSteerAngle(): number
+	return currentSteerAngle
+end
+
+function ChassisClient.getConfig(): any
+	return cfg
+end
+
+return ChassisClient

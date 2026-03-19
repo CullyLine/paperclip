@@ -93,6 +93,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 - **Downforce + drag** — speed-dependent aerodynamic forces.
 - **Counter-steer assist** — automatic slide correction for controllable drifting.
 - **Vehicle destruction watcher** — auto-cleanup via `AncestryChanged` when the server destroys the vehicle between rounds.
+- **Custom chase camera** — smooth follow behind vehicle with velocity look-ahead, speed-dependent FOV (70→85), impact shake on deceleration, rear-view (hold C / mobile button), and right-click free-look orbit. Activates automatically when driving starts, deactivates on stop.
 
 ### Design Decisions
 
@@ -125,7 +126,8 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | File | Purpose |
 |------|---------|
 | `Bootstrap.client.luau` | Entry point LocalScript — requires all client modules |
-| `ChassisClient.luau` | Client-side raycast chassis. Detects seat entry, runs suspension + drive physics on Heartbeat, creates/positions visual wheels, auto-cleans up on vehicle destruction or unseat. Uses `DownhillConfig` + `DownhillPhysics` |
+| `ChassisClient.luau` | Client-side raycast chassis. Detects seat entry, runs suspension + drive physics on Heartbeat, creates/positions visual wheels, auto-cleans up on vehicle destruction or unseat. Exports driving state API for CameraController. Uses `DownhillConfig` + `DownhillPhysics` |
+| `CameraController.luau` | Custom chase camera — smooth follow with velocity look-ahead, speed-dependent FOV (70→85), impact shake, rear-view (C key / mobile button), right-click free-look orbit. Auto-activates/deactivates with driving state |
 | `InputManager.luau` | Input abstraction — keyboard, mobile touch controls (auto-detected), gamepad (sticks + triggers). Touch controls appear only while driving and are destroyed on exit |
 | `HubController.luau` | Hub UI management, Play queue toggle, camera control |
 | `PreRoundController.luau` | Vehicle selection UI logic, countdown display |
