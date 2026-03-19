@@ -420,7 +420,8 @@ local function startDriving(vModel: Model)
 		return
 	end
 
-	cfg = DownhillConfig.new()
+	local vehicleId = vModel:GetAttribute("VehicleId") or "all_rounder"
+	cfg = DownhillConfig.forVehicle(vehicleId)
 
 	savedGravity = workspace.Gravity
 	workspace.Gravity = cfg.gravity

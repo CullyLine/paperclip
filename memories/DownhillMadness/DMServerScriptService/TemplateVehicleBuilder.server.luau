@@ -1,210 +1,218 @@
 --[[
-	TemplateVehicleBuilder — Creates the TemplateVehicle in ReplicatedStorage.
+	TemplateVehicleBuilder — Creates vehicle templates in ReplicatedStorage.
 
-	Runs once at server start. Builds a downhill-optimised vehicle with:
-	  - Lightweight chassis (low density, no CanCollide on physics root)
-	  - Separate CollisionShell for impacts (massless, CanCollide)
-	  - CenterOfMass part for mass distribution
-	  - BodyPanels model with individual parts for future damage system
-	  - 4 wheel parts (invisible, welded — visuals driven by client)
-	  - Plain Seat (avoids VehicleSeat built-in forces)
+	Runs once at server start. Reads VehicleRegistry for all vehicle
+	definitions, builds a template Model for each one:
+	  VehicleTemplates (Folder)
+	    Template_all_rounder (Model)
+	    Template_speedster (Model)
+	    Template_tank (Model)
 
-	Vehicle hierarchy:
-	  TemplateVehicle (Model, PrimaryPart = Chassis)
-	    Body (Model, PrimaryPart = Chassis)
-	      Chassis (Part) — physics root
-	      CenterOfMass (Part) — dense invisible mass anchor
-	      CollisionShell (Part) — invisible collision box
-	    BodyPanels (Model) — modular damage-ready panels
-	      Hood (Part)
-	      TrunkLid (Part)
-	      LeftDoor (Part)
-	      RightDoor (Part)
-	      Roof (Part)
-	    Wheels (Model)
-	      WheelFL / WheelFR / WheelRL / WheelRR (Part)
-	    DriverSeat (Seat)
+	Each template follows the same hierarchy as the original TemplateVehicle
+	but with dimensions, colors, and part counts driven by the VehicleDef.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local existing = ReplicatedStorage:FindFirstChild("TemplateVehicle")
+local DMReplicatedStorage = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
+local VehicleRegistry = require(DMReplicatedStorage:WaitForChild("VehicleRegistry"))
+
+local existing = ReplicatedStorage:FindFirstChild("VehicleTemplates")
 if existing then existing:Destroy() end
 
-local vehicle = Instance.new("Model")
-vehicle.Name = "TemplateVehicle"
+-- Keep legacy TemplateVehicle removed to avoid confusion
+local legacy = ReplicatedStorage:FindFirstChild("TemplateVehicle")
+if legacy then legacy:Destroy() end
 
-----------------------------------------------------------------
--- Body model
-----------------------------------------------------------------
-local body = Instance.new("Model")
-body.Name = "Body"
-body.Parent = vehicle
+local templatesFolder = Instance.new("Folder")
+templatesFolder.Name = "VehicleTemplates"
+templatesFolder.Parent = ReplicatedStorage
 
--- Chassis — physics root, invisible to collisions (shell handles that)
-local chassis = Instance.new("Part")
-chassis.Name = "Chassis"
-chassis.Size = Vector3.new(10, 3, 18)
-chassis.Color = Color3.fromRGB(45, 45, 48)
-chassis.Material = Enum.Material.SmoothPlastic
-chassis.Anchored = false
-chassis.CanCollide = false
-chassis.CanQuery = false
-chassis.CFrame = CFrame.new(0, 5, 0)
-chassis.CustomPhysicalProperties = PhysicalProperties.new(
-	1.5,  -- low density for light responsive feel
-	0.3,
-	0.1,
-	1, 1
-)
-chassis.Parent = body
-body.PrimaryPart = chassis
+for _, vehicleDef in VehicleRegistry.getAll() do
+	local spec = vehicleDef.buildSpec
 
--- CenterOfMass — dense invisible nugget that lowers effective center of mass
-local com = Instance.new("Part")
-com.Name = "CenterOfMass"
-com.Size = Vector3.new(0.1, 0.1, 0.1)
-com.Transparency = 1
-com.CanCollide = false
-com.CanQuery = false
-com.Massless = false
-com.Anchored = false
-com.CustomPhysicalProperties = PhysicalProperties.new(40, 0, 0, 0, 0)
-com.CFrame = chassis.CFrame * CFrame.new(0, 1.5, 0)
-com.Parent = body
-local comWeld = Instance.new("WeldConstraint")
-comWeld.Part0 = chassis
-comWeld.Part1 = com
-comWeld.Parent = com
+	local vehicle = Instance.new("Model")
+	vehicle.Name = "Template_" .. vehicleDef.id
+	vehicle:SetAttribute("VehicleId", vehicleDef.id)
 
--- CollisionShell — thin invisible box for collisions, shorter than chassis
--- so it doesn't scrape on steep slopes
-local shell = Instance.new("Part")
-shell.Name = "CollisionShell"
-shell.Size = Vector3.new(10, 2, 14)
-shell.Transparency = 1
-shell.Anchored = false
-shell.CanCollide = true
-shell.CanQuery = false
-shell.Massless = true
-shell.CFrame = chassis.CFrame * CFrame.new(0, 0.5, 0)
-shell.Parent = body
-local shellWeld = Instance.new("WeldConstraint")
-shellWeld.Part0 = chassis
-shellWeld.Part1 = shell
-shellWeld.Parent = shell
+	----------------------------------------------------------------
+	-- Body model
+	----------------------------------------------------------------
+	local body = Instance.new("Model")
+	body.Name = "Body"
+	body.Parent = vehicle
 
-----------------------------------------------------------------
--- BodyPanels — modular parts for future damage / destruction
-----------------------------------------------------------------
-local panels = Instance.new("Model")
-panels.Name = "BodyPanels"
-panels.Parent = vehicle
+	local chassis = Instance.new("Part")
+	chassis.Name = "Chassis"
+	chassis.Size = spec.chassisSize
+	chassis.Color = Color3.fromRGB(45, 45, 48)
+	chassis.Material = Enum.Material.SmoothPlastic
+	chassis.Anchored = false
+	chassis.CanCollide = false
+	chassis.CanQuery = false
+	chassis.CFrame = CFrame.new(0, 5, 0)
+	chassis.CustomPhysicalProperties = PhysicalProperties.new(
+		spec.chassisDensity, 0.3, 0.1, 1, 1
+	)
+	chassis.Parent = body
+	body.PrimaryPart = chassis
 
-local PANEL_DEFS = {
-	{ name = "Hood",      size = Vector3.new(8, 0.4, 5),   offset = CFrame.new(0, 1.7, -5.5) },
-	{ name = "TrunkLid",  size = Vector3.new(8, 0.4, 4),   offset = CFrame.new(0, 1.7, 5) },
-	{ name = "LeftDoor",  size = Vector3.new(0.4, 2, 8),   offset = CFrame.new(-5, 0.5, -1) },
-	{ name = "RightDoor", size = Vector3.new(0.4, 2, 8),   offset = CFrame.new(5, 0.5, -1) },
-	{ name = "Roof",      size = Vector3.new(8, 0.4, 6),   offset = CFrame.new(0, 2.8, -1) },
-}
+	local com = Instance.new("Part")
+	com.Name = "CenterOfMass"
+	com.Size = Vector3.new(0.1, 0.1, 0.1)
+	com.Transparency = 1
+	com.CanCollide = false
+	com.CanQuery = false
+	com.Massless = false
+	com.Anchored = false
+	com.CustomPhysicalProperties = PhysicalProperties.new(spec.comDensity, 0, 0, 0, 0)
+	com.CFrame = chassis.CFrame * CFrame.new(spec.comOffset)
+	com.Parent = body
+	local comWeld = Instance.new("WeldConstraint")
+	comWeld.Part0 = chassis
+	comWeld.Part1 = com
+	comWeld.Parent = com
 
-for _, def in PANEL_DEFS do
-	local panel = Instance.new("Part")
-	panel.Name = def.name
-	panel.Size = def.size
-	panel.Color = Color3.fromRGB(200, 60, 60)
-	panel.Material = Enum.Material.SmoothPlastic
-	panel.Anchored = false
-	panel.CanCollide = false
-	panel.CanQuery = false
-	panel.Massless = true
-	panel.CFrame = chassis.CFrame * def.offset
-	panel.Parent = panels
+	local shell = Instance.new("Part")
+	shell.Name = "CollisionShell"
+	shell.Size = spec.collisionShellSize
+	shell.Transparency = 1
+	shell.Anchored = false
+	shell.CanCollide = true
+	shell.CanQuery = false
+	shell.Massless = true
+	shell.CFrame = chassis.CFrame * CFrame.new(spec.collisionShellOffset)
+	shell.Parent = body
+	local shellWeld = Instance.new("WeldConstraint")
+	shellWeld.Part0 = chassis
+	shellWeld.Part1 = shell
+	shellWeld.Parent = shell
 
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = chassis
-	weld.Part1 = panel
-	weld.Parent = panel
+	----------------------------------------------------------------
+	-- BodyPanels
+	----------------------------------------------------------------
+	local panels = Instance.new("Model")
+	panels.Name = "BodyPanels"
+	panels.Parent = vehicle
 
-	panel:SetAttribute("MaxHealth", 100)
-	panel:SetAttribute("Health", 100)
+	for _, panelDef in spec.panels do
+		local panel = Instance.new("Part")
+		panel.Name = panelDef.name
+		panel.Size = panelDef.size
+		panel.Color = spec.bodyColor
+		panel.Material = Enum.Material.SmoothPlastic
+		panel.Anchored = false
+		panel.CanCollide = false
+		panel.CanQuery = false
+		panel.Massless = true
+		panel.CFrame = chassis.CFrame * panelDef.offset
+		panel.Parent = panels
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = chassis
+		weld.Part1 = panel
+		weld.Parent = panel
+
+		panel:SetAttribute("MaxHealth", panelDef.health)
+		panel:SetAttribute("Health", panelDef.health)
+	end
+
+	-- Windshield
+	local wsDef = spec.windshield
+	local windshield = Instance.new("Part")
+	windshield.Name = "Windshield"
+	windshield.Size = wsDef.size
+	windshield.Color = Color3.fromRGB(150, 200, 255)
+	windshield.Material = Enum.Material.Glass
+	windshield.Transparency = 0.5
+	windshield.Anchored = false
+	windshield.CanCollide = false
+	windshield.CanQuery = false
+	windshield.Massless = true
+	windshield.CFrame = chassis.CFrame * wsDef.offset * CFrame.Angles(math.rad(wsDef.angle), 0, 0)
+	windshield.Parent = panels
+	local wsWeld = Instance.new("WeldConstraint")
+	wsWeld.Part0 = chassis
+	wsWeld.Part1 = windshield
+	wsWeld.Parent = windshield
+	windshield:SetAttribute("MaxHealth", wsDef.health)
+	windshield:SetAttribute("Health", wsDef.health)
+
+	-- Extra decorative parts (e.g. Tank light bar)
+	if spec.extras then
+		for _, extra in spec.extras do
+			local part = Instance.new("Part")
+			part.Name = extra.name
+			part.Size = extra.size
+			part.Color = extra.color
+			part.Material = extra.material
+			part.Anchored = false
+			part.CanCollide = false
+			part.CanQuery = false
+			part.Massless = true
+			part.CFrame = chassis.CFrame * extra.offset
+			part.Parent = panels
+
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = chassis
+			weld.Part1 = part
+			weld.Parent = part
+		end
+	end
+
+	----------------------------------------------------------------
+	-- DriverSeat
+	----------------------------------------------------------------
+	local seat = Instance.new("Seat")
+	seat.Name = "DriverSeat"
+	seat.Size = Vector3.new(3, 1, 3)
+	seat.Color = Color3.fromRGB(30, 30, 32)
+	seat.Material = Enum.Material.Fabric
+	seat.Anchored = false
+	seat.CanCollide = false
+	seat.CanQuery = false
+	seat.CFrame = chassis.CFrame * CFrame.new(spec.seatOffset)
+	seat.Parent = vehicle
+	local seatWeld = Instance.new("WeldConstraint")
+	seatWeld.Part0 = chassis
+	seatWeld.Part1 = seat
+	seatWeld.Parent = seat
+
+	----------------------------------------------------------------
+	-- Wheels
+	----------------------------------------------------------------
+	local wheelsModel = Instance.new("Model")
+	wheelsModel.Name = "Wheels"
+	wheelsModel.Parent = vehicle
+
+	local wheelNames = { "WheelFL", "WheelFR", "WheelRL", "WheelRR" }
+	for i, offset in spec.wheelOffsets do
+		local wheel = Instance.new("Part")
+		wheel.Name = wheelNames[i]
+		wheel.Shape = Enum.PartType.Cylinder
+		local d = spec.wheelRadius * 2
+		wheel.Size = Vector3.new(d, d, d)
+		wheel.Color = Color3.fromRGB(25, 25, 25)
+		wheel.Material = Enum.Material.SmoothPlastic
+		wheel.Transparency = 1
+		wheel.Anchored = false
+		wheel.CanCollide = false
+		wheel.CanQuery = false
+		wheel.Massless = true
+		wheel.CFrame = chassis.CFrame * CFrame.new(offset)
+		wheel.Parent = wheelsModel
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = chassis
+		weld.Part1 = wheel
+		weld.Parent = wheel
+	end
+
+	vehicle.PrimaryPart = chassis
+	vehicle.Parent = templatesFolder
+
+	print("[TemplateVehicleBuilder] Built template: " .. vehicleDef.id
+		.. " (" .. vehicleDef.displayName .. ")")
 end
 
--- Windshield (glass visual, part of panels for damage)
-local windshield = Instance.new("Part")
-windshield.Name = "Windshield"
-windshield.Size = Vector3.new(8, 2.5, 0.3)
-windshield.Color = Color3.fromRGB(150, 200, 255)
-windshield.Material = Enum.Material.Glass
-windshield.Transparency = 0.5
-windshield.Anchored = false
-windshield.CanCollide = false
-windshield.CanQuery = false
-windshield.Massless = true
-windshield.CFrame = chassis.CFrame * CFrame.new(0, 1.5, -5) * CFrame.Angles(math.rad(25), 0, 0)
-windshield.Parent = panels
-local wsWeld = Instance.new("WeldConstraint")
-wsWeld.Part0 = chassis
-wsWeld.Part1 = windshield
-wsWeld.Parent = windshield
-windshield:SetAttribute("MaxHealth", 50)
-windshield:SetAttribute("Health", 50)
-
-----------------------------------------------------------------
--- DriverSeat — plain Seat avoids VehicleSeat built-in driving forces
-----------------------------------------------------------------
-local seat = Instance.new("Seat")
-seat.Name = "DriverSeat"
-seat.Size = Vector3.new(3, 1, 3)
-seat.Color = Color3.fromRGB(30, 30, 32)
-seat.Material = Enum.Material.Fabric
-seat.Anchored = false
-seat.CanCollide = false
-seat.CanQuery = false
-seat.CFrame = chassis.CFrame * CFrame.new(0, 2, -1)
-seat.Parent = vehicle
-local seatWeld = Instance.new("WeldConstraint")
-seatWeld.Part0 = chassis
-seatWeld.Part1 = seat
-seatWeld.Parent = seat
-
-----------------------------------------------------------------
--- Wheels — invisible physics markers welded to chassis.
--- The client creates separate anchored visual wheels each frame
--- so there is zero jitter (visual parts are outside the assembly).
-----------------------------------------------------------------
-local wheelsModel = Instance.new("Model")
-wheelsModel.Name = "Wheels"
-wheelsModel.Parent = vehicle
-
-local WHEEL_DEFS = {
-	{ name = "WheelFL", offset = Vector3.new(-4.5, -1, -6.75) },
-	{ name = "WheelFR", offset = Vector3.new(4.5, -1, -6.75) },
-	{ name = "WheelRL", offset = Vector3.new(-4.5, -1, 6.75) },
-	{ name = "WheelRR", offset = Vector3.new(4.5, -1, 6.75) },
-}
-
-for _, def in WHEEL_DEFS do
-	local wheel = Instance.new("Part")
-	wheel.Name = def.name
-	wheel.Shape = Enum.PartType.Cylinder
-	wheel.Size = Vector3.new(2, 4, 4)
-	wheel.Color = Color3.fromRGB(25, 25, 25)
-	wheel.Material = Enum.Material.SmoothPlastic
-	wheel.Transparency = 1  -- invisible: visual wheels live on the client
-	wheel.Anchored = false
-	wheel.CanCollide = false
-	wheel.CanQuery = false
-	wheel.Massless = true
-	wheel.CFrame = chassis.CFrame * CFrame.new(def.offset)
-	wheel.Parent = wheelsModel
-
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = chassis
-	weld.Part1 = wheel
-	weld.Parent = wheel
-end
-
-vehicle.PrimaryPart = chassis
-vehicle.Parent = ReplicatedStorage
+print("[TemplateVehicleBuilder] All " .. #VehicleRegistry.getAll() .. " vehicle templates built")

@@ -34,6 +34,7 @@ export type HubScreenInstance = {
 	showNotification: (self: HubScreenInstance, text: string) -> (),
 	updatePlayerList: (self: HubScreenInstance, players: { any }, queuedCount: number, totalCount: number) -> (),
 	setPlayButtonQueued: (self: HubScreenInstance, isQueued: boolean) -> (),
+	setProgression: (self: HubScreenInstance, level: number, xp: number, xpNeeded: number) -> (),
 }
 
 local function createButton(
@@ -279,6 +280,76 @@ function HubScreen.new(playerGui: PlayerGui): HubScreenInstance
 	notifStroke.Parent = notification
 
 	-- ═══════════════════════════════════════════════════════════════
+	-- PROGRESSION PANEL (bottom center)
+	-- ═══════════════════════════════════════════════════════════════
+	local progressPanel = Instance.new("Frame")
+	progressPanel.Name = "ProgressPanel"
+	progressPanel.Size = UDim2.new(0, 300, 0, 60)
+	progressPanel.Position = UDim2.new(0.5, 0, 1, -30)
+	progressPanel.AnchorPoint = Vector2.new(0.5, 1)
+	progressPanel.BackgroundColor3 = PANEL_COLOR
+	progressPanel.BackgroundTransparency = PANEL_TRANSPARENCY
+	progressPanel.BorderSizePixel = 0
+	progressPanel.Parent = container
+
+	local ppCorner = Instance.new("UICorner")
+	ppCorner.CornerRadius = UDim.new(0, 12)
+	ppCorner.Parent = progressPanel
+
+	local ppStroke = Instance.new("UIStroke")
+	ppStroke.Color = ACCENT_COLOR
+	ppStroke.Thickness = 1
+	ppStroke.Transparency = 0.5
+	ppStroke.Parent = progressPanel
+
+	local levelLabel = Instance.new("TextLabel")
+	levelLabel.Name = "Level"
+	levelLabel.Size = UDim2.new(0, 80, 0, 24)
+	levelLabel.Position = UDim2.new(0, 12, 0, 6)
+	levelLabel.BackgroundTransparency = 1
+	levelLabel.Font = Enum.Font.GothamBold
+	levelLabel.TextColor3 = ACCENT_COLOR
+	levelLabel.TextSize = 18
+	levelLabel.TextXAlignment = Enum.TextXAlignment.Left
+	levelLabel.Text = "LVL 1"
+	levelLabel.Parent = progressPanel
+
+	local xpTextLabel = Instance.new("TextLabel")
+	xpTextLabel.Name = "XPText"
+	xpTextLabel.Size = UDim2.new(1, -100, 0, 16)
+	xpTextLabel.Position = UDim2.new(0, 96, 0, 10)
+	xpTextLabel.BackgroundTransparency = 1
+	xpTextLabel.Font = Enum.Font.Gotham
+	xpTextLabel.TextColor3 = SUBTEXT_COLOR
+	xpTextLabel.TextSize = 12
+	xpTextLabel.TextXAlignment = Enum.TextXAlignment.Left
+	xpTextLabel.Text = "0 / 100 XP"
+	xpTextLabel.Parent = progressPanel
+
+	local xpBarBg = Instance.new("Frame")
+	xpBarBg.Name = "XPBarBg"
+	xpBarBg.Size = UDim2.new(1, -24, 0, 10)
+	xpBarBg.Position = UDim2.new(0, 12, 0, 36)
+	xpBarBg.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+	xpBarBg.BorderSizePixel = 0
+	xpBarBg.Parent = progressPanel
+
+	local xpBarBgCorner = Instance.new("UICorner")
+	xpBarBgCorner.CornerRadius = UDim.new(0, 5)
+	xpBarBgCorner.Parent = xpBarBg
+
+	local xpBarFill = Instance.new("Frame")
+	xpBarFill.Name = "Fill"
+	xpBarFill.Size = UDim2.new(0, 0, 1, 0)
+	xpBarFill.BackgroundColor3 = ACCENT_COLOR
+	xpBarFill.BorderSizePixel = 0
+	xpBarFill.Parent = xpBarBg
+
+	local xpFillCorner = Instance.new("UICorner")
+	xpFillCorner.CornerRadius = UDim.new(0, 5)
+	xpFillCorner.Parent = xpBarFill
+
+	-- ═══════════════════════════════════════════════════════════════
 	-- INSTANCE METHODS
 	-- ═══════════════════════════════════════════════════════════════
 	local self: HubScreenInstance = {
@@ -397,6 +468,15 @@ function HubScreen.new(playerGui: PlayerGui): HubScreenInstance
 			if stroke then stroke.Color = ACCENT_COLOR end
 			playBtn.BackgroundTransparency = PANEL_TRANSPARENCY
 		end
+	end
+
+	function self:setProgression(level: number, xp: number, xpNeeded: number)
+		levelLabel.Text = "LVL " .. level
+		xpTextLabel.Text = xp .. " / " .. xpNeeded .. " XP"
+		local fraction = if xpNeeded > 0 then math.clamp(xp / xpNeeded, 0, 1) else 0
+		TweenService:Create(xpBarFill, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.new(fraction, 0, 1, 0),
+		}):Play()
 	end
 
 	return self

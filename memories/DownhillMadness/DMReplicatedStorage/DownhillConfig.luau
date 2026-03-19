@@ -146,6 +146,35 @@ function DownhillConfig.new(overrides: { [string]: any }?): Config
 	return cfg
 end
 
+function DownhillConfig.forVehicle(vehicleId: string): Config
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local DMReplicatedStorage = ReplicatedStorage:FindFirstChild("DMReplicatedStorage")
+	if not DMReplicatedStorage then return DownhillConfig.new() end
+
+	local ok, VehicleRegistry = pcall(require, DMReplicatedStorage:FindFirstChild("VehicleRegistry"))
+	if not ok or not VehicleRegistry then return DownhillConfig.new() end
+
+	local def = VehicleRegistry.getById(vehicleId)
+	if not def then return DownhillConfig.new() end
+
+	local spec = def.buildSpec
+	local overrides = {}
+	for k, v in def.physicsOverrides do
+		overrides[k] = v
+	end
+
+	overrides.wheelRadius = spec.wheelRadius
+	overrides.wheels = {
+		{ name = "WheelFL", offset = spec.wheelOffsets[1], isSteered = true },
+		{ name = "WheelFR", offset = spec.wheelOffsets[2], isSteered = true },
+		{ name = "WheelRL", offset = spec.wheelOffsets[3], isSteered = false },
+		{ name = "WheelRR", offset = spec.wheelOffsets[4], isSteered = false },
+	}
+	overrides.centerOfMassOffset = spec.comOffset
+
+	return DownhillConfig.new(overrides)
+end
+
 function DownhillConfig.getSurfaceFriction(cfg: Config, material: Enum.Material): number
 	return cfg.surfaceFriction[material.Name] or 1.0
 end

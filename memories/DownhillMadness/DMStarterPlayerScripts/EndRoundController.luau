@@ -94,5 +94,13 @@ returnToHubEvent.OnClientEvent:Connect(function()
 	end
 end)
 
+-- XP Award event
+local xpAwardEvent = waitForRemote("XPAward")
+xpAwardEvent.OnClientEvent:Connect(function(data: any)
+	if data and screen then
+		screen:showXPAward(data)
+	end
+end)
+
 
 return true

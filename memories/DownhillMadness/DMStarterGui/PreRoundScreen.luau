@@ -1,9 +1,9 @@
 --[[
-	PreRoundScreen — Builds the Pre-Round vehicle selection ScreenGui.
+	PreRoundScreen — M1 vehicle selection ScreenGui.
 
+	Shows 3 vehicle type cards (from VehicleRegistry) with stat bars,
+	lock/unlock indicators, 3D viewport preview, and confirm button.
 	Dark panel / frosted glass style matching HubScreen.
-	Full-screen overlay with countdown timer, 3D viewport (ViewportFrame),
-	confirm button, and a 4-column scrollable vehicle grid.
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -16,26 +16,23 @@ local PANEL_TRANSPARENCY = 0.25
 local ACCENT_COLOR = Color3.fromRGB(0, 180, 255)
 local ACCENT_CONFIRM = Color3.fromRGB(30, 200, 80)
 local SELECTED_COLOR = Color3.fromRGB(0, 180, 255)
-local TAKEN_COLOR = Color3.fromRGB(60, 60, 65)
+local LOCKED_COLOR = Color3.fromRGB(55, 55, 60)
 local AVAILABLE_COLOR = Color3.fromRGB(40, 40, 46)
 local TEXT_COLOR = Color3.fromRGB(255, 255, 255)
 local SUBTEXT_COLOR = Color3.fromRGB(160, 160, 170)
-local TAKEN_TEXT_COLOR = Color3.fromRGB(100, 100, 110)
+local LOCKED_TEXT_COLOR = Color3.fromRGB(90, 90, 100)
+local STAT_BAR_BG = Color3.fromRGB(35, 35, 40)
+local STAT_BAR_FILL = Color3.fromRGB(0, 180, 255)
 local CORNER_RADIUS = UDim.new(0, 16)
 local CORNER_RADIUS_SMALL = UDim.new(0, 10)
+local CORNER_RADIUS_TINY = UDim.new(0, 4)
 local HOVER_TWEEN = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-local VEHICLE_NAMES = {
-	"Roadster", "Cruiser", "Hauler", "Speedster", "Buggy",
-	"Rally", "Muscle", "Compact", "Pickup", "SUV",
-	"Racer", "Drifter", "Offroad", "Sedan", "Coupe",
-	"Hatchback", "Minivan", "Jeep", "Wagon", "Hotrod",
-}
+local STAT_LABELS = { "SPD", "HND", "WGT", "DUR" }
+local STAT_KEYS = { "speed", "handling", "weight", "durability" }
+local STAT_MAX = 10
 
-local GRID_COLUMNS = 4
-local CELL_PADDING = 8
-
-export type VehicleCellState = "available" | "selected" | "taken"
+export type VehicleCellState = "available" | "selected" | "locked"
 
 export type PreRoundScreenInstance = {
 	screenGui: ScreenGui,
@@ -43,85 +40,163 @@ export type PreRoundScreenInstance = {
 	viewportCamera: Camera,
 	countdownLabel: TextLabel,
 	confirmButton: TextButton,
-	vehicleCells: { [string]: Frame },
+	vehicleCards: { [string]: Frame },
+	vehicleNameLabel: TextLabel,
+	vehicleTaglineLabel: TextLabel,
+	vehicleDescLabel: TextLabel,
 	onVehicleSelected: BindableEvent,
 	onConfirm: BindableEvent,
 	destroy: (self: PreRoundScreenInstance) -> (),
 	setVisible: (self: PreRoundScreenInstance, visible: boolean) -> (),
 	setCountdown: (self: PreRoundScreenInstance, seconds: number) -> (),
-	setVehicleState: (self: PreRoundScreenInstance, vehicleName: string, state: VehicleCellState) -> (),
+	setVehicleState: (self: PreRoundScreenInstance, vehicleId: string, state: VehicleCellState) -> (),
 	setConfirmEnabled: (self: PreRoundScreenInstance, enabled: boolean) -> (),
 	setVehicleModel: (self: PreRoundScreenInstance, model: Model?) -> (),
+	setVehicleInfo: (self: PreRoundScreenInstance, displayName: string, tagline: string, description: string) -> (),
+	buildCards: (self: PreRoundScreenInstance, vehicles: { any }, playerLevel: number) -> (),
 }
 
-local function createVehicleCell(vehicleName: string, index: number, parent: ScrollingFrame): Frame
-	local cell = Instance.new("Frame")
-	cell.Name = "Cell_" .. vehicleName
-	cell.BackgroundColor3 = AVAILABLE_COLOR
-	cell.BackgroundTransparency = 0.15
-	cell.BorderSizePixel = 0
-	cell.LayoutOrder = index
-	cell.Parent = parent
+local function createStatBar(statName: string, value: number, parent: Frame, layoutOrder: number): Frame
+	local row = Instance.new("Frame")
+	row.Name = "Stat_" .. statName
+	row.Size = UDim2.new(1, 0, 0, 14)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = layoutOrder
+	row.Parent = parent
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.new(0, 30, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = SUBTEXT_COLOR
+	label.TextSize = 10
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = statName
+	label.Parent = row
+
+	local barBg = Instance.new("Frame")
+	barBg.Name = "BarBg"
+	barBg.Size = UDim2.new(1, -36, 0, 6)
+	barBg.Position = UDim2.new(0, 34, 0.5, 0)
+	barBg.AnchorPoint = Vector2.new(0, 0.5)
+	barBg.BackgroundColor3 = STAT_BAR_BG
+	barBg.BorderSizePixel = 0
+	barBg.Parent = row
+
+	local barBgCorner = Instance.new("UICorner")
+	barBgCorner.CornerRadius = CORNER_RADIUS_TINY
+	barBgCorner.Parent = barBg
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "Fill"
+	barFill.Size = UDim2.new(math.clamp(value / STAT_MAX, 0, 1), 0, 1, 0)
+	barFill.BackgroundColor3 = STAT_BAR_FILL
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBg
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = CORNER_RADIUS_TINY
+	fillCorner.Parent = barFill
+
+	return row
+end
+
+local function createVehicleCard(vehicleData: any, isUnlocked: boolean, parent: Frame): Frame
+	local card = Instance.new("Frame")
+	card.Name = "Card_" .. vehicleData.id
+	card.BackgroundColor3 = if isUnlocked then AVAILABLE_COLOR else LOCKED_COLOR
+	card.BackgroundTransparency = 0.15
+	card.BorderSizePixel = 0
+	card.Parent = parent
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = CORNER_RADIUS_SMALL
-	corner.Parent = cell
+	corner.Parent = card
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Name = "SelectionStroke"
 	stroke.Color = ACCENT_COLOR
 	stroke.Thickness = 0
 	stroke.Transparency = 0
-	stroke.Parent = cell
+	stroke.Parent = card
 
+	-- Vehicle name
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "VehicleName"
-	nameLabel.Size = UDim2.new(1, -12, 1, -8)
-	nameLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-	nameLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	nameLabel.Size = UDim2.new(1, -16, 0, 24)
+	nameLabel.Position = UDim2.new(0, 8, 0, 8)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextColor3 = TEXT_COLOR
-	nameLabel.TextSize = 16
-	nameLabel.TextScaled = false
-	nameLabel.Text = vehicleName
-	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	nameLabel.Parent = cell
+	nameLabel.TextColor3 = if isUnlocked then TEXT_COLOR else LOCKED_TEXT_COLOR
+	nameLabel.TextSize = 18
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Text = vehicleData.displayName
+	nameLabel.Parent = card
 
-	local takenOverlay = Instance.new("Frame")
-	takenOverlay.Name = "TakenOverlay"
-	takenOverlay.Size = UDim2.new(1, 0, 1, 0)
-	takenOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	takenOverlay.BackgroundTransparency = 0.5
-	takenOverlay.BorderSizePixel = 0
-	takenOverlay.Visible = false
-	takenOverlay.ZIndex = 2
-	takenOverlay.Parent = cell
+	-- Tagline
+	local taglineLabel = Instance.new("TextLabel")
+	taglineLabel.Name = "Tagline"
+	taglineLabel.Size = UDim2.new(1, -16, 0, 14)
+	taglineLabel.Position = UDim2.new(0, 8, 0, 32)
+	taglineLabel.BackgroundTransparency = 1
+	taglineLabel.Font = Enum.Font.Gotham
+	taglineLabel.TextColor3 = if isUnlocked then SUBTEXT_COLOR else LOCKED_TEXT_COLOR
+	taglineLabel.TextSize = 11
+	taglineLabel.TextXAlignment = Enum.TextXAlignment.Left
+	taglineLabel.Text = vehicleData.tagline
+	taglineLabel.Parent = card
 
-	local takenCorner = Instance.new("UICorner")
-	takenCorner.CornerRadius = CORNER_RADIUS_SMALL
-	takenCorner.Parent = takenOverlay
+	-- Stats container
+	local statsFrame = Instance.new("Frame")
+	statsFrame.Name = "Stats"
+	statsFrame.Size = UDim2.new(1, -16, 0, 70)
+	statsFrame.Position = UDim2.new(0, 8, 0, 52)
+	statsFrame.BackgroundTransparency = 1
+	statsFrame.Parent = card
 
-	local takenLabel = Instance.new("TextLabel")
-	takenLabel.Name = "TakenText"
-	takenLabel.Size = UDim2.new(1, 0, 1, 0)
-	takenLabel.BackgroundTransparency = 1
-	takenLabel.Font = Enum.Font.GothamBold
-	takenLabel.TextColor3 = TAKEN_TEXT_COLOR
-	takenLabel.TextSize = 14
-	takenLabel.Text = "TAKEN"
-	takenLabel.ZIndex = 3
-	takenLabel.Parent = takenOverlay
+	local statsLayout = Instance.new("UIListLayout")
+	statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	statsLayout.Padding = UDim.new(0, 4)
+	statsLayout.Parent = statsFrame
 
+	for i, key in STAT_KEYS do
+		createStatBar(STAT_LABELS[i], vehicleData.stats[key], statsFrame, i)
+	end
+
+	-- Lock overlay
+	if not isUnlocked then
+		local lockOverlay = Instance.new("Frame")
+		lockOverlay.Name = "LockOverlay"
+		lockOverlay.Size = UDim2.new(1, 0, 0, 20)
+		lockOverlay.Position = UDim2.new(0, 0, 1, -28)
+		lockOverlay.BackgroundTransparency = 1
+		lockOverlay.Parent = card
+
+		local lockIcon = Instance.new("TextLabel")
+		lockIcon.Name = "LockText"
+		lockIcon.Size = UDim2.new(1, -16, 1, 0)
+		lockIcon.Position = UDim2.new(0, 8, 0, 0)
+		lockIcon.BackgroundTransparency = 1
+		lockIcon.Font = Enum.Font.GothamBold
+		lockIcon.TextColor3 = Color3.fromRGB(200, 160, 60)
+		lockIcon.TextSize = 12
+		lockIcon.TextXAlignment = Enum.TextXAlignment.Left
+		lockIcon.Text = "UNLOCK AT LEVEL " .. vehicleData.unlockLevel
+		lockIcon.Parent = lockOverlay
+	end
+
+	-- Click detector
 	local clickDetector = Instance.new("TextButton")
 	clickDetector.Name = "ClickDetector"
 	clickDetector.Size = UDim2.new(1, 0, 1, 0)
 	clickDetector.BackgroundTransparency = 1
 	clickDetector.Text = ""
 	clickDetector.ZIndex = 4
-	clickDetector.Parent = cell
+	clickDetector.Active = isUnlocked
+	clickDetector.Parent = card
 
-	return cell
+	return card
 end
 
 function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
@@ -134,7 +209,6 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	screenGui.Enabled = false
 	screenGui.Parent = playerGui
 
-	-- Full-screen dark backdrop
 	local backdrop = Instance.new("Frame")
 	backdrop.Name = "Backdrop"
 	backdrop.Size = UDim2.new(1, 0, 1, 0)
@@ -187,7 +261,7 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	countdownStroke.Transparency = 0.3
 	countdownStroke.Parent = countdownLabel
 
-	-- Main content area (left = viewport, right = grid)
+	-- Main content area
 	local contentFrame = Instance.new("Frame")
 	contentFrame.Name = "Content"
 	contentFrame.Size = UDim2.new(1, -60, 1, -180)
@@ -196,7 +270,7 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	contentFrame.BackgroundTransparency = 1
 	contentFrame.Parent = backdrop
 
-	-- Left side: 3D viewport + confirm button
+	-- Left side: 3D viewport + vehicle info + confirm button
 	local viewportPanel = Instance.new("Frame")
 	viewportPanel.Name = "ViewportPanel"
 	viewportPanel.Size = UDim2.new(0.45, -10, 1, -70)
@@ -220,21 +294,21 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	local noSelectionLabel = Instance.new("TextLabel")
 	noSelectionLabel.Name = "NoSelection"
 	noSelectionLabel.Size = UDim2.new(1, -20, 0, 30)
-	noSelectionLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	noSelectionLabel.Position = UDim2.new(0.5, 0, 0.4, 0)
 	noSelectionLabel.AnchorPoint = Vector2.new(0.5, 0.5)
 	noSelectionLabel.BackgroundTransparency = 1
 	noSelectionLabel.Font = Enum.Font.Gotham
 	noSelectionLabel.TextColor3 = SUBTEXT_COLOR
 	noSelectionLabel.TextSize = 18
-	noSelectionLabel.Text = "Select a vehicle from the grid"
+	noSelectionLabel.Text = "Select a vehicle from the right"
 	noSelectionLabel.Parent = viewportPanel
 
-	-- ViewportFrame for 3D preview
+	-- ViewportFrame
 	local viewportFrame = Instance.new("ViewportFrame")
 	viewportFrame.Name = "VehicleViewport"
-	viewportFrame.Size = UDim2.new(1, -20, 1, -20)
-	viewportFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	viewportFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	viewportFrame.Size = UDim2.new(1, -20, 0.6, 0)
+	viewportFrame.Position = UDim2.new(0.5, 0, 0, 10)
+	viewportFrame.AnchorPoint = Vector2.new(0.5, 0)
 	viewportFrame.BackgroundTransparency = 1
 	viewportFrame.Ambient = Color3.fromRGB(140, 140, 150)
 	viewportFrame.LightColor = Color3.fromRGB(255, 255, 255)
@@ -246,7 +320,49 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	viewportCamera.Parent = viewportFrame
 	viewportFrame.CurrentCamera = viewportCamera
 
-	-- Confirm button below viewport
+	-- Vehicle info area below viewport
+	local vehicleNameLabel = Instance.new("TextLabel")
+	vehicleNameLabel.Name = "SelectedName"
+	vehicleNameLabel.Size = UDim2.new(1, -20, 0, 24)
+	vehicleNameLabel.Position = UDim2.new(0.5, 0, 0.62, 4)
+	vehicleNameLabel.AnchorPoint = Vector2.new(0.5, 0)
+	vehicleNameLabel.BackgroundTransparency = 1
+	vehicleNameLabel.Font = Enum.Font.GothamBold
+	vehicleNameLabel.TextColor3 = ACCENT_COLOR
+	vehicleNameLabel.TextSize = 20
+	vehicleNameLabel.Text = ""
+	vehicleNameLabel.Visible = false
+	vehicleNameLabel.Parent = viewportPanel
+
+	local vehicleTaglineLabel = Instance.new("TextLabel")
+	vehicleTaglineLabel.Name = "SelectedTagline"
+	vehicleTaglineLabel.Size = UDim2.new(1, -20, 0, 16)
+	vehicleTaglineLabel.Position = UDim2.new(0.5, 0, 0.62, 30)
+	vehicleTaglineLabel.AnchorPoint = Vector2.new(0.5, 0)
+	vehicleTaglineLabel.BackgroundTransparency = 1
+	vehicleTaglineLabel.Font = Enum.Font.Gotham
+	vehicleTaglineLabel.TextColor3 = SUBTEXT_COLOR
+	vehicleTaglineLabel.TextSize = 13
+	vehicleTaglineLabel.Text = ""
+	vehicleTaglineLabel.Visible = false
+	vehicleTaglineLabel.Parent = viewportPanel
+
+	local vehicleDescLabel = Instance.new("TextLabel")
+	vehicleDescLabel.Name = "SelectedDesc"
+	vehicleDescLabel.Size = UDim2.new(1, -20, 0, 60)
+	vehicleDescLabel.Position = UDim2.new(0.5, 0, 0.62, 50)
+	vehicleDescLabel.AnchorPoint = Vector2.new(0.5, 0)
+	vehicleDescLabel.BackgroundTransparency = 1
+	vehicleDescLabel.Font = Enum.Font.Gotham
+	vehicleDescLabel.TextColor3 = SUBTEXT_COLOR
+	vehicleDescLabel.TextSize = 11
+	vehicleDescLabel.TextWrapped = true
+	vehicleDescLabel.TextYAlignment = Enum.TextYAlignment.Top
+	vehicleDescLabel.Text = ""
+	vehicleDescLabel.Visible = false
+	vehicleDescLabel.Parent = viewportPanel
+
+	-- Confirm button
 	local confirmButton = Instance.new("TextButton")
 	confirmButton.Name = "ConfirmButton"
 	confirmButton.Size = UDim2.new(0.45, -10, 0, 55)
@@ -272,76 +388,62 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	confirmStroke.Transparency = 0.3
 	confirmStroke.Parent = confirmButton
 
-	-- Hover effect on confirm button
 	confirmButton.MouseEnter:Connect(function()
-		TweenService:Create(confirmButton, HOVER_TWEEN, { BackgroundTransparency = 0 }):Play()
+		if confirmButton.Active then
+			TweenService:Create(confirmButton, HOVER_TWEEN, { BackgroundTransparency = 0 }):Play()
+		end
 	end)
 	confirmButton.MouseLeave:Connect(function()
 		TweenService:Create(confirmButton, HOVER_TWEEN, { BackgroundTransparency = 0.15 }):Play()
 	end)
 
-	-- Right side: vehicle grid
-	local gridPanel = Instance.new("Frame")
-	gridPanel.Name = "GridPanel"
-	gridPanel.Size = UDim2.new(0.55, -10, 1, 0)
-	gridPanel.Position = UDim2.new(0.45, 10, 0, 0)
-	gridPanel.BackgroundColor3 = PANEL_COLOR
-	gridPanel.BackgroundTransparency = PANEL_TRANSPARENCY
-	gridPanel.BorderSizePixel = 0
-	gridPanel.ClipsDescendants = true
-	gridPanel.Parent = contentFrame
+	-- Right side: vehicle cards
+	local cardsPanel = Instance.new("Frame")
+	cardsPanel.Name = "CardsPanel"
+	cardsPanel.Size = UDim2.new(0.55, -10, 1, 0)
+	cardsPanel.Position = UDim2.new(0.45, 10, 0, 0)
+	cardsPanel.BackgroundColor3 = PANEL_COLOR
+	cardsPanel.BackgroundTransparency = PANEL_TRANSPARENCY
+	cardsPanel.BorderSizePixel = 0
+	cardsPanel.ClipsDescendants = true
+	cardsPanel.Parent = contentFrame
 
-	local gridCorner = Instance.new("UICorner")
-	gridCorner.CornerRadius = CORNER_RADIUS
-	gridCorner.Parent = gridPanel
+	local cardsCorner = Instance.new("UICorner")
+	cardsCorner.CornerRadius = CORNER_RADIUS
+	cardsCorner.Parent = cardsPanel
 
-	local gridStroke = Instance.new("UIStroke")
-	gridStroke.Color = ACCENT_COLOR
-	gridStroke.Thickness = 1.5
-	gridStroke.Transparency = 0.5
-	gridStroke.Parent = gridPanel
+	local cardsStroke = Instance.new("UIStroke")
+	cardsStroke.Color = ACCENT_COLOR
+	cardsStroke.Thickness = 1.5
+	cardsStroke.Transparency = 0.5
+	cardsStroke.Parent = cardsPanel
 
-	local gridTitle = Instance.new("TextLabel")
-	gridTitle.Name = "GridTitle"
-	gridTitle.Size = UDim2.new(1, -20, 0, 30)
-	gridTitle.Position = UDim2.new(0, 10, 0, 8)
-	gridTitle.BackgroundTransparency = 1
-	gridTitle.Font = Enum.Font.GothamBold
-	gridTitle.TextColor3 = TEXT_COLOR
-	gridTitle.TextSize = 16
-	gridTitle.TextXAlignment = Enum.TextXAlignment.Left
-	gridTitle.Text = "VEHICLES"
-	gridTitle.Parent = gridPanel
+	local cardsTitle = Instance.new("TextLabel")
+	cardsTitle.Name = "CardsTitle"
+	cardsTitle.Size = UDim2.new(1, -20, 0, 30)
+	cardsTitle.Position = UDim2.new(0, 10, 0, 8)
+	cardsTitle.BackgroundTransparency = 1
+	cardsTitle.Font = Enum.Font.GothamBold
+	cardsTitle.TextColor3 = TEXT_COLOR
+	cardsTitle.TextSize = 16
+	cardsTitle.TextXAlignment = Enum.TextXAlignment.Left
+	cardsTitle.Text = "VEHICLES"
+	cardsTitle.Parent = cardsPanel
 
-	local scrollFrame = Instance.new("ScrollingFrame")
-	scrollFrame.Name = "VehicleGrid"
-	scrollFrame.Size = UDim2.new(1, -20, 1, -48)
-	scrollFrame.Position = UDim2.new(0, 10, 0, 42)
-	scrollFrame.BackgroundTransparency = 1
-	scrollFrame.BorderSizePixel = 0
-	scrollFrame.ScrollBarThickness = 4
-	scrollFrame.ScrollBarImageColor3 = ACCENT_COLOR
-	scrollFrame.ScrollBarImageTransparency = 0.3
-	scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-	scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scrollFrame.Parent = gridPanel
+	local cardContainer = Instance.new("Frame")
+	cardContainer.Name = "CardContainer"
+	cardContainer.Size = UDim2.new(1, -20, 1, -48)
+	cardContainer.Position = UDim2.new(0, 10, 0, 42)
+	cardContainer.BackgroundTransparency = 1
+	cardContainer.Parent = cardsPanel
 
-	local gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellPadding = UDim2.new(0, CELL_PADDING, 0, CELL_PADDING)
-	gridLayout.CellSize = UDim2.new(1 / GRID_COLUMNS, -(CELL_PADDING * (GRID_COLUMNS - 1) / GRID_COLUMNS), 0, 60)
-	gridLayout.FillDirection = Enum.FillDirection.Horizontal
-	gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	gridLayout.Parent = scrollFrame
+	local cardLayout = Instance.new("UIListLayout")
+	cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	cardLayout.Padding = UDim.new(0, 10)
+	cardLayout.FillDirection = Enum.FillDirection.Vertical
+	cardLayout.Parent = cardContainer
 
-	-- Build vehicle cells
-	local vehicleCells: { [string]: Frame } = {}
-	for i, vehicleName in ipairs(VEHICLE_NAMES) do
-		local cell = createVehicleCell(vehicleName, i, scrollFrame)
-		vehicleCells[vehicleName] = cell
-	end
-
-	-- BindableEvents for callbacks
+	-- BindableEvents
 	local onVehicleSelected = Instance.new("BindableEvent")
 	onVehicleSelected.Name = "OnVehicleSelected"
 	onVehicleSelected.Parent = screenGui
@@ -350,24 +452,16 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 	onConfirm.Name = "OnConfirm"
 	onConfirm.Parent = screenGui
 
-	-- Wire up cell click handlers
-	for vehicleName, cell in pairs(vehicleCells) do
-		local clickDetector = cell:FindFirstChild("ClickDetector") :: TextButton
-		if clickDetector then
-			clickDetector.Activated:Connect(function()
-				onVehicleSelected:Fire(vehicleName)
-			end)
-		end
-	end
-
 	confirmButton.Activated:Connect(function()
 		onConfirm:Fire()
 	end)
 
-	-- Turntable rotation for viewport model
+	-- Turntable rotation
 	local currentModel: Model? = nil
 	local turntableAngle = 0
 	local turntableConnection: RBXScriptConnection? = nil
+
+	local vehicleCards: { [string]: Frame } = {}
 
 	local self: PreRoundScreenInstance = {
 		screenGui = screenGui,
@@ -375,7 +469,10 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 		viewportCamera = viewportCamera,
 		countdownLabel = countdownLabel,
 		confirmButton = confirmButton,
-		vehicleCells = vehicleCells,
+		vehicleCards = vehicleCards,
+		vehicleNameLabel = vehicleNameLabel,
+		vehicleTaglineLabel = vehicleTaglineLabel,
+		vehicleDescLabel = vehicleDescLabel,
 		onVehicleSelected = onVehicleSelected,
 		onConfirm = onConfirm,
 	} :: any
@@ -398,55 +495,45 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 		countdownLabel.Text = tostring(math.ceil(seconds))
 		if seconds <= 3 then
 			countdownLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-			local countdownStrokeRef = countdownLabel:FindFirstChildOfClass("UIStroke")
-			if countdownStrokeRef then
-				countdownStrokeRef.Color = Color3.fromRGB(255, 80, 80)
-			end
+			local ref = countdownLabel:FindFirstChildOfClass("UIStroke")
+			if ref then ref.Color = Color3.fromRGB(255, 80, 80) end
 		else
 			countdownLabel.TextColor3 = ACCENT_COLOR
-			local countdownStrokeRef = countdownLabel:FindFirstChildOfClass("UIStroke")
-			if countdownStrokeRef then
-				countdownStrokeRef.Color = ACCENT_COLOR
-			end
+			local ref = countdownLabel:FindFirstChildOfClass("UIStroke")
+			if ref then ref.Color = ACCENT_COLOR end
 		end
 	end
 
-	function self:setVehicleState(vehicleName: string, state: VehicleCellState)
-		local cell = vehicleCells[vehicleName]
-		if not cell then return end
+	function self:setVehicleState(vehicleId: string, state: VehicleCellState)
+		local card = vehicleCards[vehicleId]
+		if not card then return end
 
-		local strokeRef = cell:FindFirstChild("SelectionStroke") :: UIStroke
-		local overlay = cell:FindFirstChild("TakenOverlay") :: Frame
-		local nameLabel = cell:FindFirstChild("VehicleName") :: TextLabel
-		local clickDetector = cell:FindFirstChild("ClickDetector") :: TextButton
+		local strokeRef = card:FindFirstChild("SelectionStroke") :: UIStroke
+		local nameLabel = card:FindFirstChild("VehicleName") :: TextLabel
+		local clickDetector = card:FindFirstChild("ClickDetector") :: TextButton
 
 		if state == "selected" then
-			cell.BackgroundColor3 = Color3.fromRGB(0, 50, 80)
-			cell.BackgroundTransparency = 0.1
+			card.BackgroundColor3 = Color3.fromRGB(0, 50, 80)
+			card.BackgroundTransparency = 0.1
 			if strokeRef then
 				strokeRef.Thickness = 2.5
 				strokeRef.Color = SELECTED_COLOR
 			end
-			if overlay then overlay.Visible = false end
 			if nameLabel then nameLabel.TextColor3 = TEXT_COLOR end
 			if clickDetector then clickDetector.Active = true end
-		elseif state == "taken" then
-			cell.BackgroundColor3 = TAKEN_COLOR
-			cell.BackgroundTransparency = 0.2
-			if strokeRef then
-				strokeRef.Thickness = 0
-			end
-			if overlay then overlay.Visible = true end
-			if nameLabel then nameLabel.TextColor3 = TAKEN_TEXT_COLOR end
+		elseif state == "locked" then
+			card.BackgroundColor3 = LOCKED_COLOR
+			card.BackgroundTransparency = 0.2
+			if strokeRef then strokeRef.Thickness = 0 end
+			if nameLabel then nameLabel.TextColor3 = LOCKED_TEXT_COLOR end
 			if clickDetector then clickDetector.Active = false end
 		else
-			cell.BackgroundColor3 = AVAILABLE_COLOR
-			cell.BackgroundTransparency = 0.15
+			card.BackgroundColor3 = AVAILABLE_COLOR
+			card.BackgroundTransparency = 0.15
 			if strokeRef then
 				strokeRef.Thickness = 0
 				strokeRef.Color = ACCENT_COLOR
 			end
-			if overlay then overlay.Visible = false end
 			if nameLabel then nameLabel.TextColor3 = TEXT_COLOR end
 			if clickDetector then clickDetector.Active = true end
 		end
@@ -460,15 +547,14 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 			local cStroke = confirmButton:FindFirstChild("ConfirmStroke") :: UIStroke
 			if cStroke then cStroke.Color = ACCENT_CONFIRM end
 		else
-			confirmButton.BackgroundColor3 = TAKEN_COLOR
+			confirmButton.BackgroundColor3 = LOCKED_COLOR
 			confirmButton.TextColor3 = SUBTEXT_COLOR
 			local cStroke = confirmButton:FindFirstChild("ConfirmStroke") :: UIStroke
-			if cStroke then cStroke.Color = TAKEN_COLOR end
+			if cStroke then cStroke.Color = LOCKED_COLOR end
 		end
 	end
 
 	function self:setVehicleModel(model: Model?)
-		-- Clear existing viewport children (except camera)
 		for _, child in ipairs(viewportFrame:GetChildren()) do
 			if child ~= viewportCamera then
 				child:Destroy()
@@ -483,7 +569,6 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 			clone.Parent = viewportFrame
 			currentModel = clone
 
-			-- Position camera to frame the model
 			local cf, size = clone:GetBoundingBox()
 			local maxDim = math.max(size.X, size.Y, size.Z)
 			local distance = maxDim * 2.2
@@ -513,12 +598,63 @@ function PreRoundScreen.new(playerGui: PlayerGui): PreRoundScreenInstance
 		end
 	end
 
-	-- Start with confirm disabled
+	function self:setVehicleInfo(displayName: string, tagline: string, description: string)
+		vehicleNameLabel.Text = displayName
+		vehicleTaglineLabel.Text = tagline
+		vehicleDescLabel.Text = description
+		vehicleNameLabel.Visible = true
+		vehicleTaglineLabel.Visible = true
+		vehicleDescLabel.Visible = true
+	end
+
+	function self:buildCards(vehicles: { any }, playerLevel: number)
+		-- Clear existing cards
+		for _, child in cardContainer:GetChildren() do
+			if child:IsA("Frame") then
+				child:Destroy()
+			end
+		end
+		vehicleCards = {}
+		self.vehicleCards = vehicleCards
+
+		for i, vData in vehicles do
+			local isUnlocked = vData.unlockLevel <= playerLevel
+			local card = createVehicleCard(vData, isUnlocked, cardContainer)
+			card.LayoutOrder = i
+
+			-- Calculate card height: fill available space evenly
+			card.Size = UDim2.new(1, 0, 1 / #vehicles, -(10 * (#vehicles - 1) / #vehicles))
+
+			vehicleCards[vData.id] = card
+
+			local clickDetector = card:FindFirstChild("ClickDetector") :: TextButton
+			if clickDetector then
+				clickDetector.Activated:Connect(function()
+					if isUnlocked then
+						onVehicleSelected:Fire(vData.id)
+					end
+				end)
+			end
+
+			-- Hover effect for unlocked cards
+			if isUnlocked and clickDetector then
+				clickDetector.MouseEnter:Connect(function()
+					if card.BackgroundColor3 ~= Color3.fromRGB(0, 50, 80) then
+						TweenService:Create(card, HOVER_TWEEN, { BackgroundTransparency = 0.05 }):Play()
+					end
+				end)
+				clickDetector.MouseLeave:Connect(function()
+					if card.BackgroundColor3 ~= Color3.fromRGB(0, 50, 80) then
+						TweenService:Create(card, HOVER_TWEEN, { BackgroundTransparency = 0.15 }):Play()
+					end
+				end)
+			end
+		end
+	end
+
 	self:setConfirmEnabled(false)
 
 	return self
 end
-
-PreRoundScreen.VEHICLE_NAMES = VEHICLE_NAMES
 
 return PreRoundScreen

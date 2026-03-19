@@ -37,6 +37,7 @@ export type EndRoundScreenInstance = {
 	setResults: (self: EndRoundScreenInstance, results: { any }) -> (),
 	setTimer: (self: EndRoundScreenInstance, remaining: number) -> (),
 	setReadyState: (self: EndRoundScreenInstance, isReady: boolean) -> (),
+	showXPAward: (self: EndRoundScreenInstance, data: { xpGained: number, placement: number, leveledUp: boolean, newLevel: number }) -> (),
 }
 
 local function formatTime(seconds: number): string
@@ -332,6 +333,121 @@ function EndRoundScreen.new(playerGui: PlayerGui): EndRoundScreenInstance
 			readyUpBtn.BackgroundColor3 = READY_COLOR
 			readyStroke.Color = READY_COLOR
 		end
+	end
+
+	-- XP Award popup (overlays on top of results panel)
+	local xpPanel = Instance.new("Frame")
+	xpPanel.Name = "XPPanel"
+	xpPanel.Size = UDim2.new(0, 260, 0, 100)
+	xpPanel.Position = UDim2.new(0.5, 0, 0, 60)
+	xpPanel.AnchorPoint = Vector2.new(0.5, 0)
+	xpPanel.BackgroundColor3 = PANEL_COLOR
+	xpPanel.BackgroundTransparency = 0.1
+	xpPanel.BorderSizePixel = 0
+	xpPanel.Visible = false
+	xpPanel.ZIndex = 20
+	xpPanel.Parent = screenGui
+
+	local xpCorner = Instance.new("UICorner")
+	xpCorner.CornerRadius = CORNER_RADIUS
+	xpCorner.Parent = xpPanel
+
+	local xpStroke = Instance.new("UIStroke")
+	xpStroke.Color = HIGHLIGHT_COLOR
+	xpStroke.Thickness = 2
+	xpStroke.Parent = xpPanel
+
+	local xpTitle = Instance.new("TextLabel")
+	xpTitle.Name = "XPTitle"
+	xpTitle.Size = UDim2.new(1, 0, 0, 28)
+	xpTitle.Position = UDim2.new(0.5, 0, 0, 8)
+	xpTitle.AnchorPoint = Vector2.new(0.5, 0)
+	xpTitle.BackgroundTransparency = 1
+	xpTitle.Font = Enum.Font.GothamBold
+	xpTitle.TextColor3 = HIGHLIGHT_COLOR
+	xpTitle.TextSize = 22
+	xpTitle.Text = "+0 XP"
+	xpTitle.ZIndex = 21
+	xpTitle.Parent = xpPanel
+
+	local xpDetail = Instance.new("TextLabel")
+	xpDetail.Name = "XPDetail"
+	xpDetail.Size = UDim2.new(1, -16, 0, 18)
+	xpDetail.Position = UDim2.new(0.5, 0, 0, 38)
+	xpDetail.AnchorPoint = Vector2.new(0.5, 0)
+	xpDetail.BackgroundTransparency = 1
+	xpDetail.Font = Enum.Font.Gotham
+	xpDetail.TextColor3 = SUBTEXT_COLOR
+	xpDetail.TextSize = 13
+	xpDetail.Text = ""
+	xpDetail.ZIndex = 21
+	xpDetail.Parent = xpPanel
+
+	local levelUpLabel = Instance.new("TextLabel")
+	levelUpLabel.Name = "LevelUp"
+	levelUpLabel.Size = UDim2.new(1, 0, 0, 26)
+	levelUpLabel.Position = UDim2.new(0.5, 0, 0, 60)
+	levelUpLabel.AnchorPoint = Vector2.new(0.5, 0)
+	levelUpLabel.BackgroundTransparency = 1
+	levelUpLabel.Font = Enum.Font.GothamBold
+	levelUpLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	levelUpLabel.TextSize = 18
+	levelUpLabel.Text = ""
+	levelUpLabel.Visible = false
+	levelUpLabel.ZIndex = 21
+	levelUpLabel.Parent = xpPanel
+
+	function self:showXPAward(data)
+		xpTitle.Text = "+" .. data.xpGained .. " XP"
+		xpDetail.Text = ordinal(data.placement) .. " place finish"
+
+		if data.leveledUp then
+			levelUpLabel.Text = "LEVEL UP! Level " .. data.newLevel
+			levelUpLabel.Visible = true
+			xpPanel.Size = UDim2.new(0, 260, 0, 120)
+			xpStroke.Color = Color3.fromRGB(255, 215, 0)
+		else
+			levelUpLabel.Visible = false
+			xpPanel.Size = UDim2.new(0, 260, 0, 80)
+			xpStroke.Color = HIGHLIGHT_COLOR
+		end
+
+		xpPanel.Visible = true
+		xpPanel.BackgroundTransparency = 0.1
+
+		-- Animate in
+		xpPanel.Position = UDim2.new(0.5, 0, 0, 30)
+		TweenService:Create(xpPanel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, 0, 0, 60),
+		}):Play()
+
+		-- Auto-hide after 5 seconds
+		task.delay(5, function()
+			if xpPanel and xpPanel.Parent then
+				TweenService:Create(xpPanel, TweenInfo.new(0.3), {
+					BackgroundTransparency = 1,
+				}):Play()
+				TweenService:Create(xpTitle, TweenInfo.new(0.3), {
+					TextTransparency = 1,
+				}):Play()
+				TweenService:Create(xpDetail, TweenInfo.new(0.3), {
+					TextTransparency = 1,
+				}):Play()
+				if levelUpLabel.Visible then
+					TweenService:Create(levelUpLabel, TweenInfo.new(0.3), {
+						TextTransparency = 1,
+					}):Play()
+				end
+				task.delay(0.35, function()
+					if xpPanel and xpPanel.Parent then
+						xpPanel.Visible = false
+						xpTitle.TextTransparency = 0
+						xpDetail.TextTransparency = 0
+						levelUpLabel.TextTransparency = 0
+					end
+				end)
+			end
+		end)
 	end
 
 	return self

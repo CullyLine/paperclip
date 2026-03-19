@@ -1,14 +1,17 @@
 --[[
 	RoundController.server.luau — Manages race lifecycle within a lobby.
 
+	M1: Passes vehicle selections to VehicleSpawner and awards XP at race end.
+
 	Listens for StartRace BindableEvent from MatchManager, then:
-	  1. Spawns vehicles via VehicleSpawner
-	  2. Runs 3-2-1-GO countdown (fires CountdownUpdate to clients)
+	  1. Spawns vehicles via VehicleSpawner (with per-player vehicle types)
+	  2. Runs 3-2-1-GO countdown
 	  3. Unlocks vehicles on GO
-	  4. Tracks progress % per player (Y-axis distance from start to finish)
+	  4. Tracks progress % per player
 	  5. Detects finishes via FinishZone Touched event
 	  6. Ends race when all finish OR 120s timer expires
-	  7. Fires RaceEnd_Server BindableEvent with results for MatchManager
+	  7. Awards XP via ProfileManager
+	  8. Fires RaceEnd_Server BindableEvent with results
 ]]
 
 local Players = game:GetService("Players")
@@ -19,6 +22,11 @@ local VehicleSpawner = require(script.Parent:WaitForChild("VehicleSpawner"))
 
 local COUNTDOWN_SECONDS = 3
 local RACE_DURATION = 120
+
+-- XP awards
+local XP_BASE = 50
+local XP_PLACEMENT_MULTIPLIER = { [1] = 3.0, [2] = 2.0, [3] = 1.5 }
+local XP_FINISH_BONUS = 25
 
 -- ═══════════════════════════════════════════════════════════════════
 -- EVENTS
@@ -46,6 +54,7 @@ local countdownEvent = ensureRemoteEvent("CountdownUpdate")
 local raceStartEvent = ensureRemoteEvent("RaceStart")
 local raceEndClientEvent = ensureRemoteEvent("RaceEnd")
 local progressUpdateEvent = ensureRemoteEvent("ProgressUpdate")
+local xpAwardEvent = ensureRemoteEvent("XPAward")
 
 local startRaceBindable = ensureBindableEvent("StartRace")
 local raceEndServerBindable = ensureBindableEvent("RaceEnd_Server")
@@ -58,16 +67,17 @@ type PlayerResult = {
 	player: Player,
 	userId: number,
 	playerName: string,
-	finishTime: number?, -- nil = DNF
-	progress: number,    -- 0-100
+	finishTime: number?,
+	progress: number,
 	placement: number,
+	xpAwarded: number?,
 }
 
 local isRaceActive = false
 local raceStartTime = 0
 local racePlayers: { Player } = {}
-local playerProgress: { [number]: number } = {}  -- UserId -> progress %
-local playerFinishTimes: { [number]: number } = {} -- UserId -> finish time
+local playerProgress: { [number]: number } = {}
+local playerFinishTimes: { [number]: number } = {}
 local finishedPlayers: { [number]: boolean } = {}
 local finishConnection: RBXScriptConnection? = nil
 local heartbeatConnection: RBXScriptConnection? = nil
@@ -127,7 +137,6 @@ local function setupFinishDetection()
 		local vehicleModel = hit.Parent
 		if not vehicleModel then return end
 
-		-- Walk up to find vehicle model named Vehicle_*
 		while vehicleModel and not string.find(vehicleModel.Name, "Vehicle_") do
 			vehicleModel = vehicleModel.Parent :: Instance
 			if vehicleModel == workspace then
@@ -201,6 +210,39 @@ local function broadcastProgress()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
+-- XP AWARD
+-- ═══════════════════════════════════════════════════════════════════
+
+local function awardXP(results: { PlayerResult })
+	local PM = _G.ProfileManager
+	if not PM then return end
+
+	for _, result in results do
+		if not result.player or not result.player:IsDescendantOf(Players) then continue end
+
+		local xp = XP_BASE
+		local multiplier = XP_PLACEMENT_MULTIPLIER[result.placement] or 1.0
+		xp = math.floor(xp * multiplier)
+
+		if result.finishTime then
+			xp = xp + XP_FINISH_BONUS
+		end
+
+		result.xpAwarded = xp
+
+		local awardResult = PM.AwardXP(result.player, xp)
+		PM.RecordRace(result.player, result.placement, result.finishTime ~= nil)
+
+		xpAwardEvent:FireClient(result.player, {
+			xpGained = xp,
+			placement = result.placement,
+			leveledUp = awardResult.leveledUp,
+			newLevel = awardResult.newLevel,
+		})
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
 -- RACE LIFECYCLE
 -- ═══════════════════════════════════════════════════════════════════
 
@@ -224,6 +266,7 @@ local function buildFinalResults(): { PlayerResult }
 			finishTime = entry.finishTime,
 			progress = entry.progress,
 			placement = i,
+			xpAwarded = 0,
 		})
 	end
 
@@ -245,6 +288,8 @@ local function endRace()
 
 	local results = buildFinalResults()
 
+	awardXP(results)
+
 	VehicleSpawner.cleanup()
 
 	raceEndServerBindable:Fire(results)
@@ -259,7 +304,7 @@ local function checkAllFinished(): boolean
 	return true
 end
 
-local function startRace(players: { Player }, _playerVehicles: { [number]: string })
+local function startRace(players: { Player }, playerVehicles: { [number]: string })
 	if isRaceActive then return end
 
 	calculateStartFinishY()
@@ -273,7 +318,7 @@ local function startRace(players: { Player }, _playerVehicles: { [number]: strin
 		playerProgress[player.UserId] = 0
 	end
 
-	local spawnedVehicles = VehicleSpawner.spawnVehicles(racePlayers)
+	local spawnedVehicles = VehicleSpawner.spawnVehicles(racePlayers, playerVehicles)
 	if #spawnedVehicles == 0 then
 		warn("[RoundController] No vehicles spawned, aborting race")
 		return
@@ -281,7 +326,6 @@ local function startRace(players: { Player }, _playerVehicles: { [number]: strin
 
 	VehicleSpawner.lockAll()
 
-	-- 3-2-1-GO countdown
 	for i = COUNTDOWN_SECONDS, 1, -1 do
 		for _, player in racePlayers do
 			if player:IsDescendantOf(Players) then
@@ -291,10 +335,9 @@ local function startRace(players: { Player }, _playerVehicles: { [number]: strin
 		task.wait(1)
 	end
 
-	-- GO!
 	for _, player in racePlayers do
 		if player:IsDescendantOf(Players) then
-			countdownEvent:FireClient(player, 0) -- 0 = GO
+			countdownEvent:FireClient(player, 0)
 		end
 	end
 
@@ -311,7 +354,6 @@ local function startRace(players: { Player }, _playerVehicles: { [number]: strin
 
 	setupFinishDetection()
 
-	-- Progress tracking + race timer heartbeat
 	local lastBroadcast = 0
 	local BROADCAST_INTERVAL = 0.5
 

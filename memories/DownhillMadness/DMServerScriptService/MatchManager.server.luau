@@ -178,7 +178,8 @@ local function startPreRound()
 	roundNumber += 1
 	broadcastState(STATES.PreRound)
 
-	MapBuilder.build()
+	local biomeId = MapBuilder.getNextBiome()
+	MapBuilder.build(biomeId)
 
 	-- Move queued players into racing set
 	racingPlayers = {}

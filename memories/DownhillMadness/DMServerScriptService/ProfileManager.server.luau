@@ -7,6 +7,12 @@ local ProfileService = require(DMReplicatedStorage:WaitForChild("ProfileService"
 local PROFILE_TEMPLATE = {
 	level = 1,
 	xp = 0,
+	totalXp = 0,
+	unlockedVehicles = { "all_rounder" },
+	selectedVehicle = "all_rounder",
+	racesPlayed = 0,
+	racesFinished = 0,
+	bestPlacements = {},
 	statPoints = 0,
 	stats = {
 		speed = 0,
@@ -15,18 +21,9 @@ local PROFILE_TEMPLATE = {
 		durability = 0,
 		recovery = 0,
 	},
-	vehicles = {},
 	cosmetics = {},
 	currency = 0,
 	settings = {},
-}
-
-local BASE_VEHICLE_IDS = {
-	"sedan_01", "sedan_02", "sedan_03", "sedan_04",
-	"suv_01", "suv_02", "suv_03", "suv_04",
-	"truck_01", "truck_02", "truck_03", "truck_04",
-	"hatchback_01", "hatchback_02", "hatchback_03", "hatchback_04",
-	"van_01", "van_02", "van_03", "van_04",
 }
 
 local STORE_NAME = "DownhillMadness_PlayerData"
@@ -34,6 +31,15 @@ local STORE_NAME = "DownhillMadness_PlayerData"
 local ProfileStore = ProfileService.GetProfileStore(STORE_NAME, PROFILE_TEMPLATE)
 
 local Profiles: { [Player]: any } = {}
+
+----- XP / Level Curve -----
+
+local BASE_XP = 100
+local XP_INCREMENT = 50
+
+local function xpForLevel(level: number): number
+	return BASE_XP + (level - 1) * XP_INCREMENT
+end
 
 ----- Signal -----
 
@@ -97,6 +103,89 @@ function ProfileManager.RemoveFromList(player: Player, key: string, item: any)
 	end
 end
 
+function ProfileManager.GetLevel(player: Player): number
+	return ProfileManager.GetValue(player, "level") or 1
+end
+
+function ProfileManager.GetXP(player: Player): (number, number)
+	local xp = ProfileManager.GetValue(player, "xp") or 0
+	local level = ProfileManager.GetLevel(player)
+	return xp, xpForLevel(level)
+end
+
+function ProfileManager.AwardXP(player: Player, amount: number): { leveledUp: boolean, newLevel: number, xpGained: number }
+	local profile = Profiles[player]
+	if not profile then
+		return { leveledUp = false, newLevel = 1, xpGained = 0 }
+	end
+
+	local data = profile.Data
+	data.xp = (data.xp or 0) + amount
+	data.totalXp = (data.totalXp or 0) + amount
+
+	local leveledUp = false
+	local startLevel = data.level or 1
+
+	while data.xp >= xpForLevel(data.level) do
+		data.xp = data.xp - xpForLevel(data.level)
+		data.level = data.level + 1
+		leveledUp = true
+
+		local VehicleRegistry = require(DMReplicatedStorage:WaitForChild("VehicleRegistry"))
+		for _, vDef in VehicleRegistry.getAll() do
+			if vDef.unlockLevel <= data.level then
+				if not table.find(data.unlockedVehicles, vDef.id) then
+					table.insert(data.unlockedVehicles, vDef.id)
+				end
+			end
+		end
+	end
+
+	return {
+		leveledUp = leveledUp,
+		newLevel = data.level,
+		xpGained = amount,
+	}
+end
+
+function ProfileManager.IsVehicleUnlocked(player: Player, vehicleId: string): boolean
+	local profile = Profiles[player]
+	if not profile then return false end
+	local unlocked = profile.Data.unlockedVehicles
+	if not unlocked then return vehicleId == "all_rounder" end
+	return table.find(unlocked, vehicleId) ~= nil
+end
+
+function ProfileManager.GetUnlockedVehicles(player: Player): { string }
+	local profile = Profiles[player]
+	if not profile then return { "all_rounder" } end
+	return profile.Data.unlockedVehicles or { "all_rounder" }
+end
+
+function ProfileManager.GetSelectedVehicle(player: Player): string
+	return ProfileManager.GetValue(player, "selectedVehicle") or "all_rounder"
+end
+
+function ProfileManager.SetSelectedVehicle(player: Player, vehicleId: string)
+	if ProfileManager.IsVehicleUnlocked(player, vehicleId) then
+		ProfileManager.SetValue(player, "selectedVehicle", vehicleId)
+	end
+end
+
+function ProfileManager.RecordRace(player: Player, placement: number, finished: boolean)
+	local profile = Profiles[player]
+	if not profile then return end
+	local data = profile.Data
+	data.racesPlayed = (data.racesPlayed or 0) + 1
+	if finished then
+		data.racesFinished = (data.racesFinished or 0) + 1
+	end
+end
+
+function ProfileManager.XpForLevel(level: number): number
+	return xpForLevel(level)
+end
+
 ----- Player lifecycle -----
 
 local function onPlayerAdded(player: Player)
@@ -116,11 +205,15 @@ local function onPlayerAdded(player: Player)
 	profile:AddUserId(player.UserId)
 	profile:Reconcile()
 
-	-- Populate base vehicles on first join
-	if #profile.Data.vehicles == 0 then
-		for _, vehicleId in ipairs(BASE_VEHICLE_IDS) do
-			table.insert(profile.Data.vehicles, vehicleId)
-		end
+	-- Ensure all_rounder is always unlocked
+	if not profile.Data.unlockedVehicles or #profile.Data.unlockedVehicles == 0 then
+		profile.Data.unlockedVehicles = { "all_rounder" }
+	elseif not table.find(profile.Data.unlockedVehicles, "all_rounder") then
+		table.insert(profile.Data.unlockedVehicles, 1, "all_rounder")
+	end
+
+	if not profile.Data.selectedVehicle then
+		profile.Data.selectedVehicle = "all_rounder"
 	end
 
 	profile:ListenToRelease(function()
@@ -143,10 +236,23 @@ end
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
--- Handle players already in game (Studio edge case)
 for _, player in ipairs(Players:GetPlayers()) do
 	task.spawn(onPlayerAdded, player)
 end
 
--- Expose via shared module table for other server scripts
 _G.ProfileManager = ProfileManager
+
+-- RemoteFunction for clients to query their own progression
+local getProgressionRemote = Instance.new("RemoteFunction")
+getProgressionRemote.Name = "GetProgression"
+getProgressionRemote.Parent = ReplicatedStorage
+
+getProgressionRemote.OnServerInvoke = function(player: Player)
+	local xp, xpNeeded = ProfileManager.GetXP(player)
+	local level = ProfileManager.GetLevel(player)
+	return {
+		level = level,
+		xp = xp,
+		xpNeeded = xpNeeded,
+	}
+end

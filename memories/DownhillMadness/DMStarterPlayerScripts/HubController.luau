@@ -9,8 +9,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 
-local StarterGui = game:GetService("StarterGui")
-
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
@@ -46,6 +44,23 @@ local function restoreGameCamera()
 	camera.CameraType = Enum.CameraType.Custom
 end
 
+local function refreshProgression()
+	task.spawn(function()
+		local remote = ReplicatedStorage:FindFirstChild("GetProgression")
+		if not remote then
+			remote = ReplicatedStorage:WaitForChild("GetProgression", 5)
+		end
+		if remote then
+			local ok, data = pcall(function()
+				return (remote :: RemoteFunction):InvokeServer()
+			end)
+			if ok and data and hub then
+				hub:setProgression(data.level, data.xp, data.xpNeeded)
+			end
+		end
+	end)
+end
+
 local function showHub()
 	isInMatch = false
 	isQueued = false
@@ -57,6 +72,7 @@ local function showHub()
 
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	setHubCamera()
+	refreshProgression()
 end
 
 local function hideHub()

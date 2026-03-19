@@ -1,9 +1,9 @@
 --[[
-	PreRoundController — Client-side logic for the Pre-Round vehicle selection.
+	PreRoundController — M1 client-side vehicle selection logic.
 
-	Listens for server signals to show/hide the selection screen, manages
-	local selection state, syncs with server via RemoteEvents, and handles
-	the 10-second countdown + confirm flow.
+	Receives vehicle registry data + player level from server via
+	PreRound_Start. Shows 3 vehicle type cards with stats/lock state.
+	Syncs selection with server via RemoteEvents.
 ]]
 
 local Players = game:GetService("Players")
@@ -22,8 +22,8 @@ local isConfirmed = false
 local countdownActive = false
 local countdownRemaining = 10
 
--- Tracks which vehicles are taken by other players: vehicleName -> playerId
-local takenVehicles: { [string]: number } = {}
+local cachedVehicles: { any } = {}
+local cachedPlayerLevel: number = 0
 
 local function waitForRemote(name: string, class: string): any
 	local remote = ReplicatedStorage:FindFirstChild(name)
@@ -40,111 +40,114 @@ local preRoundStartRemote: RemoteEvent = nil :: any
 local preRoundEndRemote: RemoteEvent = nil :: any
 local preRoundCountdownRemote: RemoteEvent = nil :: any
 
-local function refreshAllCellStates()
+local function refreshAllCardStates()
 	if not screen then return end
-	for _, vehicleName in ipairs(PreRoundScreen.VEHICLE_NAMES) do
-		if vehicleName == selectedVehicle then
-			screen:setVehicleState(vehicleName, "selected")
-		elseif takenVehicles[vehicleName] then
-			screen:setVehicleState(vehicleName, "taken")
+	for _, vData in cachedVehicles do
+		local isUnlocked = vData.unlockLevel <= cachedPlayerLevel
+		if vData.id == selectedVehicle then
+			screen:setVehicleState(vData.id, "selected")
+		elseif not isUnlocked then
+			screen:setVehicleState(vData.id, "locked")
 		else
-			screen:setVehicleState(vehicleName, "available")
+			screen:setVehicleState(vData.id, "available")
 		end
 	end
 end
 
-local function loadTemplateModel(): Model?
-	local template = ReplicatedStorage:FindFirstChild("TemplateVehicle")
+local function loadVehicleTemplate(vehicleId: string): Model?
+	local templates = ReplicatedStorage:FindFirstChild("VehicleTemplates")
+	if not templates then
+		templates = ReplicatedStorage:WaitForChild("VehicleTemplates", 5)
+	end
+	if not templates then return nil end
+
+	local template = templates:FindFirstChild("Template_" .. vehicleId)
 	if not template then
-		template = ReplicatedStorage:WaitForChild("TemplateVehicle", 5)
+		template = templates:FindFirstChild("TemplateVehicle")
 	end
 	return template :: Model?
 end
 
-local function selectVehicle(vehicleName: string)
+local function selectVehicle(vehicleId: string)
 	if isConfirmed then return end
 
-	-- Check if vehicle is taken
-	if takenVehicles[vehicleName] and takenVehicles[vehicleName] ~= player.UserId then
-		return
+	-- Check unlock
+	local isUnlocked = false
+	for _, vData in cachedVehicles do
+		if vData.id == vehicleId then
+			isUnlocked = vData.unlockLevel <= cachedPlayerLevel
+			break
+		end
 	end
+	if not isUnlocked then return end
 
-	-- If re-selecting the same vehicle, deselect
-	if vehicleName == selectedVehicle then
+	-- Toggle deselect
+	if vehicleId == selectedVehicle then
 		selectedVehicle = nil
 		screen:setVehicleModel(nil)
 		screen:setConfirmEnabled(false)
-		refreshAllCellStates()
+		screen.vehicleNameLabel.Visible = false
+		screen.vehicleTaglineLabel.Visible = false
+		screen.vehicleDescLabel.Visible = false
+		refreshAllCardStates()
 		if selectVehicleRemote then
 			selectVehicleRemote:FireServer(nil)
 		end
 		return
 	end
 
-	selectedVehicle = vehicleName
-	refreshAllCellStates()
+	selectedVehicle = vehicleId
+	refreshAllCardStates()
 	screen:setConfirmEnabled(true)
 
+	-- Show vehicle info
+	for _, vData in cachedVehicles do
+		if vData.id == vehicleId then
+			screen:setVehicleInfo(vData.displayName, vData.tagline, vData.description)
+			break
+		end
+	end
+
 	-- Load 3D preview
-	local template = loadTemplateModel()
+	local template = loadVehicleTemplate(vehicleId)
 	if template then
 		screen:setVehicleModel(template)
 	end
 
-	-- Notify server
 	if selectVehicleRemote then
-		selectVehicleRemote:FireServer(vehicleName)
+		selectVehicleRemote:FireServer(vehicleId)
 	end
 end
 
 local function confirmSelection()
 	if isConfirmed or not selectedVehicle then return end
 
-	-- Check vehicle is still available
-	if takenVehicles[selectedVehicle] and takenVehicles[selectedVehicle] ~= player.UserId then
-		selectedVehicle = nil
-		screen:setVehicleModel(nil)
-		screen:setConfirmEnabled(false)
-		refreshAllCellStates()
-		return
-	end
-
 	isConfirmed = true
 	screen:setConfirmEnabled(false)
-	screen.confirmButton.Text = "CONFIRMED ✓"
+	screen.confirmButton.Text = "CONFIRMED"
 
 	if confirmVehicleRemote then
 		confirmVehicleRemote:FireServer(selectedVehicle)
 	end
 end
 
-local function onVehicleUpdate(selections: { [string]: number }, confirmed: { [number]: boolean })
-	takenVehicles = {}
-	for vehicleName, playerId in pairs(selections) do
-		if playerId ~= player.UserId then
-			takenVehicles[vehicleName] = playerId
-		end
+local function onVehicleUpdate(selections: { [string]: number }, confirmed: { [number]: boolean }, vehicles: { any }?)
+	if vehicles and #vehicles > 0 then
+		cachedVehicles = vehicles
 	end
-
-	-- If our selected vehicle was taken by someone else, clear it
-	if selectedVehicle and takenVehicles[selectedVehicle] then
-		selectedVehicle = nil
-		if screen then
-			screen:setVehicleModel(nil)
-			screen:setConfirmEnabled(false)
-		end
-	end
-
-	refreshAllCellStates()
+	refreshAllCardStates()
 end
 
-local function onPreRoundStart(duration: number)
-	-- Reset state for new round
+local function onPreRoundStart(duration: number, vehicles: { any }, playerLevel: number?)
 	selectedVehicle = nil
 	isConfirmed = false
 	countdownActive = true
 	countdownRemaining = duration or 10
-	takenVehicles = {}
+
+	if vehicles then
+		cachedVehicles = vehicles
+	end
+	cachedPlayerLevel = playerLevel or 0
 
 	if not screen then
 		screen = PreRoundScreen.new(playerGui)
@@ -155,9 +158,15 @@ local function onPreRoundStart(duration: number)
 	screen.confirmButton.Text = "CONFIRM"
 	screen:setConfirmEnabled(false)
 	screen:setVehicleModel(nil)
+	screen.vehicleNameLabel.Visible = false
+	screen.vehicleTaglineLabel.Visible = false
+	screen.vehicleDescLabel.Visible = false
+	screen:buildCards(cachedVehicles, cachedPlayerLevel)
 	screen:setCountdown(countdownRemaining)
-	refreshAllCellStates()
 	screen:setVisible(true)
+
+	-- Auto-select saved preference if server pre-selected for us
+	-- The server fires VehicleUpdate shortly after Start with pre-selections
 end
 
 local function onPreRoundEnd()
@@ -174,7 +183,6 @@ local function onCountdownTick(remaining: number)
 	end
 end
 
--- Wire up remote events
 task.spawn(function()
 	selectVehicleRemote = waitForRemote("PreRound_SelectVehicle", "RemoteEvent") :: RemoteEvent
 	confirmVehicleRemote = waitForRemote("PreRound_ConfirmVehicle", "RemoteEvent") :: RemoteEvent

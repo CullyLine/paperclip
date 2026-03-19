@@ -1,16 +1,17 @@
 --[[
 	VehicleSpawner — Spawns, locks, unlocks, teleports, and cleans up vehicles.
 
-	ModuleScript required by RoundController.
+	M1: Spawns the correct vehicle template per player based on their
+	PreRound vehicle selection (passed via playerVehicles map).
 
 	API:
-	  .spawnVehicles(players) → { SpawnedVehicle }
-	  .lockAll()              — anchor all vehicles
-	  .unlockAll()            — unanchor + set network ownership
-	  .cleanup()              — destroy all vehicles
-	  .teleportVehicle(vehicle, cframe) — safe teleport with physics reset
-	  .anchorVehicle(vehicle, anchored) — anchor/unanchor entire vehicle
-	  .resetVehicle(vehicle)  — zero all velocity
+	  .spawnVehicles(players, playerVehicles) → { SpawnedVehicle }
+	  .lockAll()
+	  .unlockAll()
+	  .cleanup()
+	  .teleportVehicle(vehicle, cframe)
+	  .anchorVehicle(vehicle, anchored)
+	  .resetVehicle(vehicle)
 	  .getVehicleForPlayer(player) → SpawnedVehicle?
 	  .getActiveVehicles() → { SpawnedVehicle }
 ]]
@@ -25,6 +26,7 @@ type SpawnedVehicle = {
 	player: Player,
 	chassis: BasePart,
 	seat: Instance,
+	vehicleId: string,
 }
 
 local activeVehicles: { SpawnedVehicle } = {}
@@ -49,7 +51,12 @@ local function getSpawnPoints(): { BasePart }
 	return points
 end
 
-local function getTemplate(): Model?
+local function getTemplate(vehicleId: string): Model?
+	local templates = ReplicatedStorage:FindFirstChild("VehicleTemplates")
+	if templates then
+		return templates:FindFirstChild("Template_" .. vehicleId) :: Model?
+	end
+	-- Legacy fallback
 	return ReplicatedStorage:FindFirstChild("TemplateVehicle") :: Model?
 end
 
@@ -96,14 +103,8 @@ end
 -- Public API
 ----------------------------------------------------------------
 
-function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
+function VehicleSpawner.spawnVehicles(players: { Player }, playerVehicles: { [number]: string }?): { SpawnedVehicle }
 	VehicleSpawner.cleanup()
-
-	local template = getTemplate()
-	if not template then
-		warn("[VehicleSpawner] TemplateVehicle not found in ReplicatedStorage")
-		return {}
-	end
 
 	local spawnPoints = getSpawnPoints()
 	if #spawnPoints == 0 then
@@ -111,13 +112,32 @@ function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
 		return {}
 	end
 
+	local defaultVehicleId = "all_rounder"
+
 	for i, plr in players do
 		if i > #spawnPoints then break end
 		if not plr:IsDescendantOf(Players) then continue end
 
+		local vehicleId = defaultVehicleId
+		if playerVehicles and playerVehicles[plr.UserId] then
+			vehicleId = playerVehicles[plr.UserId]
+		end
+
+		local template = getTemplate(vehicleId)
+		if not template then
+			warn("[VehicleSpawner] Template not found for vehicle: " .. vehicleId .. ", falling back to default")
+			template = getTemplate(defaultVehicleId)
+		end
+		if not template then
+			warn("[VehicleSpawner] No template found at all for " .. plr.Name)
+			continue
+		end
+
 		local spawnPoint = spawnPoints[i]
 		local vehicle = template:Clone()
 		vehicle.Name = "Vehicle_" .. plr.Name
+		vehicle:SetAttribute("VehicleId", vehicleId)
+		vehicle:SetAttribute("OwnerId", plr.UserId)
 
 		local bodyModel = vehicle:FindFirstChild("Body") :: Model?
 		local chassis = bodyModel and getChassisFromVehicle(vehicle) :: BasePart?
@@ -163,6 +183,7 @@ function VehicleSpawner.spawnVehicles(players: { Player }): { SpawnedVehicle }
 			player = plr,
 			chassis = chassis,
 			seat = seat,
+			vehicleId = vehicleId,
 		})
 	end
 
@@ -200,22 +221,20 @@ function VehicleSpawner.unlockAll()
 	end
 end
 
---- Teleport a vehicle safely: anchor → move → reset velocity → unanchor.
 function VehicleSpawner.teleportVehicle(vehicle: Model, targetCF: CFrame)
 	local chassis = getChassisFromVehicle(vehicle)
 	if not chassis then return end
 
 	VehicleSpawner.anchorVehicle(vehicle, true)
-	task.wait() -- let anchor propagate
+	task.wait()
 
 	vehicle:PivotTo(targetCF)
 
-	task.wait() -- let position propagate
+	task.wait()
 
 	VehicleSpawner.resetVehicle(vehicle)
 	VehicleSpawner.anchorVehicle(vehicle, false)
 
-	-- Restore network ownership to the player who owns this vehicle
 	for _, sv in activeVehicles do
 		if sv.model == vehicle and sv.player and sv.player:IsDescendantOf(Players) then
 			task.defer(function()
@@ -228,7 +247,6 @@ function VehicleSpawner.teleportVehicle(vehicle: Model, targetCF: CFrame)
 	end
 end
 
---- Anchor or unanchor the entire vehicle assembly.
 function VehicleSpawner.anchorVehicle(vehicle: Model, anchored: boolean)
 	local chassis = getChassisFromVehicle(vehicle)
 	if chassis then
@@ -236,7 +254,6 @@ function VehicleSpawner.anchorVehicle(vehicle: Model, anchored: boolean)
 	end
 end
 
---- Zero out all linear and angular velocity on the vehicle.
 function VehicleSpawner.resetVehicle(vehicle: Model)
 	local chassis = getChassisFromVehicle(vehicle)
 	if not chassis then return end

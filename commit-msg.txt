@@ -1,24 +1,10 @@
-M0 COMPLETE
+chore: add company assets — Tide Pools, Polaris chassis, media, 3D models
 
-Downhill Madness core loop end-to-end: Hub -> Quick Play -> Pre-Round ->
-select car -> countdown -> MapBuilder test map -> drive down -> 120s timer ->
-end-of-round leaderboard -> ready-up/return -> lobby loops.
-
-New raycast chassis system:
-- DownhillConfig + DownhillPhysics replace old Polaris modules
-- Client-driven AWD flat drive model (no gears/RPM)
-- Zero-jitter visual wheels (anchored, outside assembly, Heartbeat-synced)
-- Modular damage-ready TemplateVehicle with BodyPanels + Health attributes
-- VehicleSpawner teleport/anchor/reset APIs
-- Auto-cleanup on vehicle destruction between rounds
-
-Mobile-first input:
-- Touch driving controls (steering arrows, gas, brake, handbrake)
-- Auto-detected, appear only while driving
-- Gamepad support (sticks + triggers)
-
-Deprecated old Polaris modules (ChassisConfig, ChassisPhysics, Drivetrain,
-LiveValuesSync) with deprecation notices.
-
-Updated README as full M0 design doc with vehicle architecture,
-chassis system docs, file reference, and debug guide.
+- NewRobloxGame (Tide Pools): M0 design doc, Aquarium + SunnyShore prototypes,
+  creature art (11 species), lore bible, economy benchmarks, competitive analysis
+- RobloxChassis (Polaris): reference chassis system, car/wheel models, build tools
+- Media: animal video projects (raw + final), concept art frames
+- Models: car body + wheel iterations (concept -> prototype -> production -> final)
+- Village: Blender scene + multi-angle renders
+- Agents: CEO agent config
+- Tools: decimate.py, scene-render.py
