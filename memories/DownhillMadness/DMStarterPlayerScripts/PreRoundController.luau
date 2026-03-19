@@ -63,6 +63,8 @@ local function refreshAllCardStates()
 	end
 end
 
+local selectVehicle: (vehicleId: string) -> ()
+
 local function loadVehicleTemplate(vehicleId: string): Model?
 	local templates = ReplicatedStorage:FindFirstChild("VehicleTemplates")
 	if not templates then
@@ -95,7 +97,7 @@ local function tryPurchaseVehicle(vehicleId: string)
 	end
 end
 
-local function selectVehicle(vehicleId: string)
+selectVehicle = function(vehicleId: string)
 	if isConfirmed then return end
 
 	-- Handle purchase: prefix

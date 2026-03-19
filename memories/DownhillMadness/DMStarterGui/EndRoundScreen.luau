@@ -343,115 +343,214 @@ function EndRoundScreen.new(playerGui: PlayerGui): EndRoundScreenInstance
 		end
 	end
 
-	-- XP Award popup (overlays on top of results panel)
-	local xpPanel = Instance.new("Frame")
-	xpPanel.Name = "XPPanel"
-	xpPanel.Size = UDim2.new(0, 260, 0, 100)
-	xpPanel.Position = UDim2.new(0.5, 0, 0, 60)
-	xpPanel.AnchorPoint = Vector2.new(0.5, 0)
-	xpPanel.BackgroundColor3 = PANEL_COLOR
-	xpPanel.BackgroundTransparency = 0.1
-	xpPanel.BorderSizePixel = 0
-	xpPanel.Visible = false
-	xpPanel.ZIndex = 20
-	xpPanel.Parent = screenGui
+	-- Rewards panel (overlays on top of results panel)
+	local SCRAP_COLOR = Color3.fromRGB(200, 180, 60)
 
-	local xpCorner = Instance.new("UICorner")
-	xpCorner.CornerRadius = CORNER_RADIUS
-	xpCorner.Parent = xpPanel
+	local rewardPanel = Instance.new("Frame")
+	rewardPanel.Name = "RewardPanel"
+	rewardPanel.Size = UDim2.new(0, 280, 0, 200)
+	rewardPanel.Position = UDim2.new(0.5, 0, 0, 60)
+	rewardPanel.AnchorPoint = Vector2.new(0.5, 0)
+	rewardPanel.BackgroundColor3 = PANEL_COLOR
+	rewardPanel.BackgroundTransparency = 0.1
+	rewardPanel.BorderSizePixel = 0
+	rewardPanel.Visible = false
+	rewardPanel.ZIndex = 20
+	rewardPanel.Parent = screenGui
 
-	local xpStroke = Instance.new("UIStroke")
-	xpStroke.Color = HIGHLIGHT_COLOR
-	xpStroke.Thickness = 2
-	xpStroke.Parent = xpPanel
+	local rpCorner = Instance.new("UICorner")
+	rpCorner.CornerRadius = CORNER_RADIUS
+	rpCorner.Parent = rewardPanel
 
-	local xpTitle = Instance.new("TextLabel")
-	xpTitle.Name = "XPTitle"
-	xpTitle.Size = UDim2.new(1, 0, 0, 28)
-	xpTitle.Position = UDim2.new(0.5, 0, 0, 8)
-	xpTitle.AnchorPoint = Vector2.new(0.5, 0)
-	xpTitle.BackgroundTransparency = 1
-	xpTitle.Font = Enum.Font.GothamBold
-	xpTitle.TextColor3 = HIGHLIGHT_COLOR
-	xpTitle.TextSize = 22
-	xpTitle.Text = "+0 XP"
-	xpTitle.ZIndex = 21
-	xpTitle.Parent = xpPanel
+	local rpStroke = Instance.new("UIStroke")
+	rpStroke.Color = HIGHLIGHT_COLOR
+	rpStroke.Thickness = 2
+	rpStroke.Parent = rewardPanel
 
-	local xpDetail = Instance.new("TextLabel")
-	xpDetail.Name = "XPDetail"
-	xpDetail.Size = UDim2.new(1, -16, 0, 18)
-	xpDetail.Position = UDim2.new(0.5, 0, 0, 38)
-	xpDetail.AnchorPoint = Vector2.new(0.5, 0)
-	xpDetail.BackgroundTransparency = 1
-	xpDetail.Font = Enum.Font.Gotham
-	xpDetail.TextColor3 = SUBTEXT_COLOR
-	xpDetail.TextSize = 13
-	xpDetail.Text = ""
-	xpDetail.ZIndex = 21
-	xpDetail.Parent = xpPanel
+	local rewardTitle = Instance.new("TextLabel")
+	rewardTitle.Name = "RewardTitle"
+	rewardTitle.Size = UDim2.new(1, 0, 0, 24)
+	rewardTitle.Position = UDim2.new(0.5, 0, 0, 8)
+	rewardTitle.AnchorPoint = Vector2.new(0.5, 0)
+	rewardTitle.BackgroundTransparency = 1
+	rewardTitle.Font = Enum.Font.GothamBold
+	rewardTitle.TextColor3 = TEXT_COLOR
+	rewardTitle.TextSize = 16
+	rewardTitle.Text = "RACE REWARDS"
+	rewardTitle.ZIndex = 21
+	rewardTitle.Parent = rewardPanel
 
-	local levelUpLabel = Instance.new("TextLabel")
-	levelUpLabel.Name = "LevelUp"
-	levelUpLabel.Size = UDim2.new(1, 0, 0, 26)
-	levelUpLabel.Position = UDim2.new(0.5, 0, 0, 60)
-	levelUpLabel.AnchorPoint = Vector2.new(0.5, 0)
-	levelUpLabel.BackgroundTransparency = 1
-	levelUpLabel.Font = Enum.Font.GothamBold
-	levelUpLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-	levelUpLabel.TextSize = 18
-	levelUpLabel.Text = ""
-	levelUpLabel.Visible = false
-	levelUpLabel.ZIndex = 21
-	levelUpLabel.Parent = xpPanel
+	local breakdownFrame = Instance.new("Frame")
+	breakdownFrame.Name = "Breakdown"
+	breakdownFrame.Size = UDim2.new(1, -24, 1, -40)
+	breakdownFrame.Position = UDim2.new(0, 12, 0, 36)
+	breakdownFrame.BackgroundTransparency = 1
+	breakdownFrame.ZIndex = 21
+	breakdownFrame.Parent = rewardPanel
+
+	local breakdownLayout = Instance.new("UIListLayout")
+	breakdownLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	breakdownLayout.Padding = UDim.new(0, 2)
+	breakdownLayout.Parent = breakdownFrame
+
+	local function createRewardLine(text: string, value: string, color: Color3, order: number): Frame
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, 0, 0, 16)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = order
+		row.ZIndex = 21
+		row.Parent = breakdownFrame
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0.65, 0, 1, 0)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.Gotham
+		label.TextColor3 = SUBTEXT_COLOR
+		label.TextSize = 11
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Text = text
+		label.ZIndex = 21
+		label.Parent = row
+
+		local val = Instance.new("TextLabel")
+		val.Size = UDim2.new(0.35, 0, 1, 0)
+		val.Position = UDim2.new(0.65, 0, 0, 0)
+		val.BackgroundTransparency = 1
+		val.Font = Enum.Font.GothamBold
+		val.TextColor3 = color
+		val.TextSize = 12
+		val.TextXAlignment = Enum.TextXAlignment.Right
+		val.Text = value
+		val.ZIndex = 21
+		val.Parent = row
+
+		return row
+	end
 
 	function self:showXPAward(data)
-		xpTitle.Text = "+" .. data.xpGained .. " XP"
-		xpDetail.Text = ordinal(data.placement) .. " place finish"
-
-		if data.leveledUp then
-			levelUpLabel.Text = "LEVEL UP! Level " .. data.newLevel
-			levelUpLabel.Visible = true
-			xpPanel.Size = UDim2.new(0, 260, 0, 120)
-			xpStroke.Color = Color3.fromRGB(255, 215, 0)
-		else
-			levelUpLabel.Visible = false
-			xpPanel.Size = UDim2.new(0, 260, 0, 80)
-			xpStroke.Color = HIGHLIGHT_COLOR
+		-- Clear old breakdown
+		for _, child in breakdownFrame:GetChildren() do
+			if child:IsA("Frame") then
+				child:Destroy()
+			end
 		end
 
-		xpPanel.Visible = true
-		xpPanel.BackgroundTransparency = 0.1
+		local lineOrder = 0
 
-		-- Animate in
-		xpPanel.Position = UDim2.new(0.5, 0, 0, 30)
-		TweenService:Create(xpPanel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		-- XP breakdown
+		local breakdown = data.xpBreakdown
+		if breakdown then
+			if breakdown.raceFinish > 0 then
+				lineOrder += 1
+				createRewardLine("Race Finish", "+" .. breakdown.raceFinish .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+			if breakdown.placementBonus > 0 then
+				lineOrder += 1
+				createRewardLine(ordinal(data.placement) .. " Place", "+" .. breakdown.placementBonus .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+			if breakdown.distance > 0 then
+				lineOrder += 1
+				createRewardLine("Distance", "+" .. breakdown.distance .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+			if breakdown.destruction > 0 then
+				lineOrder += 1
+				createRewardLine("Destruction", "+" .. breakdown.destruction .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+			if breakdown.cleanDriving > 0 then
+				lineOrder += 1
+				createRewardLine("Clean Driving", "+" .. breakdown.cleanDriving .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+			if breakdown.stylePoints > 0 then
+				lineOrder += 1
+				createRewardLine("Style Points", "+" .. breakdown.stylePoints .. " XP", HIGHLIGHT_COLOR, lineOrder)
+			end
+		end
+
+		-- XP total
+		lineOrder += 1
+		createRewardLine("Total XP", "+" .. data.xpGained .. " XP", ACCENT_COLOR, lineOrder)
+
+		-- Separator
+		lineOrder += 1
+		local sep = Instance.new("Frame")
+		sep.Size = UDim2.new(1, 0, 0, 1)
+		sep.BackgroundColor3 = ACCENT_COLOR
+		sep.BackgroundTransparency = 0.6
+		sep.BorderSizePixel = 0
+		sep.LayoutOrder = lineOrder
+		sep.ZIndex = 21
+		sep.Parent = breakdownFrame
+
+		-- Scrap
+		local scrapGained = data.scrapGained or 0
+		if scrapGained > 0 then
+			lineOrder += 1
+			createRewardLine("Race Reward", "+" .. scrapGained .. " Scrap", SCRAP_COLOR, lineOrder)
+		end
+
+		local scrapBonuses = data.scrapBonuses or 0
+		if scrapBonuses > 0 then
+			lineOrder += 1
+			createRewardLine("Level-Up Bonus", "+" .. scrapBonuses .. " Scrap", SCRAP_COLOR, lineOrder)
+		end
+
+		-- Level up
+		if data.leveledUp then
+			lineOrder += 1
+			local lvlRow = Instance.new("Frame")
+			lvlRow.Size = UDim2.new(1, 0, 0, 20)
+			lvlRow.BackgroundTransparency = 1
+			lvlRow.LayoutOrder = lineOrder
+			lvlRow.ZIndex = 21
+			lvlRow.Parent = breakdownFrame
+
+			local lvlLabel = Instance.new("TextLabel")
+			lvlLabel.Size = UDim2.new(1, 0, 1, 0)
+			lvlLabel.BackgroundTransparency = 1
+			lvlLabel.Font = Enum.Font.GothamBold
+			lvlLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+			lvlLabel.TextSize = 14
+			lvlLabel.Text = "LEVEL UP! Level " .. data.newLevel
+			lvlLabel.ZIndex = 21
+			lvlLabel.Parent = lvlRow
+
+			rpStroke.Color = Color3.fromRGB(255, 215, 0)
+		else
+			rpStroke.Color = HIGHLIGHT_COLOR
+		end
+
+		-- Size panel based on content
+		local totalHeight = 44 + (lineOrder * 18) + 12
+		rewardPanel.Size = UDim2.new(0, 280, 0, totalHeight)
+
+		rewardPanel.Visible = true
+		rewardPanel.BackgroundTransparency = 0.1
+
+		rewardPanel.Position = UDim2.new(0.5, 0, 0, 30)
+		TweenService:Create(rewardPanel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 			Position = UDim2.new(0.5, 0, 0, 60),
 		}):Play()
 
-		-- Auto-hide after 5 seconds
-		task.delay(5, function()
-			if xpPanel and xpPanel.Parent then
-				TweenService:Create(xpPanel, TweenInfo.new(0.3), {
+		task.delay(6, function()
+			if rewardPanel and rewardPanel.Parent then
+				TweenService:Create(rewardPanel, TweenInfo.new(0.4), {
 					BackgroundTransparency = 1,
 				}):Play()
-				TweenService:Create(xpTitle, TweenInfo.new(0.3), {
-					TextTransparency = 1,
-				}):Play()
-				TweenService:Create(xpDetail, TweenInfo.new(0.3), {
-					TextTransparency = 1,
-				}):Play()
-				if levelUpLabel.Visible then
-					TweenService:Create(levelUpLabel, TweenInfo.new(0.3), {
-						TextTransparency = 1,
-					}):Play()
+				for _, child in rewardPanel:GetDescendants() do
+					if child:IsA("TextLabel") then
+						TweenService:Create(child, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+					elseif child:IsA("Frame") and child.BackgroundTransparency < 1 then
+						TweenService:Create(child, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+					end
 				end
-				task.delay(0.35, function()
-					if xpPanel and xpPanel.Parent then
-						xpPanel.Visible = false
-						xpTitle.TextTransparency = 0
-						xpDetail.TextTransparency = 0
-						levelUpLabel.TextTransparency = 0
+				task.delay(0.45, function()
+					if rewardPanel and rewardPanel.Parent then
+						rewardPanel.Visible = false
+						for _, child in rewardPanel:GetDescendants() do
+							if child:IsA("TextLabel") then
+								child.TextTransparency = 0
+							end
+						end
 					end
 				end)
 			end

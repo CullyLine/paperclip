@@ -32,6 +32,14 @@ Before making changes, read in this order:
 
 Use embedded PGlite in dev by leaving `DATABASE_URL` unset.
 
+**Before starting**, always kill orphaned postgres processes. Stale shared-memory locks will prevent the embedded DB from starting:
+
+```powershell
+Get-Process -Name "postgres" -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+Then:
+
 ```sh
 pnpm install
 pnpm dev

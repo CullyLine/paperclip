@@ -813,8 +813,19 @@ export function issueRoutes(db: Db, storage: StorageService) {
       !!existing.createdByUserId &&
       req.body.assigneeUserId === existing.createdByUserId;
 
+    let isAgentReassigningToManager = false;
+    if (
+      req.actor.type === "agent" &&
+      req.actor.agentId &&
+      existing.assigneeAgentId === req.actor.agentId &&
+      typeof req.body.assigneeAgentId === "string"
+    ) {
+      const chain = await agentsSvc.getChainOfCommand(req.actor.agentId);
+      isAgentReassigningToManager = chain.some((m) => m.id === req.body.assigneeAgentId);
+    }
+
     if (assigneeWillChange) {
-      if (!isAgentReturningIssueToCreator) {
+      if (!isAgentReturningIssueToCreator && !isAgentReassigningToManager) {
         await assertCanAssignTasks(req, existing.companyId);
       }
     }

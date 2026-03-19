@@ -1,10 +1,24 @@
-import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Events } from "discord.js";
+import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, Events } from "discord.js";
 import WebSocket from "ws";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Kill any previous bot instance via PID file
+const PID_FILE = resolve(__dirname, ".bot.pid");
+if (existsSync(PID_FILE)) {
+  try {
+    const oldPid = parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
+    if (oldPid && oldPid !== process.pid) {
+      process.kill(oldPid);
+      console.log(`[startup] Killed previous bot instance (PID ${oldPid})`);
+    }
+  } catch {}
+}
+writeFileSync(PID_FILE, String(process.pid));
+process.on("exit", () => { try { unlinkSync(PID_FILE); } catch {} });
 
 // ---------------------------------------------------------------------------
 // Config
@@ -116,6 +130,11 @@ client.once(Events.ClientReady, async (c) => {
     adminChannel = await client.channels.fetch(ADMIN_CHANNEL_ID);
     console.log(`[discord] Admin channel: #${adminChannel.name}`);
     await sendAdminPanel();
+    const sgOnBoot = await getCeoSelfGovData();
+    if (sgOnBoot?.expiresAt && new Date(sgOnBoot.expiresAt).getTime() > Date.now()) {
+      console.log("[sg] Self-governing already active on boot — starting watcher");
+      startSgWatcher();
+    }
   } catch (err) {
     console.error(`[discord] Could not access admin channel ${ADMIN_CHANNEL_ID}: ${err.message}`);
     console.error("[discord] Make sure the bot has been invited to your server and can see that channel.");
@@ -146,7 +165,7 @@ async function handleIssueCreated(payload) {
   } catch { /* use details only */ }
 
   const description = issue?.description
-    ? issue.description.length > 300 ? issue.description.slice(0, 300) + "…" : issue.description
+    ? issue.description.length > 4000 ? issue.description.slice(0, 4000) + "…" : issue.description
     : null;
 
   const project = issue?.projectId ? projectCache.get(issue.projectId) : null;
@@ -185,7 +204,7 @@ async function handleIssueComment(payload) {
     } catch { /* use snippet */ }
   }
 
-  const displayBody = fullBody.length > 500 ? fullBody.slice(0, 500) + "…" : fullBody;
+  const displayBody = fullBody.length > 4000 ? fullBody.slice(0, 4000) + "…" : fullBody;
 
   const embed = new EmbedBuilder()
     .setColor(0x3b82f6)
@@ -332,10 +351,35 @@ function buildStatusLines(agents) {
   return agents.map(a => `${icons[a.status] || "⚪"} **${a.name}** — ${a.status}`).join("\n");
 }
 
+const CEO_ID = "d380c57a-a52a-4bd0-b0a3-3eae9c349128";
+const OWNER_DISCORD_ID = "165611171016081408";
+let sgWatchInterval = null;
+let lastKnownSgActive = false;
+
+async function getCeoSelfGovData() {
+  try {
+    const ceo = await apiFetch(`/agents/${CEO_ID}`);
+    return ceo?.metadata?.selfGoverning ?? null;
+  } catch { return null; }
+}
+
+function formatRemaining(expiresAt) {
+  const ms = Math.max(0, new Date(expiresAt).getTime() - Date.now());
+  if (ms <= 0) return "Expired";
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+let adminPanelMessage = null;
+
 async function sendAdminPanel() {
   if (!adminChannel) return;
   const { agents, running, paused, idle } = await getAgentStatuses();
   const allPaused = agents.every(a => a.status === "paused");
+  const sg = await getCeoSelfGovData();
+  const sgActive = sg?.expiresAt && new Date(sg.expiresAt).getTime() > Date.now();
 
   const embed = new EmbedBuilder()
     .setColor(allPaused ? 0xef4444 : 0x22c55e)
@@ -346,10 +390,10 @@ async function sendAdminPanel() {
       { name: "Idle", value: `${idle.length}`, inline: true },
       { name: "Paused", value: `${paused.length}`, inline: true },
     )
-    .setFooter({ text: "Type STOP to pause all • START to resume all • STATUS to refresh" })
+    .setFooter({ text: "STOP · START · STATUS · GOVERN <hours> <goal>" })
     .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
+  const agentRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("admin:pause_all")
       .setLabel("⏸ Pause All")
@@ -360,11 +404,94 @@ async function sendAdminPanel() {
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId("admin:status")
-      .setLabel("🔄 Refresh Status")
+      .setLabel("🔄 Refresh")
       .setStyle(ButtonStyle.Secondary),
   );
 
-  await adminChannel.send({ embeds: [embed], components: [row] });
+  const embeds = [embed];
+  const components = [agentRow];
+
+  // Self-Governing panel
+  const sgEmbed = new EmbedBuilder()
+    .setColor(sgActive ? 0x10b981 : 0x6b7280)
+    .setTitle("👑 Self-Governing Mode");
+
+  if (sgActive) {
+    let desc = `**Status:** Active\n**Time remaining:** ${formatRemaining(sg.expiresAt)}`;
+    if (sg.condition) desc += `\n**Goal:** ${sg.condition}`;
+    sgEmbed.setDescription(desc);
+  } else {
+    sgEmbed.setDescription("**Status:** Inactive\n\nUse the buttons below or type:\n`GOVERN 6 Complete M2 milestone`");
+  }
+
+  const sgRow = new ActionRowBuilder();
+  if (sgActive) {
+    sgRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId("sg:stop")
+        .setLabel("⏹ Stop Self-Governing")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("sg:refresh")
+        .setLabel("🔄 Refresh")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  } else {
+    sgRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId("sg:start_modal")
+        .setLabel("👑 Start Self-Governing")
+        .setStyle(ButtonStyle.Success),
+    );
+  }
+
+  embeds.push(sgEmbed);
+  components.push(sgRow);
+
+  const payload = { embeds, components };
+
+  if (adminPanelMessage) {
+    try {
+      await adminPanelMessage.edit(payload);
+      return;
+    } catch {
+      adminPanelMessage = null;
+    }
+  }
+
+  adminPanelMessage = await adminChannel.send(payload);
+}
+
+function startSgWatcher() {
+  if (sgWatchInterval) return;
+  lastKnownSgActive = true;
+  sgWatchInterval = setInterval(async () => {
+    const sg = await getCeoSelfGovData();
+    const isActive = sg?.expiresAt && new Date(sg.expiresAt).getTime() > Date.now();
+
+    if (lastKnownSgActive && !isActive) {
+      lastKnownSgActive = false;
+      clearInterval(sgWatchInterval);
+      sgWatchInterval = null;
+
+      if (adminChannel) {
+        const expired = sg?.expiresAt && new Date(sg.expiresAt).getTime() <= Date.now();
+        const reason = expired ? "Timer expired" : "Goal condition met";
+        await adminChannel.send(
+          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}`
+        );
+        await sendAdminPanel();
+      }
+    }
+  }, 30_000);
+}
+
+function stopSgWatcher() {
+  if (sgWatchInterval) {
+    clearInterval(sgWatchInterval);
+    sgWatchInterval = null;
+  }
+  lastKnownSgActive = false;
 }
 
 async function pauseAllAgents(triggeredBy) {
@@ -408,12 +535,55 @@ async function resumeAllAgents(triggeredBy) {
   return count;
 }
 
+async function startSelfGoverning(hours, condition, triggeredBy) {
+  try {
+    const ceo = await apiFetch(`/agents/${CEO_ID}`);
+    const meta = ceo.metadata || {};
+    const sgPayload = { expiresAt: new Date(Date.now() + hours * 3600000).toISOString() };
+    if (condition?.trim()) sgPayload.condition = condition.trim();
+    meta.selfGoverning = sgPayload;
+
+    await fetch(`${API_URL}/api/agents/${CEO_ID}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata: meta }),
+    });
+    console.log(`[sg] Started: ${hours}h, condition="${condition || "none"}", by ${triggeredBy}`);
+    startSgWatcher();
+    return sgPayload;
+  } catch (err) {
+    console.error("[sg] Failed to start:", err.message);
+    return null;
+  }
+}
+
+async function stopSelfGoverning(triggeredBy) {
+  try {
+    const ceo = await apiFetch(`/agents/${CEO_ID}`);
+    const meta = ceo.metadata || {};
+    delete meta.selfGoverning;
+
+    await fetch(`${API_URL}/api/agents/${CEO_ID}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata: meta }),
+    });
+    console.log(`[sg] Stopped by ${triggeredBy}`);
+    stopSgWatcher();
+    return true;
+  } catch (err) {
+    console.error("[sg] Failed to stop:", err.message);
+    return false;
+  }
+}
+
 // Text commands in admin channel
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
   if (message.channelId !== ADMIN_CHANNEL_ID) return;
 
-  const cmd = message.content.trim().toUpperCase();
+  const text = message.content.trim();
+  const cmd = text.toUpperCase();
 
   if (cmd === "STOP") {
     const count = await pauseAllAgents(message.author.tag);
@@ -425,15 +595,107 @@ client.on(Events.MessageCreate, async (message) => {
     await sendAdminPanel();
   } else if (cmd === "STATUS") {
     await sendAdminPanel();
+  } else if (cmd.startsWith("GOVERN")) {
+    // GOVERN <hours> <optional goal text>
+    const parts = text.slice(6).trim();
+    const match = parts.match(/^(\d+)\s*(.*)?$/);
+    if (!match) {
+      await message.reply("Usage: `GOVERN <hours> <optional goal>`\nExample: `GOVERN 6 Complete M2 milestone`");
+      return;
+    }
+    const hours = parseInt(match[1], 10);
+    const condition = match[2]?.trim() || null;
+    const result = await startSelfGoverning(hours, condition, message.author.tag);
+    if (result) {
+      let reply = `👑 Self-Governing started for **${hours}h** (until ${new Date(result.expiresAt).toLocaleTimeString()})`;
+      if (condition) reply += `\n**Goal:** ${condition}`;
+      await message.reply(reply);
+    } else {
+      await message.reply("Failed to start self-governing mode.");
+    }
+    await sendAdminPanel();
+  } else if (cmd === "STOPGOV" || cmd === "STOP GOV" || cmd === "STOP GOVERN") {
+    const ok = await stopSelfGoverning(message.author.tag);
+    await message.reply(ok ? "⏹ Self-Governing mode stopped." : "Failed to stop self-governing.");
+    await sendAdminPanel();
   }
 });
 
-// Admin button interactions
+// Admin + Self-Governing button interactions
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (!interaction.customId.startsWith("admin:")) return;
+  // Modal submission (self-governing goal form)
+  if (interaction.isModalSubmit() && interaction.customId === "sg:modal_submit") {
+    const hours = parseInt(interaction.fields.getTextInputValue("sg_hours"), 10) || 6;
+    const condition = interaction.fields.getTextInputValue("sg_condition")?.trim() || null;
+    await interaction.deferUpdate();
+    const result = await startSelfGoverning(hours, condition, interaction.user.tag);
+    if (result) {
+      let reply = `👑 Self-Governing started for **${hours}h**`;
+      if (condition) reply += ` — Goal: ${condition}`;
+      await interaction.followUp({ content: reply, ephemeral: true });
+    } else {
+      await interaction.followUp({ content: "Failed to start.", ephemeral: true });
+    }
+    await sendAdminPanel();
+    return;
+  }
 
-  const action = interaction.customId.split(":")[1];
+  if (!interaction.isButton()) return;
+
+  const id = interaction.customId;
+
+  // Self-governing buttons
+  if (id === "sg:start_modal") {
+    const modal = new ModalBuilder()
+      .setCustomId("sg:modal_submit")
+      .setTitle("Start Self-Governing Mode");
+
+    const hoursInput = new TextInputBuilder()
+      .setCustomId("sg_hours")
+      .setLabel("Max hours (safety limit)")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("6")
+      .setValue("6")
+      .setRequired(true)
+      .setMaxLength(3);
+
+    const conditionInput = new TextInputBuilder()
+      .setCustomId("sg_condition")
+      .setLabel("Goal / stop condition (optional)")
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder("e.g. CEO is highly confident M2 is complete")
+      .setRequired(false)
+      .setMaxLength(500);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(hoursInput),
+      new ActionRowBuilder().addComponents(conditionInput),
+    );
+
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (id === "sg:stop") {
+    await interaction.deferUpdate();
+    const ok = await stopSelfGoverning(interaction.user.tag);
+    await interaction.followUp({
+      content: ok ? "⏹ Self-Governing stopped." : "Failed to stop.",
+      ephemeral: true,
+    });
+    await sendAdminPanel();
+    return;
+  }
+
+  if (id === "sg:refresh") {
+    await interaction.deferUpdate();
+    await sendAdminPanel();
+    return;
+  }
+
+  // Admin agent buttons
+  if (!id.startsWith("admin:")) return;
+  const action = id.split(":")[1];
   await interaction.deferUpdate();
 
   if (action === "pause_all") {
@@ -453,11 +715,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // WebSocket connection to Paperclip live events
 // ---------------------------------------------------------------------------
 
+const recentEventIds = new Map();
+const DEDUP_TTL_MS = 30_000;
+
+function isDuplicate(entityId, action) {
+  const key = `${action}:${entityId}`;
+  const now = Date.now();
+  if (recentEventIds.has(key) && now - recentEventIds.get(key) < DEDUP_TTL_MS) return true;
+  recentEventIds.set(key, now);
+  if (recentEventIds.size > 500) {
+    for (const [k, t] of recentEventIds) {
+      if (now - t > DEDUP_TTL_MS) recentEventIds.delete(k);
+    }
+  }
+  return false;
+}
+
+let activeWs = null;
+
 function connectWebSocket() {
+  if (activeWs) {
+    try { activeWs.removeAllListeners(); activeWs.close(); } catch {}
+    activeWs = null;
+  }
+
   const wsUrl = API_URL.replace(/^http/, "ws") + `/api/companies/${COMPANY_ID}/events/ws`;
   console.log(`[ws] Connecting to ${wsUrl}`);
 
   const ws = new WebSocket(wsUrl);
+  activeWs = ws;
   let reconnectDelay = 2000;
 
   ws.on("open", () => {
@@ -476,7 +762,10 @@ function connectWebSocket() {
     if (event.type !== "activity.logged") return;
 
     const action = event.payload?.action;
-    if (!action) return;
+    const entityId = event.payload?.entityId;
+    if (!action || !entityId) return;
+
+    if (isDuplicate(entityId, action)) return;
 
     await refreshCaches();
 
@@ -499,6 +788,7 @@ function connectWebSocket() {
 
   ws.on("close", (code, reason) => {
     console.log(`[ws] Disconnected (${code}). Reconnecting in ${reconnectDelay / 1000}s...`);
+    activeWs = null;
     setTimeout(connectWebSocket, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 60000);
   });

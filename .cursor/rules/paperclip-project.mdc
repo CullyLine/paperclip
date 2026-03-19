@@ -50,6 +50,16 @@ pnpm dev
 
 Leave `DATABASE_URL` unset for local dev — an embedded PGlite database is auto-created at `~/.paperclip/instances/default/db`.
 
+### Pre-flight: kill orphaned postgres
+
+Before starting Paperclip, always kill any orphaned embedded postgres processes. Stale postgres locks will prevent the server from starting.
+
+```powershell
+Get-Process -Name "postgres" -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+Run this **every time** before `pnpm dev` or `pnpm dev:once`.
+
 ### Key commands
 ```sh
 pnpm dev              # API + UI, watch mode

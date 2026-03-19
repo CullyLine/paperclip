@@ -143,6 +143,7 @@ TemplateVehicle (Model, PrimaryPart = Chassis)
 | `DownhillConfig.luau` | **Active** | Flat tuning table for the chassis — suspension, steering, drive force, traction, surface friction, aero, air control, gravity, damage thresholds |
 | `DownhillPhysics.luau` | **Active** | Pure computation functions — suspension spring-damper, anti-roll, lateral grip (tire model), steering, airborne torques, downforce, drag, angular damping |
 | `DamageSystem.luau` | **Active** | Shared damage calculations — impact damage from velocity, nearest-panel lookup, health tracking, damage tint, wrecked state detection, handling penalty computation, server-side validation |
+| `ProgressionSystem.luau` | **Active** | XP calculation (placement, distance, destruction, clean driving, style points), Scrap earning tables, level-up rewards, daily login rewards, vehicle unlock checks, trick detection thresholds |
 | `ChassisConfig.luau` | ⚠️ Deprecated | Original Polaris-based tuning config. Not used — kept as reference |
 | `ChassisPhysics.luau` | ⚠️ Deprecated | Original Polaris physics functions. Not used — kept as reference |
 | `Drivetrain.luau` | ⚠️ Deprecated | Original gear shifting / RPM simulation. Not used — flat force model replaced it |
@@ -184,8 +185,82 @@ The `InputManager` supports configurable mobile controls via the `settings` tabl
 
 Settings are loaded from the server via `GetInputSettings` RemoteFunction when driving starts, and saved via `SetInputSettings`.
 
+## Progression System
+
+### XP Earning (per race)
+
+| Source | Amount |
+|--------|--------|
+| Race Finish | 50 XP base |
+| 1st Place | +100 XP |
+| 2nd Place | +60 XP |
+| 3rd Place | +30 XP |
+| Distance Traveled | 1 XP per 100 studs |
+| Destruction (panels) | 5 XP per panel knocked off opponents |
+| Clean Driving | +25 XP (no panel damage taken) |
+| Style Points | 5 XP per trick (airtime >1.5s, drift >2s, near-miss <5 studs) |
+
+### XP-to-Level Curve
+
+`XP_required(level) = 100 + (level - 1) * 50`
+
+Level-up grants Scrap bonus: `50 + (newLevel - 1) * 25` Scrap.
+
+### Scrap (Currency)
+
+Earned per race by placement:
+- 1st: 100, 2nd: 75, 3rd: 50, 4th-6th: 30, DNF: 15
+
+### Vehicle Unlock Gating
+
+Vehicles require BOTH level AND Scrap cost:
+- **Nomad** (all_rounder): Level 0, 0 Scrap (free starter)
+- **Viper** (speedster): Level 5, 500 Scrap
+- **Rhino** (tank): Level 10, 1,200 Scrap
+
+Players can purchase during PreRound vehicle selection once they meet the level requirement.
+
+### Daily Login Rewards
+
+7-day cycle (Scrap): 25, 50, 50, 75, 100, 100, 200. Wraps after Day 7. Processed on PlayerAdded via `ProfileManager.ProcessDailyLogin()`.
+
+### Profile Data Fields
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `scrap` | number | 0 | Earned currency |
+| `xp` | number | 0 | Current XP within level |
+| `level` | number | 1 | Player level |
+| `totalXp` | number | 0 | Lifetime XP earned |
+| `unlockedVehicles` | { string } | { "all_rounder" } | Purchased/unlocked vehicle IDs |
+| `equippedCosmetics` | table | {} | Paint, wheels, trail, plate, horn, wrap |
+| `activeBoosts` | array | {} | { type, racesRemaining } |
+| `dailyLoginDay` | number | 0 | Current day in 7-day cycle |
+| `lastLoginDate` | string | "" | ISO date string for dedup |
+| `gamePasses` | table | {} | Purchased game passes |
+
+### Key Modules
+
+| Module | Location | Purpose |
+|--------|----------|---------|
+| `ProgressionSystem.luau` | DMReplicatedStorage | XP calc, scrap calc, level-up rewards, daily login tables, vehicle unlock checks, trick thresholds |
+| `ProfileManager.server.luau` | DMServerScriptService | Profile persistence, AwardXP, AwardScrap, PurchaseVehicle, ProcessDailyLogin |
+
+### RemoteEvents / RemoteFunctions
+
+| Name | Type | Direction | Purpose |
+|------|------|-----------|---------|
+| `GetProgression` | RemoteFunction | Client→Server | Returns level, xp, xpNeeded, scrap |
+| `PurchaseVehicle` | RemoteFunction | Client→Server | Purchase a vehicle (validates level+scrap) |
+| `XPAward` | RemoteEvent | Server→Client | Post-race XP+Scrap breakdown |
+| `DailyLoginReward` | RemoteEvent | Server→Client | Daily login reward notification |
+
 ## Known Limitations / Future Work
 
 - **Settings UI** — mobile input settings need an in-game settings panel (currently only settable via code/API)
 - **Damage VFX** — particle effects for sparks/smoke on impact not yet implemented
 - **Damage HUD** — no on-screen damage indicator or vehicle health bar yet
+- **Style Points** — airtime/drift/near-miss trick detection runs client-side but is not yet wired to RoundController (tracked as 0 for now; needs client→server reporting)
+- **Boost system** — `activeBoosts` field is stored but boost activation/consumption not yet implemented
+- **Cosmetics** — `equippedCosmetics` field is stored but cosmetic application not yet implemented
+- **Game Passes** — `gamePasses` field is stored but no passes are defined yet
