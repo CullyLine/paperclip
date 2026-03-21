@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
 local InputManager = require(script.Parent:WaitForChild("InputManager"))
+local VFXController = require(script.Parent:WaitForChild("VFXController"))
 
 local DMRep = ReplicatedStorage:WaitForChild("DMReplicatedStorage")
 local DownhillConfig = require(DMRep:WaitForChild("DownhillConfig"))
@@ -72,7 +73,9 @@ local lastDamageTime = 0
 local windshieldShakeTimer = 0
 local windshieldShakeActive = false
 
-local DEBUG_ENABLED = true
+local vfx = VFXController.new()
+
+local DEBUG_ENABLED = false
 local debugTimer = 0
 local DEBUG_INTERVAL = 0.5
 
@@ -539,6 +542,18 @@ local function physicsStep(dt: number)
 		print("=========================")
 	end
 
+	local lateralVel = velocity:Dot(rootCF.RightVector)
+	local slipFrac = math.abs(lateralVel) / math.max(math.abs(forwardSpeed), 1)
+	vfx:update(dt, {
+		root = root,
+		rootCF = rootCF,
+		velocity = velocity,
+		speed = speed,
+		forwardSpeed = forwardSpeed,
+		lateralSlipFraction = slipFrac,
+		effectiveMaxSpeed = effectiveMaxSpeed,
+	})
+
 	-- Position visual wheels using a FRESH CFrame read (after all impulses)
 	updateVisualWheels()
 end
@@ -599,6 +614,8 @@ local function startDriving(vModel: Model)
 	end
 
 	buildWheels()
+
+	vfx:attach(vehicleModel, cfg, wheels)
 
 	if visualWheelFolder then
 		table.insert(rayParams.FilterDescendantsInstances, visualWheelFolder)
@@ -669,6 +686,7 @@ stopDriving = function()
 		panelDetachedConn:Disconnect()
 		panelDetachedConn = nil
 	end
+	vfx:destroy()
 	if input then
 		input:destroy()
 		input = nil
@@ -768,5 +786,19 @@ end
 function ChassisClient.getWindshieldShake(): (boolean, number)
 	return windshieldShakeActive, windshieldShakeTimer
 end
+
+return ChassisClient
+
+return ChassisClient
+
+return ChassisClient
+
+return ChassisClient
+
+return ChassisClient
+
+return ChassisClient
+
+return ChassisClient
 
 return ChassisClient

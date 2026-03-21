@@ -32,6 +32,9 @@ server/src/**/*.d.ts
 server/src/**/*.d.ts.map
 tmp/
 
+# Roblox Studio agent captures (vision); keep scripts/.tmp/ folder
+scripts/.tmp/*.png
+
 # Editor / tool temp files
 *.tmp
 .vscode/
@@ -50,3 +53,7 @@ tests/release-smoke/test-results/
 tests/release-smoke/playwright-report/
 .superset/
 .claude/worktrees/
+
+# Local runtime
+discord-bridge/.bot.pid
+.tmp-pol161-comments.json

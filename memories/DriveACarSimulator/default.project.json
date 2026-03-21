@@ -1,0 +1,39 @@
+{
+  "name": "DriveACarSimulator",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedFirst": {
+      "$className": "ReplicatedFirst",
+      "DACLoadingScreen": {
+        "$path": "DACReplicatedFirst/LoadingScreen.local.luau"
+      }
+    },
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "DAC": {
+        "$path": "DACReplicatedStorage"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "DAC": {
+        "$path": "DACServerScriptService"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "DAC": {
+          "$path": "DACStarterPlayerScripts"
+        }
+      }
+    },
+    "StarterGui": {
+      "$className": "StarterGui",
+      "DAC": {
+        "$path": "DACStarterGui"
+      }
+    }
+  }
+}

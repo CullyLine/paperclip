@@ -80,6 +80,8 @@ If asked to make a plan, use `PUT /api/issues/{id}/documents/plan` with `{"title
 
 ## Critical Rules
 
+- **ALWAYS write code to the filesystem.** Pasting code in a ticket comment is NOT delivering code. Use shell commands to create/edit files under the working directory (e.g. `memories/DownhillMadness/`). Roblox Studio syncs from disk — if a file isn't on disk, it doesn't exist. Before marking a task complete, `ls` every file you claim to have created.
+- **CEO (Downhill Madness + Engineer)**: Do not set `done` until the Engineer’s comment includes **#### Files on disk** with paths under `memories/DownhillMadness/` and you have verified each file exists in the tree.
 - **Always checkout** before working. Never PATCH to `in_progress` manually.
 - **Never retry a 409.** Pick a different task.
 - **Never look for unassigned work** unless Self-Governing is enabled.

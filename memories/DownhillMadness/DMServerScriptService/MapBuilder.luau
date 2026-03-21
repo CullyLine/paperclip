@@ -561,7 +561,7 @@ function MapBuilder.build(biomeId: string?)
 	newMap.Parent = workspace
 	map = newMap
 
-	local rng = Random.new(os.time() + currentBiomeIndex)
+	local rng = Random.new(os.clock() * 1000000 + tick() * 1000 + math.random(1, 999999))
 	local C = biome.palette
 
 	-- 1. ROAD SURFACE

@@ -351,7 +351,7 @@ function buildStatusLines(agents) {
   return agents.map(a => `${icons[a.status] || "⚪"} **${a.name}** — ${a.status}`).join("\n");
 }
 
-const CEO_ID = "d380c57a-a52a-4bd0-b0a3-3eae9c349128";
+const CEO_ID = "3fb10555-e10d-4f07-bf53-ce650210ce0a";
 const OWNER_DISCORD_ID = "165611171016081408";
 let sgWatchInterval = null;
 let lastKnownSgActive = false;
@@ -390,7 +390,7 @@ async function sendAdminPanel() {
       { name: "Idle", value: `${idle.length}`, inline: true },
       { name: "Paused", value: `${paused.length}`, inline: true },
     )
-    .setFooter({ text: "STOP · START · STATUS · GOVERN <hours> <goal>" })
+    .setFooter({ text: "STOP · START · WAKE · STATUS · GOVERN <hours> <goal>" })
     .setTimestamp();
 
   const agentRow = new ActionRowBuilder().addComponents(
@@ -403,12 +403,35 @@ async function sendAdminPanel() {
       .setLabel("▶ Resume All")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId("admin:status")
+      .setCustomId("admin:wake_ceo")
+      .setLabel("⚡ Wake CEO")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin:refresh")
       .setLabel("🔄 Refresh")
       .setStyle(ButtonStyle.Secondary),
   );
 
-  const embeds = [embed];
+  const helpEmbed = new EmbedBuilder()
+    .setColor(0x3b82f6)
+    .setTitle("📖 Quick Reference")
+    .setDescription(
+      "**Buttons**\n" +
+      "⏸ **Pause All** — Pause every active agent\n" +
+      "▶ **Resume All** — Resume all paused agents\n" +
+      "⚡ **Wake CEO** — Trigger the CEO's next heartbeat now\n" +
+      "🔄 **Refresh** — Update statuses & timer\n" +
+      "👑 **Start/Stop Self-Governing** — CEO works autonomously\n\n" +
+      "**Text Commands**\n" +
+      "`STOP` — Pause all agents\n" +
+      "`START` — Resume all agents\n" +
+      "`WAKE` — Trigger CEO heartbeat\n" +
+      "`STATUS` — Refresh the panel\n" +
+      "`GOVERN 6 Complete M2` — Self-govern for 6h with a goal\n" +
+      "`STOPGOV` — Stop self-governing mode"
+    );
+
+  const embeds = [helpEmbed, embed];
   const components = [agentRow];
 
   // Self-Governing panel
@@ -431,10 +454,6 @@ async function sendAdminPanel() {
         .setCustomId("sg:stop")
         .setLabel("⏹ Stop Self-Governing")
         .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId("sg:refresh")
-        .setLabel("🔄 Refresh")
-        .setStyle(ButtonStyle.Secondary),
     );
   } else {
     sgRow.addComponents(
@@ -462,6 +481,44 @@ async function sendAdminPanel() {
   adminPanelMessage = await adminChannel.send(payload);
 }
 
+async function getOpenWorkCount() {
+  try {
+    const issues = await apiFetch(
+      `/companies/${COMPANY_ID}/issues?status=todo,in_progress,in_review,blocked`
+    );
+    return Array.isArray(issues) ? issues.length : 0;
+  } catch { return -1; }
+}
+
+let windDownInterval = null;
+
+function startWindDown(reason) {
+  if (windDownInterval) return;
+  console.log("[sg] Goal met — watching for agents to finish remaining work before pausing");
+
+  windDownInterval = setInterval(async () => {
+    const openWork = await getOpenWorkCount();
+    if (openWork < 0) return;
+
+    if (openWork === 0) {
+      clearInterval(windDownInterval);
+      windDownInterval = null;
+
+      const count = await pauseAllAgents("Self-Governing wind-down");
+      if (adminChannel) {
+        await adminChannel.send(
+          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}\n` +
+          `All work complete — **${count} agent(s) paused** automatically.`
+        );
+        await sendAdminPanel();
+      }
+      console.log(`[sg] All work done, paused ${count} agents`);
+    } else {
+      console.log(`[sg] Wind-down: ${openWork} open issue(s) remaining, waiting...`);
+    }
+  }, 30_000);
+}
+
 function startSgWatcher() {
   if (sgWatchInterval) return;
   lastKnownSgActive = true;
@@ -474,14 +531,18 @@ function startSgWatcher() {
       clearInterval(sgWatchInterval);
       sgWatchInterval = null;
 
+      const expired = sg?.expiresAt && new Date(sg.expiresAt).getTime() <= Date.now();
+      const reason = expired ? "Timer expired" : "Goal condition met";
+
       if (adminChannel) {
-        const expired = sg?.expiresAt && new Date(sg.expiresAt).getTime() <= Date.now();
-        const reason = expired ? "Timer expired" : "Goal condition met";
         await adminChannel.send(
-          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}`
+          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}\n` +
+          `Checking for remaining work before pausing agents...`
         );
         await sendAdminPanel();
       }
+
+      startWindDown(reason);
     }
   }, 30_000);
 }
@@ -490,6 +551,10 @@ function stopSgWatcher() {
   if (sgWatchInterval) {
     clearInterval(sgWatchInterval);
     sgWatchInterval = null;
+  }
+  if (windDownInterval) {
+    clearInterval(windDownInterval);
+    windDownInterval = null;
   }
   lastKnownSgActive = false;
 }
@@ -618,6 +683,24 @@ client.on(Events.MessageCreate, async (message) => {
     const ok = await stopSelfGoverning(message.author.tag);
     await message.reply(ok ? "⏹ Self-Governing mode stopped." : "Failed to stop self-governing.");
     await sendAdminPanel();
+  } else if (cmd === "WAKE" || cmd === "WAKE CEO") {
+    try {
+      const res = await fetch(`${API_URL}/api/agents/${CEO_ID}/wakeup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "manual", triggerDetail: `Discord by ${message.author.tag}` }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        await message.reply(`⚠ Wake failed (${res.status}): ${body.error || "Unknown error"}`);
+      } else if (body.status === "skipped") {
+        await message.reply("⏭ CEO wake was skipped — likely already running or at max concurrent runs.");
+      } else {
+        await message.reply("⚡ CEO heartbeat triggered.");
+      }
+    } catch (err) {
+      await message.reply(`Failed to wake CEO: ${err.message}`);
+    }
   }
 });
 
@@ -687,12 +770,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  if (id === "sg:refresh") {
-    await interaction.deferUpdate();
-    await sendAdminPanel();
-    return;
-  }
-
   // Admin agent buttons
   if (!id.startsWith("admin:")) return;
   const action = id.split(":")[1];
@@ -706,7 +783,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const count = await resumeAllAgents(interaction.user.tag);
     await interaction.followUp({ content: `▶ Resumed ${count} agent(s).`, ephemeral: true });
     await sendAdminPanel();
-  } else if (action === "status") {
+  } else if (action === "wake_ceo") {
+    try {
+      const res = await fetch(`${API_URL}/api/agents/${CEO_ID}/wakeup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "manual", triggerDetail: `Discord by ${interaction.user.tag}` }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        await interaction.followUp({ content: `⚠ Wake failed (${res.status}): ${body.error || "Unknown error"}`, ephemeral: true });
+      } else if (body.status === "skipped") {
+        await interaction.followUp({ content: "⏭ CEO wake was skipped — likely already running or at max concurrent runs.", ephemeral: true });
+      } else {
+        await interaction.followUp({ content: "⚡ CEO heartbeat triggered.", ephemeral: true });
+      }
+    } catch (err) {
+      await interaction.followUp({ content: `Failed to wake CEO: ${err.message}`, ephemeral: true });
+    }
+    await sendAdminPanel();
+  } else if (action === "refresh") {
     await sendAdminPanel();
   }
 });
