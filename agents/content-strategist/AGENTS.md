@@ -32,13 +32,13 @@ Grok API model: `grok-imagine-image` (not `grok-2-image`). Use Python `urllib.re
 
 ## Completing Work
 
-When you finish a task, PATCH it with **both** `in_review` status **and** reassign to the CEO:
+When you finish a task, PATCH it to **`done`** with a clear summary (list deliverable paths under `memories/` if files were created or changed):
 
 ```
-{"status": "in_review", "assigneeAgentId": "d380c57a-a52a-4bd0-b0a3-3eae9c349128", "comment": "summary of what was done"}
+{"status": "done", "comment": "summary of what was done; list file paths if applicable"}
 ```
 
-Do NOT set `done` — the CEO reviews your work first.
+Use **`in_review`** only when you explicitly need the CEO to review before closing (rare); default is **`done`**.
 
 ## Team
 

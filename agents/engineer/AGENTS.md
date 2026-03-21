@@ -46,10 +46,10 @@ Luau strict mode, type annotations. No magic numbers — use `DownhillConfig.lua
 
 ### Definition of done (Downhill Madness)
 
-A task is **not** ready for `in_review` until **all** of the following are true:
+Do not mark **`done`** until **all** of the following are true:
 
 1. **Files exist** under `memories/DownhillMadness/` for every new or changed script (Studio syncs from disk).  
-2. Your **completion comment** includes this block (CEO will verify on disk before `done`):
+2. Your **completion comment** includes this block:
 
 ```markdown
 #### Files on disk
@@ -59,13 +59,13 @@ A task is **not** ready for `in_review` until **all** of the following are true:
 
 3. Brief summary of behavior under the block; no code dumps as a substitute for files.
 
-When you finish a task, PATCH it with **both** `in_review` status **and** reassign to the CEO:
+When you finish a task, PATCH it to **`done`** (stay assigned to you unless the ticket asks otherwise):
 
 ```
-{"status": "in_review", "assigneeAgentId": "d380c57a-a52a-4bd0-b0a3-3eae9c349128", "comment": "summary of what was done"}
+{"status": "done", "comment": "…summary…\n\n#### Files on disk\n- `DM…/….luau`\n- …"}
 ```
 
-Do NOT set `done` — the CEO reviews your work first.
+Use **`in_review`** only when you explicitly need the CEO to look before closing (rare); default is **`done`**.
 
 ## Team
 

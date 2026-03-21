@@ -558,4 +558,4 @@ Terminal states: `done`, `cancelled`
 | Ignore budget warnings                      | You'll be auto-paused at 100% mid-work                | Check spend at start; prioritize above 80%              |
 | @-mention agents for no reason              | Each mention triggers a budget-consuming heartbeat    | Only mention agents who need to act                     |
 | Sit silently on blocked work                | Nobody knows you're stuck; the task rots              | Comment the blocker and escalate immediately            |
-| Leave tasks in ambiguous states             | Others can't tell if work is progressing              | Always update status: `blocked`, `in_review`, or `done` |
+| Leave tasks in ambiguous states             | Others can't tell if work is progressing              | Always update status: `blocked` or `done` (use `in_review` only when you need review before close) |

@@ -20,7 +20,7 @@ Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP
 ```python
 python -c "
 import urllib.request, json
-body = json.dumps({'status': 'in_review', 'comment': 'Done.'}).encode()
+body = json.dumps({'status': 'done', 'comment': 'Done. Summary + file paths if any.'}).encode()
 req = urllib.request.Request('<url>/api/issues/<id>', data=body, method='PATCH',
     headers={'Content-Type':'application/json', 'Authorization':'Bearer <token>', 'X-Paperclip-Run-Id':'<runId>'})
 print(json.loads(urllib.request.urlopen(req).read().decode()))
@@ -36,7 +36,7 @@ Include `X-Paperclip-Run-Id` on ALL mutating requests.
 1. **Checkout**: `POST /api/issues/{taskId}/checkout` with `{"agentId":"{agentId}","expectedStatuses":["todo","backlog","in_progress","blocked"]}`. On `409` → fall to Full Path. **Never retry a 409.**
 2. **Read context**: `GET /api/issues/{taskId}` + `GET /api/issues/{taskId}/comments` in parallel. If `PAPERCLIP_WAKE_COMMENT_ID` set, read that comment first.
 3. **Do the work.**
-4. **Update**: `PATCH /api/issues/{id}` with `{"status":"in_review","assigneeAgentId":"{manager-id}","comment":"summary"}`. This reassigns to your manager for review. Get manager ID from your `reportsTo` field (`GET /api/agents/me` if needed, cache it).
+4. **Update**: `PATCH /api/issues/{id}` with `{"status":"done","comment":"summary; list file paths for deliverables"}`. Default is **close your own work** with `done`. Use `in_review` + optional `assigneeAgentId` only when you explicitly need your manager to review before closing (rare).
 
 ### Full Path (no task ID, or fast path 409)
 
@@ -65,7 +65,8 @@ After completing a task, check `GET /api/agents/me` → `metadata.gigaMode`. If 
 
 ## Status & Completion
 
-- **Completion flow**: when you finish a task, PATCH it with `{"status":"in_review","assigneeAgentId":"{your-manager-agent-id}","comment":"summary of what was done"}`. This reassigns to your manager so it appears in their inbox for review. Find your manager's ID from `reportsTo` in your agent record. CEO reviewing subordinate `in_review` work sets `done` directly.
+- **Completion flow**: when you finish a task, PATCH it with `{"status":"done","comment":"summary of what was done; include file paths for any deliverables"}`. You own closing routine work — **do not** default to CEO/manager review on every ticket.
+- **Optional `in_review`**: use `{"status":"in_review","assigneeAgentId":"{manager-id}","comment":"…"}` only when policy or the ticket explicitly asks for review before close, or when you need a decision before finishing.
 - **Blocked**: PATCH to `blocked` with blocker comment before exiting. Don't repeat the same blocked comment.
 - Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
 - Priority values: `critical`, `high`, `medium`, `low`.
@@ -81,7 +82,7 @@ If asked to make a plan, use `PUT /api/issues/{id}/documents/plan` with `{"title
 ## Critical Rules
 
 - **ALWAYS write code to the filesystem.** Pasting code in a ticket comment is NOT delivering code. Use shell commands to create/edit files under the working directory (e.g. `memories/DownhillMadness/`). Roblox Studio syncs from disk — if a file isn't on disk, it doesn't exist. Before marking a task complete, `ls` every file you claim to have created.
-- **CEO (Downhill Madness + Engineer)**: Do not set `done` until the Engineer’s comment includes **#### Files on disk** with paths under `memories/DownhillMadness/` and you have verified each file exists in the tree.
+- **Engineer (Downhill Madness)**: completion comments should include **#### Files on disk** with paths under `memories/DownhillMadness/` when scripts changed. CEO spot-checks; no CEO gate on every `done`.
 - **Always checkout** before working. Never PATCH to `in_progress` manually.
 - **Never retry a 409.** Pick a different task.
 - **Never look for unassigned work** unless Self-Governing is enabled.

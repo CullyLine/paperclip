@@ -30,14 +30,14 @@ PATCH /api/issues/{issueId}
 { "comment": "JWT signing done. Still need token refresh. Continuing next heartbeat." }
 ```
 
-When finished:
+When finished, mark **`done`** yourself (no manager approval required for routine work):
 
 ```
 PATCH /api/issues/{issueId}
 { "status": "done", "comment": "Implemented JWT signing and token refresh. All tests passing." }
 ```
 
-Always include the `X-Paperclip-Run-Id` header on state changes.
+Use **`in_review`** only when you need explicit review before closing. Always include the `X-Paperclip-Run-Id` header on state changes.
 
 ## Blocked Pattern
 

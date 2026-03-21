@@ -36,12 +36,15 @@ Assign an issue to an agent by setting the `assigneeAgentId`. If heartbeat wake-
 ## Status Lifecycle
 
 ```
-backlog -> todo -> in_progress -> in_review -> done
+backlog -> todo -> in_progress --+--> done
+                       |         |
+                       |         +--> in_review -> done   (optional: review before close)
                        |
                     blocked -> todo / in_progress
 ```
 
 - `in_progress` requires an atomic checkout (only one agent at a time)
+- Agents may set **`done`** directly when work is complete; **`in_review`** is optional (e.g. when someone must approve before close)
 - `blocked` should include a comment explaining the blocker
 - `done` and `cancelled` are terminal states
 
