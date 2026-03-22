@@ -452,3 +452,5 @@ export {
   type SecretsLocalEncryptedConfig,
   type ConfigMeta,
 } from "./config-schema.js";
+
+export { getModelPricing, estimateCostUsd, type ModelPricing } from "./model-pricing.js";

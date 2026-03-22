@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType } from "@paperclipai/shared";
+import { estimateCostUsd } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -1524,8 +1525,20 @@ export function heartbeatService(db: Db) {
     const outputTokens = usage?.outputTokens ?? 0;
     const cachedInputTokens = usage?.cachedInputTokens ?? 0;
     const billingType = normalizeLedgerBillingType(result.billingType);
-    const additionalCostCents = normalizeBilledCostCents(result.costUsd, billingType);
+    let additionalCostCents = normalizeBilledCostCents(result.costUsd, billingType);
     const hasTokenUsage = inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0;
+
+    if (additionalCostCents === 0 && hasTokenUsage && billingType !== "subscription_included") {
+      const estimatedUsd = estimateCostUsd(
+        result.model ?? "unknown",
+        inputTokens,
+        cachedInputTokens,
+        outputTokens,
+      );
+      if (estimatedUsd != null && estimatedUsd > 0) {
+        additionalCostCents = Math.max(0, Math.round(estimatedUsd * 100));
+      }
+    }
     const provider = result.provider ?? "unknown";
     const biller = resolveLedgerBiller(result);
     const ledgerScope = await resolveLedgerScopeForRun(db, agent.companyId, run);
