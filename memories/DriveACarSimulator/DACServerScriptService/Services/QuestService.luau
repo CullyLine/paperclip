@@ -8,6 +8,7 @@ local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("Battle
 local QuestConfig = require(DAC:WaitForChild("Config"):WaitForChild("QuestConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local _battlePassService: any = nil
 local function getBattlePassService()
 	if not _battlePassService then
@@ -152,9 +153,19 @@ local function completeQuest(player: Player, slot: any, def: any)
 	slot.completed = true
 	getBattlePassService().awardXp(player, def.xpReward)
 	Remotes.getEvent("Notification"):FireClient(player, {
-		type = "success",
+		type = "reward_claim",
+		title = "Quest Complete",
+		subtitle = def.title,
 		message = `Quest complete: {def.title} (+{def.xpReward} Season XP)`,
+		items = {
+			{ label = "Season XP", amount = def.xpReward or 0, kind = "xp" },
+		},
 	})
+
+	local pdata = DataManager.get(player)
+	if pdata then
+		MilestoneCeremonyService.tryFirstTime(player, pdata, "FirstQuestCompleted", nil)
+	end
 end
 
 local function bumpProgress(player: Player, slot: any, def: any, add: number)

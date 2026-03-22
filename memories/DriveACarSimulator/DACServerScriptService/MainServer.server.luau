@@ -39,6 +39,7 @@ local ValidationService = require(Services:WaitForChild("ValidationService"))
 local AdminService = require(Services:WaitForChild("AdminService"))
 local VipEffectsService = require(Services:WaitForChild("VipEffectsService"))
 local EasterEggService = require(Services:WaitForChild("EasterEggService"))
+local AchievementService = require(Services:WaitForChild("AchievementService"))
 
 print("[DAC] Server initializing...")
 
@@ -74,6 +75,7 @@ TradeService.init()
 AdminService.init()
 VipEffectsService.init()
 EasterEggService.init()
+AchievementService.init()
 
 -- 4. Wire GetPlayerData so clients can request their data at any time
 Remotes.getFunction("GetPlayerData").OnServerInvoke = function(player)
@@ -91,11 +93,19 @@ Players.PlayerAdded:Connect(function(player)
 
 	local data = DataManager.get(player)
 
+	RebirthService.syncPrestigeAttributes(player)
+
 	GamePassService.checkAllPasses(player)
 	BattlePassService.ensureSeason(player)
 	QuestService.ensureQuests(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+
+	task.defer(function()
+		LeaderboardService.updatePlayer(player)
+	end)
+
+	AchievementService.syncProgressNudges(player)
 
 	EventService.handlePlayerJoin(player)
 	task.defer(TutorialService.handlePlayerJoin, player)
@@ -110,10 +120,15 @@ for _, player in Players:GetPlayers() do
 		local loaded = DataManager.load(player)
 		if loaded then
 			local data = DataManager.get(player)
+			RebirthService.syncPrestigeAttributes(player)
 			GamePassService.checkAllPasses(player)
 			BattlePassService.ensureSeason(player)
 			QuestService.ensureQuests(player)
 			Remotes.getEvent("DataUpdate"):FireClient(player, data)
+			task.defer(function()
+				LeaderboardService.updatePlayer(player)
+			end)
+			AchievementService.syncProgressNudges(player)
 			EventService.handlePlayerJoin(player)
 			task.defer(TutorialService.handlePlayerJoin, player)
 			QuestService.onWorldChanged(player, data.currentWorld)

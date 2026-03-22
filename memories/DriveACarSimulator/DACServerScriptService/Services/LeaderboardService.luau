@@ -8,10 +8,15 @@ local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
 local LeaderboardService = {}
+
+-- Max pages to scan when resolving rank (100 entries per page).
+local MAX_RANK_PAGES = 40
 
 local function titleForUserId(userId: number): string
 	local p = Players:GetPlayerByUserId(userId)
@@ -31,6 +36,108 @@ local BOARDS = {
 
 local UPDATE_INTERVAL = 60
 
+local function computeRankForUser(store, userId: number): number?
+	local success, pages = pcall(function()
+		return store:GetSortedAsync(false, 100)
+	end)
+	if not success or not pages then
+		return nil
+	end
+
+	local rank = 0
+	local pageCount = 0
+	while pageCount < MAX_RANK_PAGES do
+		pageCount += 1
+		local page = pages:GetCurrentPage()
+		for _, entry in page do
+			rank += 1
+			if tonumber(entry.key) == userId then
+				return rank
+			end
+		end
+		if pages.IsFinished then
+			break
+		end
+		local ok = pcall(function()
+			pages:AdvanceToNextPageAsync()
+		end)
+		if not ok then
+			break
+		end
+	end
+	return nil
+end
+
+local function tierForRankChange(oldRank: number, newRank: number): string
+	if newRank == 1 and oldRank ~= 1 then
+		return "champion"
+	end
+	if oldRank > 10 and newRank <= 10 and newRank > 1 then
+		return "top10"
+	end
+	return "rankup"
+end
+
+local function evaluateRankAfterUpdate(player: Player)
+	local data = DataManager.get(player)
+	if not data then
+		return
+	end
+	if type(data.leaderboardRankSnapshot) ~= "table" then
+		data.leaderboardRankSnapshot = {
+			totalDistance = nil,
+			totalRebirths = nil,
+		}
+	end
+	local snap = data.leaderboardRankSnapshot :: any
+
+	for stat, store in BOARDS do
+		local value = data.stats and data.stats[stat]
+		if type(value) ~= "number" or value <= 0 then
+			continue
+		end
+
+		local newRank = computeRankForUser(store, player.UserId)
+		if newRank == nil then
+			continue
+		end
+
+		if newRank == 1 then
+			AchievementService.onLeaderboardRank(player, newRank)
+		end
+
+		local prevAny = snap[stat]
+		local prevRank = if type(prevAny) == "number" then prevAny else nil
+
+		if prevRank == nil then
+			snap[stat] = newRank
+			MilestoneCeremonyService.tryFirstTime(player, data, "FirstLeaderboardEntry", {
+				n = tostring(newRank),
+			})
+			Remotes.getEvent("RankUpNotification"):FireClient(player, {
+				stat = stat,
+				newRank = newRank,
+				oldRank = nil,
+				isFirstPlacement = true,
+				tier = "first_placement",
+			})
+			continue
+		end
+
+		if newRank < prevRank then
+			local tier = tierForRankChange(prevRank, newRank)
+			Remotes.getEvent("RankUpNotification"):FireClient(player, {
+				stat = stat,
+				oldRank = prevRank,
+				newRank = newRank,
+				tier = tier,
+			})
+		end
+
+		snap[stat] = newRank
+	end
+end
+
 function LeaderboardService.updatePlayer(player: Player)
 	local data = DataManager.get(player)
 	if not data then return end
@@ -43,6 +150,8 @@ function LeaderboardService.updatePlayer(player: Player)
 			end)
 		end
 	end
+
+	evaluateRankAfterUpdate(player)
 end
 
 function LeaderboardService.getTop(stat: string, count: number?): { { userId: number, value: number, name: string } }

@@ -7,6 +7,7 @@ local Remotes = require(DAC:WaitForChild("Remotes"))
 local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("BattlePassConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
+local EggConfig = require(DAC:WaitForChild("Config"):WaitForChild("EggConfig"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Constants = require(DAC:WaitForChild("Constants"))
 
@@ -191,6 +192,76 @@ local function grantReward(player: Player, reward: any): (boolean, string?)
 	return true, nil
 end
 
+local function appendRewardItems(reward: any, out: { any })
+	if not reward or reward.type == nil or reward.type == "none" then
+		return
+	end
+	local t = reward.type
+	if t == "bundle" then
+		local items = (reward :: any).items
+		if type(items) == "table" then
+			for _, sub in items do
+				appendRewardItems(sub, out)
+			end
+		end
+		return
+	end
+	if t == "coins" or t == "gems" or t == "crystals" or t == "skulls" then
+		local amt = reward.amount or 0
+		local name = t:sub(1, 1):upper() .. t:sub(2)
+		table.insert(out, { label = name, amount = amt, kind = t })
+		return
+	end
+	if t == "pet_egg" then
+		local eggId = reward.eggId
+		local eggName = (type(eggId) == "string" and EggConfig.Eggs[eggId]) and EggConfig.Eggs[eggId].name or tostring(eggId)
+		table.insert(out, { label = eggName .. " Egg", amount = math.max(1, reward.amount or 1), kind = "egg" })
+		return
+	end
+	if t == "exclusive_car" or t == "car_skin" then
+		local carId = reward.carId
+		local carName = (type(carId) == "string" and CarConfig.Cars[carId]) and CarConfig.Cars[carId].name or tostring(carId)
+		table.insert(out, { label = carName, kind = "car" })
+		return
+	end
+	if t == "exclusive_pet" or t == "pet" then
+		local petId = reward.petId
+		local petName = (type(petId) == "string" and PetConfig.Pets[petId]) and PetConfig.Pets[petId].name or tostring(petId)
+		table.insert(out, { label = petName .. " Pet", kind = "pet" })
+		return
+	end
+	if t == "cosmetic" then
+		local cid = reward.cosmeticId
+		table.insert(out, {
+			label = if type(cid) == "string" then `Cosmetic: {cid}` else "Cosmetic",
+			kind = "cosmetic",
+		})
+		return
+	end
+	if t == "speed_boost" then
+		table.insert(out, { label = "Speed Boost", amount = math.max(1, reward.amount or 1), kind = "consumable" })
+		return
+	end
+	if t == "luck_boost" then
+		table.insert(out, { label = "Luck Boost", amount = math.max(1, reward.amount or 1), kind = "consumable" })
+		return
+	end
+	if t == "title" then
+		local tid = reward.titleId
+		table.insert(out, {
+			label = if type(tid) == "string" then `Title: {tid}` else "Title",
+			kind = "title",
+		})
+		return
+	end
+end
+
+local function rewardToItems(reward: any): { any }
+	local out: { any } = {}
+	appendRewardItems(reward, out)
+	return out
+end
+
 local function canClaimTier(playerXp: number, tier: number): boolean
 	if tier < 1 or tier > BattlePassConfig.TIER_COUNT then
 		return false
@@ -248,6 +319,17 @@ function BattlePassService.claimTier(player: Player, tier: number, track: string
 	DataManager.save(player)
 	syncData(player)
 	EventService.syncPlayerTitleAttribute(player)
+
+	local rewardRow = if track == "free" then row.freeReward else row.premiumReward
+	local items = rewardToItems(rewardRow)
+	Remotes.getEvent("Notification"):FireClient(player, {
+		type = "reward_claim",
+		title = "Battle Pass",
+		subtitle = `Tier {tier} ({track})`,
+		message = `Tier {tier} claimed`,
+		items = items,
+	})
+
 	return true, nil
 end
 

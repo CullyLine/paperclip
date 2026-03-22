@@ -442,7 +442,13 @@ function EasterEggService.init()
 		)
 	end
 	if #skippedNoWorld > 0 then
-		warn(`[EasterEggService] Missing world models: {table.concat(skippedNoWorld, ", ")}`)
+		-- Common in Studio before world models are placed; keep log level low.
+		local msg = `[EasterEggService] Missing world models: {table.concat(skippedNoWorld, ", ")}`
+		if RunService:IsStudio() then
+			print(msg .. " (ok until Workspace.Worlds is populated)")
+		else
+			warn(msg)
+		end
 	end
 
 	RunService.Heartbeat:Connect(function(dt)

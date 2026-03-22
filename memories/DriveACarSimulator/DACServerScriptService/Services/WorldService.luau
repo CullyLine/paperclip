@@ -6,6 +6,7 @@ local Remotes = require(DAC:WaitForChild("Remotes"))
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
@@ -42,7 +43,20 @@ function WorldService.unlockWorld(player: Player, worldId: string): (boolean, st
 		end
 	end
 
+	local unlockedBefore = 0
+	for _ in data.unlockedWorlds do
+		unlockedBefore += 1
+	end
+
 	data.unlockedWorlds[worldId] = true
+
+	MilestoneCeremonyService.tryWorldMasteryForUnlock(player, data, worldId)
+
+	if unlockedBefore == 1 and worldId ~= Constants.STARTING_WORLD then
+		local wname = world.name or worldId
+		MilestoneCeremonyService.tryFirstTime(player, data, "FirstWorldUnlocked", { WorldName = wname })
+	end
+
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	return true, nil
 end
@@ -69,7 +83,16 @@ function WorldService.skipWorldUnlock(player: Player): (boolean, string?)
 	local sortedWorlds = WorldConfig.getWorldsSorted()
 	for _, world in sortedWorlds do
 		if not data.unlockedWorlds[world.id] then
+			local unlockedBefore = 0
+			for _ in data.unlockedWorlds do
+				unlockedBefore += 1
+			end
 			data.unlockedWorlds[world.id] = true
+			MilestoneCeremonyService.tryWorldMasteryForUnlock(player, data, world.id)
+			if unlockedBefore == 1 and world.id ~= Constants.STARTING_WORLD then
+				local wname = world.name or world.id
+				MilestoneCeremonyService.tryFirstTime(player, data, "FirstWorldUnlocked", { WorldName = wname })
+			end
 			Remotes.getEvent("DataUpdate"):FireClient(player, data)
 			return true, nil
 		end

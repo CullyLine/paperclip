@@ -23,17 +23,15 @@ local PetService = require(script.Parent:WaitForChild("PetService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local BattlePassService = require(script.Parent:WaitForChild("BattlePassService"))
 local QuestService = require(script.Parent:WaitForChild("QuestService"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local EventService = require(script.Parent:WaitForChild("EventService"))
 local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
 local DACRunService = {}
 
-local function utcDateString(): string
-	local t = os.date("!*t", os.time())
-	return string.format("%04d-%02d-%02d", t.year, t.month, t.day)
-end
-
+-- Declared before any function uses it (avoids nil activeRuns during circular requires).
 type ActiveRun = {
 	player: Player,
 	carId: string,
@@ -46,9 +44,72 @@ type ActiveRun = {
 	speed: number,
 	power: number,
 	highwayLength: number,
+	nearMissChain: number?,
+	nearMissChainAt: number?,
+	nearMissLastClaim: number?,
+	nearMissCoinsThisRun: number?,
+	lapStartClock: number,
 }
 
 local activeRuns: { [number]: ActiveRun } = {}
+
+local function nearMissComboMultiplier(streak: number): number
+	if streak >= 5 then
+		return 2.0
+	elseif streak == 4 then
+		return 1.75
+	elseif streak == 3 then
+		return 1.5
+	elseif streak == 2 then
+		return 1.25
+	end
+	return 1.0
+end
+
+function DACRunService.claimNearMiss(player: Player)
+	local run = activeRuns[player.UserId]
+	if not run then
+		return
+	end
+	local now = os.clock()
+	local lastClaim = run.nearMissLastClaim or 0
+	if now - lastClaim < Constants.NEAR_MISS_CLAIM_MIN_INTERVAL then
+		return
+	end
+	run.nearMissLastClaim = now
+
+	local chainAt = run.nearMissChainAt or 0
+	local chain = run.nearMissChain or 0
+	if now - chainAt > Constants.NEAR_MISS_CHAIN_RESET_SEC then
+		chain = 1
+	else
+		chain += 1
+	end
+	run.nearMissChain = chain
+	run.nearMissChainAt = now
+
+	local mult = nearMissComboMultiplier(chain)
+	local raw = math.floor(Constants.NEAR_MISS_BASE_COINS * mult + 0.5)
+	local spent = run.nearMissCoinsThisRun or 0
+	local capLeft = Constants.NEAR_MISS_MAX_COINS_PER_RUN - spent
+	if capLeft <= 0 then
+		return
+	end
+	local grant = math.min(raw, capLeft)
+	run.nearMissCoinsThisRun = spent + grant
+
+	CurrencyService.add(player, "coins", grant, "near_miss")
+	Remotes.getEvent("NearMissClaim"):FireClient(player, {
+		amount = grant,
+		streak = chain,
+		multiplier = mult,
+	})
+end
+
+local function utcDateString(): string
+	local t = os.date("!*t", os.time())
+	return string.format("%04d-%02d-%02d", t.year, t.month, t.day)
+end
 
 -- Car model spawning/despawning
 
@@ -135,6 +196,11 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 	local stats = CarService.getEffectiveStats(player, carId)
 	if not stats then return false, "No car equipped" end
 
+	local gas = stats.gas
+	if type(gas) == "number" and gas < 1e9 and gas <= 0 then
+		return false, "No fuel"
+	end
+
 	local world = WorldConfig.Worlds[data.currentWorld]
 	if not world then return false, "Invalid world" end
 
@@ -150,6 +216,11 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 		speed = stats.speed,
 		power = stats.power,
 		highwayLength = world.highwayLength,
+		nearMissChain = 0,
+		nearMissChainAt = 0,
+		nearMissLastClaim = 0,
+		nearMissCoinsThisRun = 0,
+		lapStartClock = os.clock(),
 	}
 
 	if not spawnCarForPlayer(player, carId) then
@@ -158,11 +229,15 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 		return false, "No car model '" .. tostring(tmpl) .. "' in ServerStorage.CarModels"
 	end
 
+	local today = utcDateString()
+	local isFirstRunOfDay = data.lastRunOfDayDate ~= today
+
 	Remotes.getEvent("StartRun"):FireClient(player, {
 		carId = carId,
 		stats = stats,
 		worldId = data.currentWorld,
 		highwayLength = world.highwayLength,
+		isFirstRunOfDay = isFirstRunOfDay,
 	})
 
 	TutorialService.onStartRun(player)
@@ -196,11 +271,33 @@ function DACRunService.tick(dt: number)
 			run.laps += 1
 			run.currentLapDistance = run.currentLapDistance - run.highwayLength
 
+			local nowClock = os.clock()
+			local lapTimeSeconds = math.max(0, nowClock - run.lapStartClock)
+			run.lapStartClock = nowClock
+
+			local isPersonalBest = false
+			local data = DataManager.get(run.player)
+			if data and type(data.stats) == "table" then
+				local statsBlock = data.stats
+				local prevBest = statsBlock.bestLapSeconds
+				if type(prevBest) ~= "number" then
+					isPersonalBest = true
+					statsBlock.bestLapSeconds = lapTimeSeconds
+					DataManager.save(run.player)
+				elseif lapTimeSeconds < prevBest then
+					isPersonalBest = true
+					statsBlock.bestLapSeconds = lapTimeSeconds
+					DataManager.save(run.player)
+				end
+			end
+
 			Remotes.getEvent("RunUpdate"):FireClient(run.player, {
 				type = "lap",
 				laps = run.laps,
 				totalDistance = run.totalDistance,
 				gasRemaining = run.gasRemaining,
+				isPersonalBest = isPersonalBest,
+				lapTimeSeconds = lapTimeSeconds,
 			})
 
 			if
@@ -272,7 +369,24 @@ function DACRunService.endRun(player: Player)
 
 	TutorialService.onRunEnd(player, awardedCoins)
 
+	local battlePassXpEarned = math.max(0, math.floor(run.totalDistance / 100))
+
+	local isPersonalBest = false
+	local statsBlock = data.stats
+	if type(statsBlock) == "table" then
+		if type(statsBlock.bestSingleRun) ~= "number" then
+			statsBlock.bestSingleRun = 0
+		end
+		local prevBest = statsBlock.bestSingleRun
+		isPersonalBest = run.totalDistance > prevBest
+		statsBlock.bestSingleRun = math.max(prevBest, run.totalDistance)
+	end
+
 	BattlePassService.addXP(player, run.totalDistance)
+	local battlePassXpAfter = 0
+	if data.battlePass and type(data.battlePass.xp) == "number" then
+		battlePassXpAfter = data.battlePass.xp
+	end
 	QuestService.onRunEnd(player, {
 		distance = run.totalDistance,
 		laps = run.laps,
@@ -288,6 +402,15 @@ function DACRunService.endRun(player: Player)
 	data.stats.totalDistance += run.totalDistance
 	data.stats.totalLaps += run.laps
 
+	if type(data.stats.totalRunsCompleted) ~= "number" then
+		data.stats.totalRunsCompleted = 0
+	end
+	local prevRuns = data.stats.totalRunsCompleted
+	data.stats.totalRunsCompleted = prevRuns + 1
+	MilestoneCeremonyService.tryTotalRunsMilestones(player, data, prevRuns, data.stats.totalRunsCompleted)
+
+	AchievementService.onRunEnded(player, { worldId = run.worldId, speed = run.speed })
+
 	destroyCarForPlayer(player)
 
 	Remotes.getEvent("EndRun"):FireClient(player, {
@@ -298,6 +421,9 @@ function DACRunService.endRun(player: Player)
 		runOfDayMultiplier = runOfDayMult,
 		runOfDayCelebration = runOfDayMult == 3,
 		founderMultiplier = founderMult,
+		battlePassXpEarned = battlePassXpEarned,
+		battlePassXpAfter = battlePassXpAfter,
+		isPersonalBest = isPersonalBest,
 		breakdown = {
 			base = math.floor(baseCoins),
 			worldMultiplier = coinMultiplier,
@@ -388,10 +514,14 @@ function DACRunService.init()
 		end
 		local success, err = DACRunService.startRun(player)
 		if not success then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			local payload = {
 				type = "error",
 				message = err or "Failed to start run",
-			})
+			}
+			if err == "No fuel" then
+				payload.code = "fuel_empty"
+			end
+			Remotes.getEvent("Notification"):FireClient(player, payload)
 		end
 	end)
 
@@ -403,6 +533,16 @@ function DACRunService.init()
 			return
 		end
 		DACRunService.endRun(player)
+	end)
+
+	Remotes.getEvent("NearMissClaim").OnServerEvent:Connect(function(player)
+		if not ValidationService.checkRemoteRate(player, "NearMissClaim") then
+			return
+		end
+		if not RemoteCooldown.allow(player, "NearMissClaim", Constants.NEAR_MISS_CLAIM_MIN_INTERVAL) then
+			return
+		end
+		DACRunService.claimNearMiss(player)
 	end)
 
 	RobloxRunService.Heartbeat:Connect(function(dt)

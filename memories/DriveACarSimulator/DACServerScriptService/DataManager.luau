@@ -54,6 +54,7 @@ local function getDefaultData()
 			streak = 0,
 			dailyCycle = 1,
 			premiumBoxClaimed = false,
+			lastClaimLostStreak = 0,
 		},
 		redeemedCodes = {},
 		settings = {
@@ -72,6 +73,16 @@ local function getDefaultData()
 			totalRebirths = 0,
 			totalEggsHatched = 0,
 			totalLaps = 0,
+			bestSingleRun = 0,
+			totalRunsCompleted = 0,
+			bestLapSeconds = nil,
+		},
+
+		-- One-shot flags for MilestoneCeremonyCopyConfig-driven celebrations (server)
+		milestoneCopyClaimed = {
+			collection = {} :: { [number]: boolean? },
+			worldMastery = {} :: { [string]: boolean? },
+			totalRuns = {} :: { [number]: boolean? },
 		},
 
 		playtimeSecondsSinceGem = 0,
@@ -84,6 +95,36 @@ local function getDefaultData()
 		discoveredEasterEggs = {} :: { [string]: boolean },
 
 		titles = {},
+
+		-- Last known global leaderboard ranks (lower = better). Used for rank-up fanfare.
+		leaderboardRankSnapshot = {
+			totalDistance = nil,
+			totalRebirths = nil,
+		},
+
+		-- One-shot ceremony flags + cumulative monetization (FirstTimeConfig consumers)
+		firstTimeCeremony = {
+			FirstCarPurchased = false,
+			FirstPetHatched = false,
+			FirstRebirth = false,
+			FirstWorldUnlocked = false,
+			FirstQuestCompleted = false,
+			FirstGamePassPurchase = false,
+			FirstLeaderboardEntry = false,
+		},
+		totalRobuxSpent = 0,
+		spendMilestonesClaimed = {} :: { [number]: boolean },
+		streakMilestonesClaimed = {} :: { [number]: boolean },
+
+		-- Achievements (AchievementService)
+		achievementsUnlocked = {} :: { [string]: boolean },
+		achievementsSeen = {} :: { [string]: boolean },
+		coinsSpentTotal = 0,
+		worldsWithCompletedRun = {} :: { [string]: boolean },
+		achievementMeta = {
+			categoryToastFired = {} :: { [string]: boolean },
+			totalToastFired = false,
+		},
 
 		battlePass = {
 			seasonId = "",

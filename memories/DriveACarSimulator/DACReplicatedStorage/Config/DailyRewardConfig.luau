@@ -10,6 +10,10 @@ export type DayReward = { rewards: { RewardPart } }
 
 local DailyRewardConfig = {}
 
+-- Must match DailyRewardService: streak resets if claim gap exceeds 2× daily cooldown (48h).
+DailyRewardConfig.STREAK_RESET_HOURS = 48
+DailyRewardConfig.STREAK_RESET_SECONDS = Constants.DAILY_REWARD_COOLDOWN * 2
+
 local function formatNumber(n: number): string
 	local s = tostring(n)
 	local pattern = "^(-?%d+)(%d%d%d)"

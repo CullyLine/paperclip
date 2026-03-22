@@ -26,6 +26,8 @@ local ValidationService = {}
 
 local PURCHASE_INTERVAL = 0.5
 local MOVEMENT_INTERVAL = 0.1
+-- Settings sliders can legitimately fire faster than PURCHASE_INTERVAL; keep tighter than spam.
+local SETTINGS_INTERVAL = 0.08
 
 local MOVEMENT_REMOTES: { [string]: boolean } = {
 	StartRun = true,
@@ -78,7 +80,10 @@ function ValidationService.checkRemoteRate(player: Player, remoteName: string): 
 	local uid = player.UserId
 	local now = os.clock()
 	local isMovement = MOVEMENT_REMOTES[remoteName] == true
-	local interval = if isMovement then MOVEMENT_INTERVAL else PURCHASE_INTERVAL
+	local interval = if remoteName == "UpdateSettings"
+		then SETTINGS_INTERVAL
+		elseif isMovement then MOVEMENT_INTERVAL
+		else PURCHASE_INTERVAL
 	local bucket = if isMovement then movementLast else purchaseLast
 	local sub = bucket[uid]
 	if not sub then
@@ -199,6 +204,12 @@ local function onSpeedHeartbeat()
 		local dist = (pos - lastPos).Magnitude
 		local maxSpeed = getMaxSpeedStudsPerSec(player)
 		local maxDist = maxSpeed * 1.5
+		-- Teleport / respawn / large physics snap — reset baseline, do not flag.
+		if dist > 500 then
+			speedSamplePos[uid] = pos
+			speedSampleClock[uid] = now
+			continue
+		end
 		speedSamplePos[uid] = pos
 		speedSampleClock[uid] = now
 
@@ -216,7 +227,7 @@ local function onSpeedHeartbeat()
 				"high",
 				`dist={math.floor(dist)} max={math.floor(maxDist)}`
 			)
-			if #flags >= 3 then
+			if #flags >= 3 and not RunService:IsStudio() then
 				speedFlagTimes[uid] = {}
 				player:Kick("Unexpected movement detected")
 			end

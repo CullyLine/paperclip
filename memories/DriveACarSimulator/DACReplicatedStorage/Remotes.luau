@@ -23,6 +23,7 @@ local REMOTE_EVENTS = {
 	"EquipPet",
 	"UnequipPet",
 	"FusePets",
+	"FusionResult",
 
 	"Rebirth",
 
@@ -45,12 +46,38 @@ local REMOTE_EVENTS = {
 	"CurrencyUpdate",
 	"DataUpdate",
 	"Notification",
+	-- Robux / GamePass purchase confirmed (server → client celebration)
+	"PurchaseCelebration",
+	-- Full post-purchase thank-you overlay (server → client)
+	"PurchaseComplete",
+	-- Thank-you dismissed; server may flush queued SpendMilestone payloads (client → server)
+	"PurchaseThankYouAck",
 	"LaunchEventState",
 
 	"EasterEggDiscovered",
 
+	-- Leaderboard rank improved (server → client VFX)
+	"RankUpNotification",
+
+	-- First-time / spend / streak milestone ceremonies (server → client VFX)
+	"FirstTimeCeremony",
+	"SpendMilestone",
+	"StreakMilestone",
+
+	-- Client reports lane near-miss during a run; server grants combo-scaled coins (server → client echo for VFX)
+	"NearMissClaim",
+
+	-- Server-wide rare+ hatch social proof (server → all clients)
+	"ServerDropFeed",
+
 	"TutorialStep",
 	"TutorialSkip",
+
+	"AchievementUnlocked",
+	"AchievementProgress",
+	"MarkAchievementsSeen",
+
+	"AdminCommand",
 }
 
 local REMOTE_FUNCTIONS = {
@@ -58,6 +85,8 @@ local REMOTE_FUNCTIONS = {
 	"GetLeaderboard",
 	"GetPassFlags",
 	"GetQuests",
+	"GetAchievementData",
+	"AdminAuth",
 }
 
 local remotesFolder: Folder? = nil

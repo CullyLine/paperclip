@@ -33,7 +33,7 @@ function PremiumService.init()
 		premiumPlayers[player.UserId] = player.MembershipType == Enum.MembershipType.Premium
 		if PremiumService.isPremium(player) then
 			Remotes.getEvent("Notification"):FireClient(player, {
-				type = "success",
+				type = "premium_welcome",
 				message = "Welcome to Premium! +50% coin earnings and daily premium gifts!",
 			})
 		end

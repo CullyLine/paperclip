@@ -153,4 +153,12 @@ function PetConfig.listPetIds(): { string }
 	return ids
 end
 
+function PetConfig.getTotalSpeciesCount(): number
+	local n = 0
+	for _ in PetConfig.Pets do
+		n += 1
+	end
+	return n
+end
+
 return PetConfig

@@ -32,6 +32,12 @@ Constants.REMOTE_COOLDOWN_DEFAULT = 0.35
 
 Constants.AUTO_COLLECT_LAPS_BEFORE_BANK = 3
 
+-- Near-miss chain (server must match client lateral debounce; see DrivingController)
+Constants.NEAR_MISS_CHAIN_RESET_SEC = 3.0
+Constants.NEAR_MISS_BASE_COINS = 5
+Constants.NEAR_MISS_CLAIM_MIN_INTERVAL = 0.12
+Constants.NEAR_MISS_MAX_COINS_PER_RUN = 600
+
 Constants.CURRENCY_DISPLAY = {
 	coins = { icon = "rbxassetid://0", color = Color3.fromRGB(255, 200, 50) },
 	gems = { icon = "rbxassetid://0", color = Color3.fromRGB(200, 100, 255) },

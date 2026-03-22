@@ -131,12 +131,15 @@ function PetService.fusePets(player: Player, petUids: { string }): (boolean, str
 
 	-- Validate all pets exist and share a rarity tier
 	local targetRarity: string? = nil
+	local sacrificedNames: { string } = {}
 	for _, uid in petUids do
 		local pet = data.pets[uid]
 		if not pet then return false, "Pet not found" end
 
 		local petDef = PetConfig.Pets[pet.id]
 		if not petDef then return false, "Invalid pet" end
+
+		table.insert(sacrificedNames, petDef.name)
 
 		if not targetRarity then
 			targetRarity = petDef.rarity
@@ -192,9 +195,15 @@ function PetService.fusePets(player: Player, petUids: { string }): (boolean, str
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 
-	Remotes.getEvent("Notification"):FireClient(player, {
-		type = "success",
-		message = `Fused into {chosenDef.name}! Power: {fusedPower}`,
+	Remotes.getEvent("FusionResult"):FireClient(player, {
+		petId = chosenPetId,
+		petName = chosenDef.name,
+		modelName = chosenDef.modelName,
+		rarity = chosenDef.rarity,
+		power = fusedPower,
+		previousPowerTotal = totalPower,
+		sourceRarity = targetRarity,
+		sacrificedNames = sacrificedNames,
 	})
 
 	return true, nil

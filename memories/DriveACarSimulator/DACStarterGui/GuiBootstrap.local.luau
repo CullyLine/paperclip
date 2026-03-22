@@ -74,4 +74,8 @@ safeInit("TutorialOverlay", function()
 	require(parent:WaitForChild("TutorialOverlay")).init()
 end)
 
+safeInit("AdminPanel", function()
+	require(parent:WaitForChild("AdminPanel")).init()
+end)
+
 print("[DAC] GUI initialized (all modules)")

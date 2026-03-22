@@ -5,6 +5,7 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
@@ -31,8 +32,9 @@ function VipEffectsService.init()
 			return props
 		end
 	end)
-	if not ok then
-		print("[VipEffectsService] TextChatService.OnIncomingMessage not available (expected in Studio)")
+	-- In many Studio sessions TextChat hooks are unavailable; avoid noisy output (still safe in live).
+	if not ok and not RunService:IsStudio() then
+		warn("[VipEffectsService] TextChatService.OnIncomingMessage not available")
 	end
 end
 

@@ -1,11 +1,14 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
+local WorldUnlockConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldUnlockConfig"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
+local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 
 local UIHelpers = require(script.Parent:WaitForChild("UIHelpers"))
 local MenuHub = require(script.Parent:WaitForChild("MenuHub"))
@@ -30,6 +33,22 @@ local function highwayLabel(studs: number): string
 	return `{Utils.formatNumber(studs)} studs highway`
 end
 
+local function pickUnlockHeadline(): string
+	local h = WorldUnlockConfig.UnlockHeadlines
+	if type(h) == "table" and #h > 0 then
+		return h[math.random(1, #h)]
+	end
+	return "NEW WORLD UNLOCKED!"
+end
+
+local function pickTravelTeaser(worldId: string): string?
+	local pool = WorldUnlockConfig.TravelTeaser[worldId]
+	if type(pool) == "table" and #pool > 0 then
+		return pool[math.random(1, #pool)]
+	end
+	return nil
+end
+
 function WorldPanel.init()
 	local sg = MenuHub.getScreenGui()
 	local root = UIHelpers.panel(sg, "WorldRoot")
@@ -45,9 +64,33 @@ function WorldPanel.init()
 		currentBadge: TextLabel,
 		action: TextButton,
 		status: TextLabel,
+		row: Frame,
+		lastUnlocked: boolean?,
+		travelPulse: Tween?,
+		actionScale: UIScale?,
+		travelTeaser: TextLabel,
 	}
 
 	local rows: { [string]: RowRefs } = {}
+
+	local function ensureUIScale(gui: GuiObject): UIScale
+		local u = gui:FindFirstChildOfClass("UIScale")
+		if not u then
+			u = Instance.new("UIScale")
+			u.Parent = gui
+		end
+		return u
+	end
+
+	local function clearTravelPulse(refs: RowRefs)
+		if refs.travelPulse then
+			refs.travelPulse:Cancel()
+			refs.travelPulse = nil
+		end
+		if refs.actionScale then
+			refs.actionScale.Scale = 1
+		end
+	end
 
 	local function refresh()
 		local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
@@ -66,6 +109,8 @@ function WorldPanel.init()
 			local here = type(currentWorld) == "string" and currentWorld == worldId
 			local accent = ACCENT[worldId] or Color3.fromRGB(120, 160, 255)
 
+			clearTravelPulse(refs)
+
 			refs.stroke.Color = accent
 			refs.currentBadge.Visible = here
 
@@ -82,6 +127,15 @@ function WorldPanel.init()
 					refs.action.BackgroundColor3 = Color3.fromRGB(70, 120, 220)
 					refs.action.Active = true
 					refs.action.Selectable = true
+					local sc = ensureUIScale(refs.action)
+					refs.actionScale = sc
+					sc.Scale = 1
+					refs.travelPulse = TweenService:Create(
+						sc,
+						TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+						{ Scale = 1.045 }
+					)
+					refs.travelPulse:Play()
 				end
 				if world.unlockCost > 0 then
 					refs.status.Text = "Unlocked"
@@ -103,7 +157,118 @@ function WorldPanel.init()
 					refs.status.Text = `Locked • {Utils.formatNumber(world.unlockCost)} {cur}`
 					refs.status.TextColor3 = curColor
 				end
+				local teaser = pickTravelTeaser(worldId)
+				if teaser then
+					refs.travelTeaser.Text = teaser
+					refs.travelTeaser.Visible = true
+				else
+					refs.travelTeaser.Text = ""
+					refs.travelTeaser.Visible = false
+				end
 			end
+
+			if unlocked then
+				refs.travelTeaser.Text = ""
+				refs.travelTeaser.Visible = false
+			end
+
+			if refs.lastUnlocked == false and unlocked then
+				VFXFacade.milestonePopup(pickUnlockHeadline() .. "|" .. worldId, "world_unlock")
+				local row = refs.row
+				local rowScale = ensureUIScale(row)
+				rowScale.Scale = 1
+				TweenService:Create(
+					rowScale,
+					TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+					{ Scale = 1.1 }
+				):Play()
+				task.delay(0.2, function()
+					if row.Parent then
+						TweenService:Create(
+							rowScale,
+							TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+							{ Scale = 1 }
+						):Play()
+					end
+				end)
+
+				local unlockBanner = Instance.new("TextLabel")
+				unlockBanner.Name = "WorldUnlockBanner"
+				unlockBanner.BackgroundTransparency = 1
+				unlockBanner.Size = UDim2.new(1, -24, 0, 30)
+				unlockBanner.Position = UDim2.new(0, 12, 0, -34)
+				unlockBanner.Font = Enum.Font.GothamBlack
+				unlockBanner.TextSize = 20
+				unlockBanner.TextColor3 = Color3.fromRGB(255, 230, 120)
+				unlockBanner.TextStrokeTransparency = 0.5
+				unlockBanner.TextStrokeColor3 = Color3.fromRGB(60, 30, 0)
+				unlockBanner.Text = pickUnlockHeadline()
+				unlockBanner.ZIndex = 5
+				unlockBanner.Parent = row
+				local ubScale = Instance.new("UIScale")
+				ubScale.Scale = 0.45
+				ubScale.Parent = unlockBanner
+				TweenService:Create(ubScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+				TweenService:Create(
+					unlockBanner,
+					TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ TextTransparency = 1, TextStrokeTransparency = 1 }
+				):Play()
+				task.delay(1.15, function()
+					if unlockBanner.Parent then
+						unlockBanner:Destroy()
+					end
+				end)
+
+				local base = row.BackgroundColor3
+				row.BackgroundColor3 = Color3.fromRGB(120, 220, 160)
+				TweenService:Create(
+					row,
+					TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ BackgroundColor3 = base }
+				):Play()
+				TweenService:Create(
+					refs.stroke,
+					TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ Thickness = 5, Transparency = 0.1 }
+				):Play()
+				task.delay(0.4, function()
+					TweenService:Create(
+						refs.stroke,
+						TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{ Thickness = 2, Transparency = 0.35 }
+					):Play()
+				end)
+
+				clearTravelPulse(refs)
+				if refs.action.Text == "Travel" and refs.action.Active then
+					local sc = ensureUIScale(refs.action)
+					sc.Scale = 1
+					refs.travelPulse = TweenService:Create(
+						sc,
+						TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+						{ Scale = 1.12 }
+					)
+					refs.travelPulse:Play()
+					task.delay(3, function()
+						if not refs.action.Parent then
+							return
+						end
+						clearTravelPulse(refs)
+						local sc2 = ensureUIScale(refs.action)
+						sc2.Scale = 1
+						if refs.action.Text == "Travel" and refs.action.Active then
+							refs.travelPulse = TweenService:Create(
+								sc2,
+								TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+								{ Scale = 1.045 }
+							)
+							refs.travelPulse:Play()
+						end
+					end)
+				end
+			end
+			refs.lastUnlocked = unlocked
 		end
 	end
 
@@ -119,7 +284,7 @@ function WorldPanel.init()
 
 		local row = Instance.new("Frame")
 		row.Name = "World_" .. worldId
-		row.Size = UDim2.new(1, -12, 0, 132)
+		row.Size = UDim2.new(1, -12, 0, 152)
 		row.BackgroundColor3 = Color3.fromRGB(26, 28, 46)
 		row.LayoutOrder = layoutOrder
 		row.Parent = scroll
@@ -174,9 +339,24 @@ function WorldPanel.init()
 		desc.Text = world.description
 		desc.Parent = row
 
+		local travelTeaser = Instance.new("TextLabel")
+		travelTeaser.Name = "TravelTeaser"
+		travelTeaser.Size = UDim2.new(1, -24, 0, 28)
+		travelTeaser.Position = UDim2.new(0, 12, 0, 72)
+		travelTeaser.BackgroundTransparency = 1
+		travelTeaser.Font = Enum.Font.GothamMedium
+		travelTeaser.TextSize = 12
+		travelTeaser.TextXAlignment = Enum.TextXAlignment.Left
+		travelTeaser.TextYAlignment = Enum.TextYAlignment.Top
+		travelTeaser.TextWrapped = true
+		travelTeaser.TextColor3 = Color3.fromRGB(255, 200, 140)
+		travelTeaser.Text = ""
+		travelTeaser.Visible = false
+		travelTeaser.Parent = row
+
 		local stats = Instance.new("TextLabel")
 		stats.Size = UDim2.new(1, -24, 0, 18)
-		stats.Position = UDim2.new(0, 12, 0, 74)
+		stats.Position = UDim2.new(0, 12, 0, 102)
 		stats.BackgroundTransparency = 1
 		stats.Font = Enum.Font.Gotham
 		stats.TextSize = 13
@@ -188,7 +368,7 @@ function WorldPanel.init()
 		local status = Instance.new("TextLabel")
 		status.Name = "Status"
 		status.Size = UDim2.new(0.55, -16, 0, 22)
-		status.Position = UDim2.new(0, 12, 1, -30)
+		status.Position = UDim2.new(0, 12, 1, -32)
 		status.BackgroundTransparency = 1
 		status.Font = Enum.Font.Gotham
 		status.TextSize = 13
@@ -200,7 +380,7 @@ function WorldPanel.init()
 		local action = Instance.new("TextButton")
 		action.Name = "Action"
 		action.Size = UDim2.new(0.38, -8, 0, 36)
-		action.Position = UDim2.new(0.58, 0, 1, -32)
+		action.Position = UDim2.new(0.58, 0, 1, -34)
 		action.Font = Enum.Font.GothamBold
 		action.TextSize = 15
 		action.TextColor3 = Color3.new(1, 1, 1)
@@ -210,7 +390,6 @@ function WorldPanel.init()
 		ac.Parent = action
 
 		action.MouseButton1Click:Connect(function()
-			SoundFacade.playOneShot("click")
 			local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
 			if type(data) ~= "table" or type(data.unlockedWorlds) ~= "table" then
 				return
@@ -221,8 +400,12 @@ function WorldPanel.init()
 				return
 			end
 			if unlocked then
+				SoundFacade.playOneShot("world_travel")
+				local fromW = if type(data.currentWorld) == "string" then data.currentWorld else "grasslands"
+				VFXFacade.worldTransition(fromW, worldId)
 				Remotes.getEvent("ChangeWorld"):FireServer(worldId)
 			else
+				SoundFacade.playOneShot("world_unlock")
 				Remotes.getEvent("UnlockWorld"):FireServer(worldId)
 			end
 		end)
@@ -232,6 +415,11 @@ function WorldPanel.init()
 			currentBadge = badge,
 			action = action,
 			status = status,
+			row = row,
+			lastUnlocked = nil,
+			travelPulse = nil,
+			actionScale = nil,
+			travelTeaser = travelTeaser,
 		}
 	end
 

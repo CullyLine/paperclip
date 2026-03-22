@@ -10,6 +10,7 @@ local Constants = require(DAC:WaitForChild("Constants"))
 local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePassConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
@@ -114,10 +115,39 @@ function GamePassService.onGamePassPurchased(player: Player, gamePassId: number,
 
 			syncVipAttribute(player)
 
+			local pdata = DataManager.get(player)
+			if pdata then
+				MilestoneCeremonyService.tryFirstTime(player, pdata, "FirstGamePassPurchase")
+			end
+
 			Remotes.getEvent("Notification"):FireClient(player, {
 				type = "success",
 				message = `Purchased {passDef.name}!`,
 			})
+
+			local pdataMoney = DataManager.get(player)
+			if pdataMoney then
+				local robuxSpent = math.max(0, math.floor(tonumber(passDef.robuxPrice) or 0))
+				local deferred = MilestoneCeremonyService.recordRobuxSpend(player, pdataMoney, robuxSpent, true)
+				MilestoneCeremonyService.queueDeferredSpendMilestones(player, deferred)
+				local iconId = if type(passDef.iconId) == "string" and passDef.iconId ~= "" then passDef.iconId else "rbxassetid://0"
+				local benefits: { string } = {}
+				if type(passDef.description) == "string" and passDef.description ~= "" then
+					table.insert(benefits, passDef.description)
+				else
+					table.insert(benefits, "Permanent unlock")
+				end
+				Remotes.getEvent("PurchaseComplete"):FireClient(player, {
+					productType = "gamepass",
+					productKey = passId,
+					displayName = tostring(passDef.name),
+					iconId = iconId,
+					benefits = benefits,
+					robuxSpent = robuxSpent,
+					totalRobuxSpent = if type(pdataMoney.totalRobuxSpent) == "number" then pdataMoney.totalRobuxSpent else 0,
+				})
+				DataManager.save(player)
+			end
 			break
 		end
 	end

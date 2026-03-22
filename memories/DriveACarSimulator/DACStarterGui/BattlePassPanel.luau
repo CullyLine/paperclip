@@ -1,6 +1,7 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("BattlePassConfig"))
@@ -8,11 +9,16 @@ local DevProductConfig = require(DAC:WaitForChild("Config"):WaitForChild("DevPro
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
+local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 
 local UIHelpers = require(script.Parent:WaitForChild("UIHelpers"))
 local MenuHub = require(script.Parent:WaitForChild("MenuHub"))
 
 local BattlePassPanel = {}
+
+local bpClaimSeeded = false
+local prevClaimedFree: { [number]: boolean } = {}
+local prevClaimedPremium: { [number]: boolean } = {}
 
 local function describeReward(r: any): string
 	local t = r.type
@@ -106,6 +112,16 @@ function BattlePassPanel.init()
 	barFillCorner.CornerRadius = UDim.new(0, 6)
 	barFillCorner.Parent = barFill
 
+	local barGlowStroke = Instance.new("UIStroke")
+	barGlowStroke.Name = "XpBarGlow"
+	barGlowStroke.Thickness = 2.5
+	barGlowStroke.Transparency = 1
+	barGlowStroke.Color = Color3.fromRGB(255, 230, 120)
+	barGlowStroke.Parent = barFill
+
+	local xpBarTween: Tween? = nil
+	local barGlowTween: Tween? = nil
+
 	local buyPremiumBtn = Instance.new("TextButton")
 	buyPremiumBtn.Name = "BuyPremium"
 	buyPremiumBtn.Size = UDim2.new(1, 0, 0, 40)
@@ -144,10 +160,59 @@ function BattlePassPanel.init()
 			return
 		end
 		local bp = data.battlePass
+
+		if bpClaimSeeded then
+			for tier = 1, BattlePassConfig.TIER_COUNT do
+				local freeClaimed = bp.claimedFree[tier] == true
+				local premClaimed = bp.claimedPremium[tier] == true
+				if freeClaimed and not prevClaimedFree[tier] then
+					local def = BattlePassConfig.Tiers[tier]
+					VFXFacade.battlePassTierUp(tier, false, def and describeReward(def.freeReward) or nil)
+				end
+				if premClaimed and not prevClaimedPremium[tier] then
+					local def = BattlePassConfig.Tiers[tier]
+					VFXFacade.battlePassTierUp(tier, true, def and describeReward(def.premiumReward) or nil)
+				end
+			end
+		end
+		for tier = 1, BattlePassConfig.TIER_COUNT do
+			prevClaimedFree[tier] = bp.claimedFree[tier] == true
+			prevClaimedPremium[tier] = bp.claimedPremium[tier] == true
+		end
+		bpClaimSeeded = true
+
 		local xp = bp.xp or 0
 		local curTier, prog = BattlePassConfig.tierFromXp(xp)
 		summary.Text = `Tier {curTier} / {BattlePassConfig.TIER_COUNT}  •  BP XP: {Utils.formatNumber(xp)}`
-		barFill.Size = UDim2.new(math.clamp(prog, 0, 1), 0, 1, 0)
+		local targetScale = math.clamp(prog, 0, 1)
+		local targetSize = UDim2.new(targetScale, 0, 1, 0)
+		if xpBarTween then
+			xpBarTween:Cancel()
+			xpBarTween = nil
+		end
+		xpBarTween = TweenService:Create(
+			barFill,
+			TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Size = targetSize }
+		)
+		xpBarTween:Play()
+
+		if barGlowTween then
+			barGlowTween:Cancel()
+			barGlowTween = nil
+		end
+		local nearTierUp = prog >= 0.9 and curTier < BattlePassConfig.TIER_COUNT
+		if nearTierUp then
+			barGlowStroke.Transparency = 0.35
+			barGlowTween = TweenService:Create(
+				barGlowStroke,
+				TweenInfo.new(0.55, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ Transparency = 0.92 }
+			)
+			barGlowTween:Play()
+		else
+			barGlowStroke.Transparency = 1
+		end
 
 		local premDef = DevProductConfig.Products.battle_pass_premium
 		if bp.premium then

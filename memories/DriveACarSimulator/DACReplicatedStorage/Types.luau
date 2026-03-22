@@ -112,6 +112,7 @@ export type PlayerSettings = {
 export type DailyRewardData = {
 	lastClaim: number,
 	streak: number,
+	lastClaimLostStreak: number?,
 }
 
 export type PlayerStats = {

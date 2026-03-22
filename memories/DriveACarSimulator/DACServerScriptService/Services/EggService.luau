@@ -9,6 +9,8 @@ local EggConfig = require(DAC:WaitForChild("Config"):WaitForChild("EggConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
@@ -16,6 +18,23 @@ local QuestService = require(script.Parent:WaitForChild("QuestService"))
 local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 
 local EggService = {}
+
+local function countDiscoveredSpecies(map: { [string]: boolean }): number
+	local n = 0
+	for _, v in pairs(map) do
+		if v then
+			n += 1
+		end
+	end
+	return n
+end
+
+local RARE_PLUS_RARITIES: { [string]: boolean } = {
+	rare = true,
+	epic = true,
+	legendary = true,
+	mythic = true,
+}
 
 local function rollDrop(drops: { any }, luckyEggs: boolean, ultraLucky: boolean): any
 	local totalWeight = 0
@@ -90,6 +109,11 @@ function EggService.hatchEgg(player: Player, eggId: string): (boolean, string?, 
 		return false, "No eggs of this type", nil
 	end
 
+	local petCountBefore = 0
+	for _ in data.pets do
+		petCountBefore += 1
+	end
+
 	-- Consume egg
 	data.eggs[eggId] -= 1
 	if data.eggs[eggId] <= 0 then
@@ -115,10 +139,19 @@ function EggService.hatchEgg(player: Player, eggId: string): (boolean, string?, 
 	}
 
 	data.stats.totalEggsHatched += 1
+	local prevIndexCount = countDiscoveredSpecies(data.discoveredPets)
 	data.discoveredPets[drop.petId] = true
+	local newIndexCount = countDiscoveredSpecies(data.discoveredPets)
 
 	QuestService.onEggHatch(player)
 	TutorialService.onHatch(player)
+
+	if petCountBefore == 0 then
+		MilestoneCeremonyService.tryFirstTime(player, data, "FirstPetHatched", { PetName = petDef.name })
+	end
+	MilestoneCeremonyService.tryPetIndexMilestones(player, data, prevIndexCount, newIndexCount)
+
+	AchievementService.onEggHatched(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 
@@ -163,6 +196,14 @@ function EggService.init()
 		local success, err, result = EggService.hatchEgg(player, eggId)
 		if success and result then
 			Remotes.getEvent("HatchEgg"):FireClient(player, result)
+			if type(result.rarity) == "string" and RARE_PLUS_RARITIES[string.lower(result.rarity)] then
+				Remotes.getEvent("ServerDropFeed"):FireAllClients({
+					playerName = player.DisplayName,
+					petName = result.petName,
+					rarity = result.rarity,
+					userId = player.UserId,
+				})
+			end
 		elseif not success then
 			Remotes.getEvent("Notification"):FireClient(player, {
 				type = "error",

@@ -6,6 +6,7 @@ local Remotes = require(DAC:WaitForChild("Remotes"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local EventService = require(script.Parent:WaitForChild("EventService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 
 local CurrencyService = {}
 
@@ -27,6 +28,13 @@ end
 function CurrencyService.spend(player: Player, currency: string, amount: number): boolean
 	local success = DataManager.spendCurrency(player, currency, amount)
 	if success then
+		if currency == "coins" and amount > 0 then
+			local data = DataManager.get(player)
+			if data then
+				data.coinsSpentTotal = (data.coinsSpentTotal or 0) + math.floor(amount)
+				AchievementService.onCoinsSpent(player, data)
+			end
+		end
 		CurrencyService.sync(player)
 	end
 	return success

@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local RunResultsBridge = require(DAC:WaitForChild("RunResultsBridge"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
@@ -16,6 +17,27 @@ local UIController = {}
 
 local player = Players.LocalPlayer
 local playerGui: PlayerGui = player:WaitForChild("PlayerGui") :: PlayerGui
+
+local rewardChestModuleCache: any = nil
+local function getRewardChestAnimation(): any?
+	if rewardChestModuleCache then
+		return rewardChestModuleCache
+	end
+	local dac = playerGui:FindFirstChild("DAC")
+	if not dac then
+		return nil
+	end
+	local m = dac:FindFirstChild("RewardChestAnimation")
+	if not m or not m:IsA("ModuleScript") then
+		return nil
+	end
+	local ok, mod = pcall(require, m)
+	if ok and mod then
+		rewardChestModuleCache = mod
+		return mod
+	end
+	return nil
+end
 
 local screenGui: ScreenGui
 local panels: Frame
@@ -79,11 +101,120 @@ local activePanel: string? = nil
 local activeInvSub: string? = nil
 local activeStoreTab: string? = nil
 
+local OPEN_PANEL_DURATION = 0.2
+local CLOSE_PANEL_DURATION = 0.15
+local OPEN_START_SCALE = 0.9
+local backdrop: Frame? = nil
+
+local function ensureUIScale(gui: GuiObject): UIScale
+	local u = gui:FindFirstChildOfClass("UIScale")
+	if not u then
+		u = Instance.new("UIScale")
+		u.Parent = gui
+	end
+	return u
+end
+
+local function getOrigBackgroundTransparency(frame: Frame): number
+	if frame:GetAttribute("DACOrigBg") == nil then
+		frame:SetAttribute("DACOrigBg", frame.BackgroundTransparency)
+	end
+	return frame:GetAttribute("DACOrigBg") :: number
+end
+
+local function resetPanelTransform(frame: Frame)
+	local u = frame:FindFirstChildOfClass("UIScale")
+	if u then
+		u.Scale = 1
+	end
+	local orig = frame:GetAttribute("DACOrigBg")
+	if orig ~= nil then
+		frame.BackgroundTransparency = orig :: number
+	end
+end
+
+local function ensureBackdrop()
+	if backdrop or not screenGui then
+		return
+	end
+	local f = Instance.new("Frame")
+	f.Name = "PanelBackdrop"
+	f.Size = UDim2.fromScale(1, 1)
+	f.Position = UDim2.new()
+	f.BackgroundColor3 = Color3.new(0, 0, 0)
+	f.BackgroundTransparency = 1
+	f.BorderSizePixel = 0
+	f.ZIndex = 1
+	f.Visible = false
+	f.Parent = screenGui
+	backdrop = f
+	local pf = screenGui:FindFirstChild("Panels")
+	if pf and pf:IsA("GuiObject") then
+		pf.ZIndex = 10
+	end
+end
+
+local function collectVisibleMainPanels(): { Frame }
+	local out: { Frame } = {}
+	for _, name in PANEL_NAMES do
+		local p = panels:FindFirstChild(name)
+		if p and p:IsA("Frame") and p.Visible then
+			table.insert(out, p)
+		end
+	end
+	for _, f in registeredPanels do
+		if f.Visible then
+			table.insert(out, f)
+		end
+	end
+	if popup then
+		for _, n in { "EggBuy", "Confirm" } do
+			local p = popup:FindFirstChild(n)
+			if p and p:IsA("Frame") and p.Visible then
+				table.insert(out, p)
+			end
+		end
+	end
+	return out
+end
+
+local function animatePanelOpen(frame: Frame)
+	local scale = ensureUIScale(frame)
+	local orig = getOrigBackgroundTransparency(frame)
+	frame.BackgroundTransparency = 1
+	scale.Scale = OPEN_START_SCALE
+	TweenService:Create(
+		scale,
+		TweenInfo.new(OPEN_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Scale = 1 }
+	):Play()
+	TweenService:Create(
+		frame,
+		TweenInfo.new(OPEN_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = orig }
+	):Play()
+end
+
 local selectedEggId: string? = nil
 local hoveredPetUid: string? = nil
 
-local toastLabel: TextLabel? = nil
-local toastToken = 0
+local activeToasts: { any } = {}
+local toastIdCounter = 0
+local MAX_TOASTS = 3
+local TOAST_LIFETIME = 3.5
+local TOAST_WIDTH = 320
+local TOAST_GAP = 8
+
+local TOAST_ICONS: { [string]: { text: string, color: Color3 } } = {
+	success = { text = "\xe2\x9c\x93", color = Color3.fromRGB(80, 220, 120) },
+	error = { text = "\xe2\x9c\x97", color = Color3.fromRGB(255, 90, 90) },
+	info = { text = "\xe2\x84\xb9", color = Color3.fromRGB(100, 160, 255) },
+	-- Daily streak nudges (RetentionController)
+	streak_nudge = { text = "\xe2\x9a\xa0", color = Color3.fromRGB(255, 190, 90) },
+	streak_urgent = { text = "\xe2\x9a\xa1", color = Color3.fromRGB(255, 120, 60) },
+	streak_critical = { text = "\xe2\x9c\x97", color = Color3.fromRGB(255, 60, 80) },
+	streak_celebrate = { text = "\xe2\x98\x85", color = Color3.fromRGB(255, 210, 120) },
+}
 
 local function setVisible(parent: Instance, childName: string, visible: boolean)
 	local ch = parent:FindFirstChild(childName)
@@ -113,15 +244,7 @@ function UIController.registerPanel(id: string, frame: Frame)
 	registeredPanels[id] = frame
 end
 
-function UIController.closeAll()
-	for _, name in PANEL_NAMES do
-		setVisible(panels, name, false)
-	end
-	for _, f in registeredPanels do
-		f.Visible = false
-	end
-	activePanel = nil
-
+local function clearInventoryOverlayState()
 	local invPanel = panels:FindFirstChild("Inventory")
 	if invPanel then
 		for _, sub in INV_SUB_PANELS do
@@ -130,35 +253,129 @@ function UIController.closeAll()
 		setVisible(invPanel, "EggOpenPrompt", false)
 		setVisible(invPanel, "PetHoverFrame", false)
 	end
+end
+
+function UIController.closeAllInstant()
+	for _, name in PANEL_NAMES do
+		setVisible(panels, name, false)
+	end
+	for _, f in registeredPanels do
+		f.Visible = false
+		resetPanelTransform(f)
+	end
+	activePanel = nil
+	activeInvSub = nil
+	activeStoreTab = nil
+	clearInventoryOverlayState()
 
 	if popup then
 		setVisible(popup, "EggBuy", false)
 		setVisible(popup, "Confirm", false)
 	end
+	if backdrop then
+		backdrop.Visible = false
+		backdrop.BackgroundTransparency = 1
+	end
+end
+
+function UIController.closeAll(onComplete: (() -> ())?)
+	local toClose = collectVisibleMainPanels()
+
+	local function finishState()
+		activePanel = nil
+		activeInvSub = nil
+		activeStoreTab = nil
+		clearInventoryOverlayState()
+		if popup then
+			setVisible(popup, "EggBuy", false)
+			setVisible(popup, "Confirm", false)
+		end
+		if onComplete then
+			onComplete()
+		end
+	end
+
+	if #toClose == 0 then
+		if backdrop then
+			backdrop.Visible = false
+			backdrop.BackgroundTransparency = 1
+		end
+		finishState()
+		return
+	end
+
+	SoundFacade.playOneShot("panel_close")
+	for _, f in toClose do
+		local scale = ensureUIScale(f)
+		TweenService:Create(
+			scale,
+			TweenInfo.new(CLOSE_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Scale = 0.87 }
+		):Play()
+		TweenService:Create(
+			f,
+			TweenInfo.new(CLOSE_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }
+		):Play()
+	end
+	if backdrop and backdrop.Visible then
+		TweenService:Create(
+			backdrop,
+			TweenInfo.new(CLOSE_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 }
+		):Play()
+	end
+	task.delay(CLOSE_PANEL_DURATION, function()
+		for _, f in toClose do
+			f.Visible = false
+			resetPanelTransform(f)
+		end
+		if backdrop then
+			backdrop.Visible = false
+			backdrop.BackgroundTransparency = 1
+		end
+		finishState()
+	end)
 end
 
 function UIController.openPanel(name: string)
-	UIController.closeAll()
+	UIController.closeAll(function()
+		SoundFacade.playOneShot("panel_open")
+		activePanel = name
 
-	local dacPanel = panels:FindFirstChild(name)
-	if dacPanel and (dacPanel:IsA("Frame") or dacPanel:IsA("ScrollingFrame")) then
-		(dacPanel :: Frame).Visible = true
-	end
+		local dacPanel = panels:FindFirstChild(name)
+		if dacPanel and (dacPanel:IsA("Frame") or dacPanel:IsA("ScrollingFrame")) then
+			local fr = dacPanel :: Frame
+			fr.Visible = true
+			animatePanelOpen(fr)
+		end
 
-	local regPanel = registeredPanels[name]
-	if regPanel then
-		regPanel.Visible = true
-	end
+		local regPanel = registeredPanels[name]
+		if regPanel then
+			regPanel.Visible = true
+			animatePanelOpen(regPanel)
+		end
 
-	activePanel = name
+		if backdrop then
+			backdrop.Visible = true
+			backdrop.BackgroundTransparency = 1
+			TweenService:Create(
+				backdrop,
+				TweenInfo.new(OPEN_PANEL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = 0.52 }
+			):Play()
+		end
 
-	if name == "Inventory" then
-		UIController.showInvSub("Pets")
-	elseif name == "Store" then
-		UIController.showStoreTab("Cars")
-	elseif name == "EggStore" then
-		UIController.refreshEggStoreOrder()
-	end
+		if name == "Inventory" then
+			UIController.showInvSub("Pets")
+		elseif name == "Store" then
+			UIController.showStoreTab("Cars")
+		elseif name == "EggStore" then
+			UIController.refreshEggStoreOrder()
+		elseif name == "Rebirth" then
+			UIController.populateRebirth()
+		end
+	end)
 end
 
 function UIController.togglePanel(name: string)
@@ -209,6 +426,91 @@ function UIController.showStoreTab(tab: string)
 	activeStoreTab = tab
 end
 
+local function getPetModelsFolder(): Folder?
+	local f = ReplicatedStorage:FindFirstChild("PetModels")
+	if f and f:IsA("Folder") then return f end
+	return nil
+end
+
+local function renderPetModelInSlot(slot: GuiObject, modelName: string)
+	local petFolder = getPetModelsFolder()
+	if not petFolder then return end
+	local tpl = petFolder:FindFirstChild(modelName)
+	if not tpl or not tpl:IsA("Model") then return end
+
+	local vf = slot:FindFirstChildOfClass("ViewportFrame")
+	if not vf then
+		vf = Instance.new("ViewportFrame")
+		vf.Name = "PetViewport"
+		vf.Size = UDim2.fromScale(1, 0.75)
+		vf.Position = UDim2.fromScale(0.5, 0.35)
+		vf.AnchorPoint = Vector2.new(0.5, 0.5)
+		vf.BackgroundTransparency = 1
+		vf.Parent = slot
+	end
+	for _, ch in vf:GetChildren() do
+		ch:Destroy()
+	end
+
+	local model = tpl:Clone()
+	model.Parent = vf
+	if not model.PrimaryPart then
+		local p = model:FindFirstChildWhichIsA("BasePart", true)
+		if p and p:IsA("BasePart") then model.PrimaryPart = p end
+	end
+
+	local cam = Instance.new("Camera")
+	cam.Parent = vf
+	vf.CurrentCamera = cam
+
+	if model.PrimaryPart then
+		local cf = model:GetBoundingBox()
+		local _, size = model:GetBoundingBox()
+		local dist = math.max(size.X, size.Y, size.Z) * 1.8 + 2
+		cam.CFrame = CFrame.new(cf.Position + Vector3.new(dist * 0.6, dist * 0.35, dist), cf.Position)
+	end
+end
+
+local function clearSlotVisuals(slot: GuiObject)
+	if slot:IsA("ImageButton") or slot:IsA("ImageLabel") then
+		(slot :: any).Image = ""
+	end
+	slot.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	for _, child in slot:GetChildren() do
+		if child:IsA("TextLabel") then
+			child.Text = ""
+		end
+		if child:IsA("ViewportFrame") then
+			for _, ch in child:GetChildren() do
+				ch:Destroy()
+			end
+		end
+	end
+end
+
+local function updateSlotPowerLabel(slot: GuiObject, power: number)
+	local powerStr = Utils.formatNumber(power)
+	for _, child in slot:GetDescendants() do
+		if child:IsA("TextLabel") then
+			local n = string.lower(child.Name)
+			if n == "power" or n == "powerlabel" or n == "powertext" then
+				child.Text = powerStr
+				return
+			end
+		end
+	end
+	-- Fall back to a TextLabel that looks like it shows a number (template default like "1.08k").
+	for _, child in slot:GetChildren() do
+		if child:IsA("TextLabel") and child.Name ~= "TextLabel" then
+			local txt = child.Text:gsub("[%s,]", "")
+			if tonumber(txt) or txt:match("^[%d%.]+[kKmM]?$") then
+				child.Text = powerStr
+				return
+			end
+		end
+	end
+end
+
 function UIController.populatePets()
 	if not cachedData then return end
 	local invPanel = panels:FindFirstChild("Inventory")
@@ -231,21 +533,20 @@ function UIController.populatePets()
 						local pid = petDefId(petData)
 						local def = pid and PetConfig.Pets[pid]
 						if def then
+							slot.Visible = true
 							slot.Image = ""
+							slot.BackgroundColor3 = RARITY_COLORS[def.rarity] or Color3.new(1, 1, 1)
 							local nameLabel = slot:FindFirstChild("TextLabel")
 							if nameLabel and nameLabel:IsA("TextLabel") then
 								nameLabel.Text = def.name
 							end
-							slot.BackgroundColor3 = RARITY_COLORS[def.rarity] or Color3.new(1, 1, 1)
+							renderPetModelInSlot(slot, def.modelName)
+							updateSlotPowerLabel(slot, petData.power or def.basePower)
 						end
 					end
 				else
-					slot.Image = ""
-					slot.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-					local nameLabel = slot:FindFirstChild("TextLabel")
-					if nameLabel and nameLabel:IsA("TextLabel") then
-						nameLabel.Text = ""
-					end
+					clearSlotVisuals(slot)
+					slot.Visible = false
 				end
 			end
 		end
@@ -270,12 +571,34 @@ function UIController.populatePets()
 					if nameLabel and nameLabel:IsA("TextLabel") then
 						nameLabel.Text = def.name
 					end
+					renderPetModelInSlot(item, def.modelName)
+					updateSlotPowerLabel(item, petData.power or def.basePower)
 				end
-				if item:IsA("ImageButton") then
+
+				if item:IsA("GuiButton") then
+					local petRef = petData
 					item.MouseButton1Click:Connect(function()
-						UIController.showPetHover(petData)
+						UIController.showPetHover(petRef)
 					end)
+				else
+					local overlay = item:FindFirstChild("_PetClickTarget")
+					if not overlay then
+						overlay = Instance.new("TextButton")
+						overlay.Name = "_PetClickTarget"
+						overlay.Size = UDim2.fromScale(1, 1)
+						overlay.BackgroundTransparency = 1
+						overlay.Text = ""
+						overlay.ZIndex = 50
+						overlay.Parent = item
+					end
+					if overlay:IsA("GuiButton") then
+						local petRef = petData
+						overlay.MouseButton1Click:Connect(function()
+							UIController.showPetHover(petRef)
+						end)
+					end
 				end
+
 				item.Parent = invScroll
 			end
 		end
@@ -298,6 +621,8 @@ function UIController.findPetByUid(uid: string): any?
 	return nil
 end
 
+local hoverEquipConn: RBXScriptConnection? = nil
+
 function UIController.showPetHover(petData: any)
 	local invPanel = panels:FindFirstChild("Inventory")
 	if not invPanel then return end
@@ -315,6 +640,10 @@ function UIController.showPetHover(petData: any)
 	local nameLabel = hover:FindFirstChild("Name")
 	if nameLabel and nameLabel:IsA("TextLabel") then
 		nameLabel.Text = def.name
+	end
+	local nicknameLabel = hover:FindFirstChild("Nickname")
+	if nicknameLabel and nicknameLabel:IsA("TextLabel") then
+		nicknameLabel.Text = petData.nickname and ('"' .. petData.nickname .. '"') or ""
 	end
 	local rarityLabel = hover:FindFirstChild("Rarity")
 	if rarityLabel and rarityLabel:IsA("TextLabel") then
@@ -335,6 +664,46 @@ function UIController.showPetHover(petData: any)
 	local fuseLabel = hover:FindFirstChild("Fuse")
 	if fuseLabel and fuseLabel:IsA("TextLabel") then
 		fuseLabel.Text = tostring(petData.fuseLevel or 0)
+	end
+
+	-- Equip / Unequip button inside the hover panel.
+	local equipBtn = hover:FindFirstChild("Equip") or hover:FindFirstChild("EquipButton")
+	if not equipBtn then
+		equipBtn = Instance.new("TextButton")
+		equipBtn.Name = "EquipButton"
+		equipBtn.Size = UDim2.new(0.9, 0, 0, 32)
+		equipBtn.Position = UDim2.new(0.5, 0, 1, -40)
+		equipBtn.AnchorPoint = Vector2.new(0.5, 0)
+		equipBtn.Font = Enum.Font.GothamBold
+		equipBtn.TextSize = 14
+		equipBtn.TextColor3 = Color3.new(1, 1, 1)
+		equipBtn.AutoButtonColor = true
+		equipBtn.Parent = hover
+		local ec = Instance.new("UICorner")
+		ec.CornerRadius = UDim.new(0, 8)
+		ec.Parent = equipBtn
+	end
+
+	local isEquipped = petData.equipped == true
+	if equipBtn:IsA("TextButton") or equipBtn:IsA("ImageButton") then
+		local tb = equipBtn :: TextButton
+		tb.Text = isEquipped and "Unequip" or "Equip"
+		tb.BackgroundColor3 = isEquipped and Color3.fromRGB(200, 80, 80) or Color3.fromRGB(80, 180, 80)
+
+		if hoverEquipConn then
+			hoverEquipConn:Disconnect()
+		end
+		hoverEquipConn = tb.MouseButton1Click:Connect(function()
+			local uid = hoveredPetUid
+			if not uid then return end
+			SoundFacade.playOneShot("click")
+			if isEquipped then
+				Remotes.getEvent("UnequipPet"):FireServer(uid)
+			else
+				Remotes.getEvent("EquipPet"):FireServer(uid)
+			end
+			hover.Visible = false
+		end)
 	end
 end
 
@@ -454,11 +823,17 @@ function UIController.populateRebirth()
 end
 
 function UIController.showEggBuyPopup(eggId: string)
-	local eggBuy = popup:FindFirstChild("EggBuy") :: Frame
-	if not eggBuy then return end
+	local eggBuy = popup:FindFirstChild("EggBuy") :: Frame?
+	if not eggBuy then
+		warn("[DAC] DACMain.Popup.EggBuy is missing — egg clicks cannot show the buy dialog")
+		return
+	end
 
 	local def = EggConfig.Eggs[eggId]
-	if not def then return end
+	if not def then
+		warn("[DAC] Unknown egg id:", eggId)
+		return
+	end
 
 	selectedEggId = eggId
 	eggBuy.Visible = true
@@ -572,12 +947,35 @@ local function wireCloseButtons()
 	end
 end
 
+local function resolveTrophyIcon(): string
+	local images = ReplicatedStorage:FindFirstChild("Images")
+	if not images then
+		return ""
+	end
+	local KEYWORDS = { "trophy", "award", "achievement", "medal", "cup", "star" }
+	for _, child in images:GetChildren() do
+		local n = string.lower(child.Name)
+		for _, kw in KEYWORDS do
+			if string.find(n, kw, 1, true) then
+				if child:IsA("Decal") then return child.Texture end
+				if child:IsA("ImageLabel") or child:IsA("ImageButton") then return child.Image end
+			end
+		end
+	end
+	for _, child in images:GetChildren() do
+		if child:IsA("Decal") and child.Texture ~= "" then return child.Texture end
+		if (child:IsA("ImageLabel") or child:IsA("ImageButton")) and child.Image ~= "" then return child.Image end
+	end
+	return ""
+end
+
 local TAB_BUTTONS = {
 	{ name = "EggShopTab", icon = "rbxassetid://15460672893", panelName = "EggStore", order = 20 },
 	{ name = "QuestsTab", icon = "rbxassetid://15473783825", panelName = "quests", order = 30 },
 	{ name = "BattlePassTab", icon = "rbxassetid://15475011812", panelName = "battlepass", order = 31 },
 	{ name = "CodesTab", icon = "rbxassetid://4871215849", panelName = "Codes", order = 40 },
 	{ name = "Stats", icon = "rbxassetid://15473783825", invSub = "Stats", order = 15 },
+	{ name = "TrophyTab", icon = "", panelName = "trophyCase", order = 25 },
 }
 
 local function wireInventoryTabBar()
@@ -604,7 +1002,7 @@ local function wireInventoryTabBar()
 			local pName = panelMap[btn.Name]
 			if subName then
 				btn.MouseButton1Click:Connect(function()
-					SoundFacade.playOneShot("click")
+					SoundFacade.playOneShot("tab_switch")
 					UIController.showInvSub(subName)
 				end)
 			elseif pName then
@@ -619,14 +1017,21 @@ local function wireInventoryTabBar()
 	local DARK_TINT = Color3.fromRGB(0, 0, 0)
 	local FULL_COLOR = Color3.new(1, 1, 1)
 
+	local trophyIcon = resolveTrophyIcon()
+
 	for _, def in TAB_BUTTONS do
 		if tabBar:FindFirstChild(def.name) then continue end
+
+		local icon = def.icon
+		if def.name == "TrophyTab" and trophyIcon ~= "" then
+			icon = trophyIcon
+		end
 
 		local btn = Instance.new("ImageButton")
 		btn.Name = def.name
 		btn.Size = UDim2.new(0.085, 0, 0.84, 0)
 		btn.BackgroundTransparency = 1
-		btn.Image = def.icon
+		btn.Image = icon
 		btn.ImageColor3 = DARK_TINT
 		btn.AutoButtonColor = true
 		btn.LayoutOrder = def.order
@@ -643,7 +1048,7 @@ local function wireInventoryTabBar()
 		if def.invSub then
 			local sub = def.invSub
 			btn.MouseButton1Click:Connect(function()
-				SoundFacade.playOneShot("click")
+				SoundFacade.playOneShot("tab_switch")
 				UIController.showInvSub(sub)
 			end)
 		elseif def.panelName then
@@ -665,6 +1070,7 @@ local function wireStoreTabBar()
 	for _, btn in tabBar:GetChildren() do
 		if btn:IsA("ImageButton") and btn.Name ~= "__Placeholder__" then
 			btn.MouseButton1Click:Connect(function()
+				SoundFacade.playOneShot("tab_switch")
 				UIController.showStoreTab(btn.Name)
 			end)
 		end
@@ -702,25 +1108,35 @@ local function wireEggBuyPopup()
 	local eggBuy = popup:FindFirstChild("EggBuy") :: Frame
 	if not eggBuy then return end
 
-	local amounts = { Buy1 = 1, Buy3 = 3, Buy10 = 10 }
-	for btnName, count in amounts do
-		local btn = eggBuy:FindFirstChild(btnName)
-		if btn and btn:IsA("ImageButton") then
-			btn.MouseButton1Click:Connect(function()
-				if selectedEggId then
-					Remotes.getEvent("BuyEgg"):FireServer(selectedEggId, count)
-					eggBuy.Visible = false
+	local function wirePopupButton(btn: Instance?, onClick: () -> ())
+		if btn and btn:IsA("GuiButton") then
+			local last = 0.0
+			local function fire()
+				local now = os.clock()
+				if now - last < 0.06 then
+					return
 				end
-			end)
+				last = now
+				onClick()
+			end
+			btn.MouseButton1Click:Connect(fire)
+			btn.Activated:Connect(fire)
 		end
 	end
 
-	local noBtn = eggBuy:FindFirstChild("No")
-	if noBtn and noBtn:IsA("ImageButton") then
-		noBtn.MouseButton1Click:Connect(function()
-			eggBuy.Visible = false
+	local amounts = { Buy1 = 1, Buy3 = 3, Buy10 = 10 }
+	for btnName, count in amounts do
+		wirePopupButton(eggBuy:FindFirstChild(btnName), function()
+			if selectedEggId then
+				Remotes.getEvent("BuyEgg"):FireServer(selectedEggId, count)
+				eggBuy.Visible = false
+			end
 		end)
 	end
+
+	wirePopupButton(eggBuy:FindFirstChild("No"), function()
+		eggBuy.Visible = false
+	end)
 end
 
 local function wirePetActions()
@@ -833,13 +1249,25 @@ local function wireSettingsPanel()
 	end
 end
 
+local function findRebirthActionButton(parent: Instance): GuiButton?
+	for _, child in parent:GetChildren() do
+		if child.Name == "Close" then continue end
+		if child:IsA("ImageButton") or child:IsA("TextButton") then
+			return child :: GuiButton
+		end
+	end
+	return nil
+end
+
 local function wireRebirthPanel()
 	local rebirthPanel = panels:FindFirstChild("Rebirth")
 	if not rebirthPanel then return end
 
 	local rebirthBtn = rebirthPanel:FindFirstChild("Confirm")
-	if rebirthBtn and rebirthBtn:IsA("ImageButton") then
-		rebirthBtn.MouseButton1Click:Connect(function()
+		or findRebirthActionButton(rebirthPanel)
+
+	if rebirthBtn and (rebirthBtn:IsA("ImageButton") or rebirthBtn:IsA("TextButton")) then
+		rebirthBtn.Activated:Connect(function()
 			local rebirths = cachedData and cachedData.rebirths or 0
 			local cost = Utils.calculateRebirthCost(rebirths, RebirthConfig.BaseCost, RebirthConfig.CostMultiplier)
 			UIController.showConfirmPopup(
@@ -866,37 +1294,147 @@ local CURRENCY_PREFIX: { [string]: string } = {
 	crystals = "C ",
 }
 
+local LAYOUT_CLASSES: { [string]: boolean } = {
+	UIListLayout = true,
+	UIGridLayout = true,
+	UIPadding = true,
+	UIAspectRatioConstraint = true,
+	UICorner = true,
+	UIStroke = true,
+	UIScale = true,
+	UIPageLayout = true,
+	UITableLayout = true,
+	UISizeConstraint = true,
+	UITextSizeConstraint = true,
+}
+
+local function isLayoutObject(inst: Instance): boolean
+	return LAYOUT_CLASSES[inst.ClassName] ~= nil
+end
+
+-- Log the EggStore hierarchy so we can see what the Studio template actually contains.
+local function dumpHierarchy(inst: Instance, depth: number, maxDepth: number)
+	local indent = string.rep("  ", depth)
+	local extra = ""
+	if inst:IsA("GuiObject") then
+		extra = " Visible=" .. tostring((inst :: GuiObject).Visible)
+	end
+	print(indent .. inst.ClassName .. ' "' .. inst.Name .. '"' .. extra)
+	if depth < maxDepth then
+		for _, child in inst:GetChildren() do
+			dumpHierarchy(child, depth + 1, maxDepth)
+		end
+	end
+end
+
+-- Find the first non-layout GuiObject child (the egg slot template).
+local function findSlotTemplate(container: Instance): GuiObject?
+	for _, child in container:GetChildren() do
+		if child:IsA("GuiObject") and not isLayoutObject(child) and child.Name ~= "Title" then
+			return child :: GuiObject
+		end
+	end
+	return nil
+end
+
+-- Add a full-size transparent TextButton over a non-button slot so it receives clicks.
+local function ensureClickTarget(slot: GuiObject): GuiButton
+	if slot:IsA("GuiButton") then
+		slot.Active = true
+		return slot :: GuiButton
+	end
+	local existing = slot:FindFirstChild("_EggClickTarget")
+	if existing and existing:IsA("GuiButton") then
+		return existing :: GuiButton
+	end
+	local overlay = Instance.new("TextButton")
+	overlay.Name = "_EggClickTarget"
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.Position = UDim2.new()
+	overlay.BackgroundTransparency = 1
+	overlay.Text = ""
+	overlay.ZIndex = 100
+	overlay.Active = true
+	overlay.Parent = slot
+	return overlay
+end
+
+-- Ensure all children of a slot don't steal input from the click target.
+local function passthroughChildren(slot: GuiObject)
+	for _, d in slot:GetDescendants() do
+		if d.Name == "_EggClickTarget" then
+			continue
+		end
+		if d:IsA("GuiObject") then
+			d.Active = false
+		end
+	end
+end
+
 local function wireEggStorePanel()
 	local eggStorePanel = panels:FindFirstChild("EggStore")
-	if not eggStorePanel then return end
-	local mainScroll = eggStorePanel:FindFirstChild("Main") :: ScrollingFrame
-	if not mainScroll then return end
-	local eggsScroll = mainScroll:FindFirstChild("Eggs") :: ScrollingFrame
-	if not eggsScroll then return end
+	if not eggStorePanel then
+		warn("[DAC] EggStore: Panels.EggStore not found")
+		return
+	end
 
-	local templateFrame: Frame? = nil
-	for _, child in eggsScroll:GetChildren() do
-		if child:IsA("Frame") then
-			templateFrame = child :: Frame
+	-- Find Main → Eggs (required structure)
+	local mainFrame = eggStorePanel:FindFirstChild("Main")
+	if not mainFrame then
+		warn("[DAC] EggStore: no 'Main' child — dumping hierarchy:")
+		dumpHierarchy(eggStorePanel, 0, 3)
+		return
+	end
+	local eggsContainer = mainFrame:FindFirstChild("Eggs")
+	if not eggsContainer then
+		warn("[DAC] EggStore: no 'Eggs' under Main — dumping hierarchy:")
+		dumpHierarchy(mainFrame, 0, 3)
+		return
+	end
+
+	-- Dump the eggs container so we can see exactly what's there.
+	print("[DAC] EggStore wiring — Eggs hierarchy:")
+	dumpHierarchy(eggsContainer, 0, 4)
+
+	-- Strategy A: section-based (Frame with Title + Content or direct egg children)
+	-- Strategy B: flat (egg slots are direct children of Eggs)
+	-- Detect which we have.
+
+	local sectionTemplate: Frame? = nil
+	for _, child in eggsContainer:GetChildren() do
+		if child:IsA("Frame") and not isLayoutObject(child) then
+			sectionTemplate = child :: Frame
 			break
 		end
 	end
-	if not templateFrame then return end
 
-	local templateContent = templateFrame:FindFirstChild("Content")
-	if not templateContent then return end
+	-- Determine where the egg slot template lives.
+	local slotContainer: Instance
+	local slotTemplate: GuiObject?
 
-	local eggBtnTemplate: ImageButton? = nil
-	for _, child in templateContent:GetChildren() do
-		if child:IsA("ImageButton") then
-			eggBtnTemplate = child
-			break
-		end
+	if sectionTemplate then
+		local content = sectionTemplate:FindFirstChild("Content")
+		slotContainer = content or sectionTemplate
+		slotTemplate = findSlotTemplate(slotContainer)
+	else
+		slotContainer = eggsContainer
+		slotTemplate = findSlotTemplate(slotContainer)
 	end
-	if not eggBtnTemplate then return end
 
-	templateFrame.Visible = false
+	if not slotTemplate then
+		warn("[DAC] EggStore: no egg slot template found (need a Frame/ImageButton/etc under the egg grid). Hierarchy was dumped above.")
+		return
+	end
 
+	print("[DAC] EggStore: slot template found — " .. slotTemplate.ClassName .. ' "' .. slotTemplate.Name .. '" (isButton=' .. tostring(slotTemplate:IsA("GuiButton")) .. ")")
+
+	-- Hide the template(s).
+	slotTemplate.Visible = false
+	if sectionTemplate then
+		sectionTemplate.Visible = false
+	end
+
+	-- Group eggs by world.
 	local worldGroups: { [string]: { { id: string, def: any } } } = {}
 	local worldOrder: { string } = {}
 	for eggId, eggDef in EggConfig.Eggs do
@@ -908,55 +1446,132 @@ local function wireEggStorePanel()
 		table.insert(worldGroups[wid], { id = eggId, def = eggDef })
 	end
 
-	for idx, wid in worldOrder do
-		local section = templateFrame:Clone()
-		section.Name = "World_" .. wid
-		section.Visible = true
-		section.LayoutOrder = idx
+	local totalWired = 0
 
-		local title = section:FindFirstChild("Title")
-		if title then
-			local titleLabel = title:FindFirstChild("TextLabel")
-			if titleLabel and titleLabel:IsA("TextLabel") then
-				titleLabel.Text = (WORLD_DISPLAY[wid] or wid) .. " Eggs!"
-			end
-		end
+	if sectionTemplate then
+		-- Clone section per world, populate with egg slots.
+		for idx, wid in worldOrder do
+			local section = sectionTemplate:Clone()
+			section.Name = "World_" .. wid
+			section.Visible = true
+			section.LayoutOrder = idx
 
-		local content = section:FindFirstChild("Content")
-		if content then
-			for _, child in content:GetChildren() do
-				if child:IsA("ImageButton") then
-					child:Destroy()
+			local title = section:FindFirstChild("Title")
+			if title then
+				for _, d in title:GetDescendants() do
+					if d:IsA("GuiObject") then
+						d.Active = false
+					end
 				end
+				if title:IsA("TextLabel") then
+					title.Text = (WORLD_DISPLAY[wid] or wid) .. " Eggs!"
+				else
+					local titleLabel = title:FindFirstChild("TextLabel")
+					if titleLabel and titleLabel:IsA("TextLabel") then
+						titleLabel.Text = (WORLD_DISPLAY[wid] or wid) .. " Eggs!"
+					end
+				end
+			end
+
+			local contentRoot = section:FindFirstChild("Content") or section
+
+			-- Remove existing slot copies (leave layouts + title).
+			local toRemove: { Instance } = {}
+			for _, child in contentRoot:GetChildren() do
+				if child:IsA("GuiObject") and not isLayoutObject(child) and child.Name ~= "Title" then
+					table.insert(toRemove, child)
+				end
+			end
+			for _, r in toRemove do
+				r:Destroy()
 			end
 
 			for _, eggInfo in worldGroups[wid] do
-				local egg = eggBtnTemplate:Clone()
-				egg.Name = eggInfo.id
-				egg.Visible = true
+				local slot = slotTemplate:Clone()
+				slot.Name = eggInfo.id
+				slot.Visible = true
 
-				local nameLabel = egg:FindFirstChild("Name")
+				local nameLabel = slot:FindFirstChild("Name")
 				if nameLabel and nameLabel:IsA("TextLabel") then
 					nameLabel.Text = eggInfo.def.name:upper()
 				end
-
-				local costLabel = egg:FindFirstChild("Cost")
+				local costLabel = slot:FindFirstChild("Cost")
 				if costLabel and costLabel:IsA("TextLabel") then
 					local prefix = CURRENCY_PREFIX[eggInfo.def.currency] or "$"
 					costLabel.Text = prefix .. Utils.formatNumber(eggInfo.def.price)
 				end
 
+				passthroughChildren(slot)
+				local clickBtn = ensureClickTarget(slot)
 				local eid = eggInfo.id
-				egg.MouseButton1Click:Connect(function()
+				local lastFire = 0.0
+				local function onEggClick()
+					local now = os.clock()
+					if now - lastFire < 0.08 then return end
+					lastFire = now
 					SoundFacade.playOneShot("click")
 					UIController.showEggBuyPopup(eid)
-				end)
+				end
+				clickBtn.Activated:Connect(onEggClick)
+				clickBtn.MouseButton1Click:Connect(onEggClick)
 
-				egg.Parent = content
+				slot.Parent = contentRoot
+				totalWired += 1
+			end
+
+			section.Parent = eggsContainer
+		end
+	else
+		-- Flat layout: slots are direct children of Eggs. Clone per egg.
+		local toRemove: { Instance } = {}
+		for _, child in eggsContainer:GetChildren() do
+			if child:IsA("GuiObject") and not isLayoutObject(child) and child ~= slotTemplate then
+				table.insert(toRemove, child)
 			end
 		end
+		for _, r in toRemove do
+			r:Destroy()
+		end
 
-		section.Parent = eggsScroll
+		for _, eggId in ipairs(EggConfig.listEggIds()) do
+			local eggDef = EggConfig.Eggs[eggId]
+			local slot = slotTemplate:Clone()
+			slot.Name = eggId
+			slot.Visible = true
+
+			local nameLabel = slot:FindFirstChild("Name")
+			if nameLabel and nameLabel:IsA("TextLabel") then
+				nameLabel.Text = eggDef.name:upper()
+			end
+			local costLabel = slot:FindFirstChild("Cost")
+			if costLabel and costLabel:IsA("TextLabel") then
+				local prefix = CURRENCY_PREFIX[eggDef.currency] or "$"
+				costLabel.Text = prefix .. Utils.formatNumber(eggDef.price)
+			end
+
+			passthroughChildren(slot)
+			local clickBtn = ensureClickTarget(slot)
+			local eid = eggId
+			local lastFire = 0.0
+			local function onEggClick()
+				local now = os.clock()
+				if now - lastFire < 0.08 then return end
+				lastFire = now
+				SoundFacade.playOneShot("click")
+				UIController.showEggBuyPopup(eid)
+			end
+			clickBtn.Activated:Connect(onEggClick)
+			clickBtn.MouseButton1Click:Connect(onEggClick)
+
+			slot.Parent = eggsContainer
+			totalWired += 1
+		end
+	end
+
+	if totalWired > 0 then
+		print("[DAC] EggStore: wired", totalWired, "egg slots successfully")
+	else
+		warn("[DAC] EggStore: 0 egg slots wired — check EggConfig.Eggs entries")
 	end
 end
 
@@ -997,6 +1612,11 @@ local function createActionBarButtons()
 	if oldBar then
 		oldBar:Destroy()
 	end
+
+	local oldTrophy = actionBar:FindFirstChild("TrophyButton")
+	if oldTrophy then
+		oldTrophy:Destroy()
+	end
 end
 
 function UIController.refreshEggStoreOrder()
@@ -1031,19 +1651,68 @@ function UIController.onCurrencyUpdate(currencies: any)
 	end
 end
 
+local function repositionToasts()
+	for i, entry in activeToasts do
+		local targetY = 10 + (i - 1) * (64 + TOAST_GAP)
+		TweenService:Create(
+			entry.frame,
+			TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Position = UDim2.new(1, -10, 0, targetY) }
+		):Play()
+	end
+end
+
+local function dismissToast(id: number)
+	for i, entry in activeToasts do
+		if entry.id == id then
+			local frame = entry.frame
+			TweenService:Create(
+				frame,
+				TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ Position = UDim2.new(1, TOAST_WIDTH + 10, 0, frame.Position.Y.Offset) }
+			):Play()
+			task.delay(0.35, function()
+				if frame.Parent then
+					frame:Destroy()
+				end
+			end)
+			table.remove(activeToasts, i)
+			repositionToasts()
+			break
+		end
+	end
+end
+
 function UIController.showNotification(notification: any)
 	local msg: string?
 	local kind = "info"
-	if type(notification) == "table" and notification.message then
-		msg = tostring(notification.message)
+	if type(notification) == "table" then
 		if type(notification.type) == "string" then
 			kind = notification.type
+		end
+		if notification.message ~= nil then
+			msg = tostring(notification.message)
 		end
 	elseif type(notification) == "string" then
 		msg = notification
 	end
-	if not msg then
+	if kind == "reward_claim" and msg == nil then
+		msg = ""
+	end
+	if msg == nil then
 		return
+	end
+	if kind == "reward_claim" then
+		local chest = getRewardChestAnimation()
+		if chest and chest.play then
+			local ok = pcall(function()
+				chest.play(notification)
+			end)
+			if ok then
+				print("[DAC] reward_claim")
+				return
+			end
+		end
 	end
 	print("[DAC] " .. msg)
 
@@ -1052,77 +1721,188 @@ function UIController.showNotification(notification: any)
 		return
 	end
 
-	if not toastLabel or not toastLabel.Parent then
-		local holder = Instance.new("Frame")
-		holder.Name = "DAC_ToastHolder"
-		holder.BackgroundTransparency = 1
-		holder.Size = UDim2.new(0.9, 0, 0, 56)
-		holder.Position = UDim2.new(0.5, 0, 0.88, 0)
-		holder.AnchorPoint = Vector2.new(0.5, 1)
-		holder.ZIndex = 500
-		holder.Parent = sg
-
-		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Toast"
-		lbl.BackgroundColor3 = Color3.fromRGB(24, 26, 40)
-		lbl.BackgroundTransparency = 0.08
-		lbl.BorderSizePixel = 0
-		lbl.AutomaticSize = Enum.AutomaticSize.Y
-		lbl.Size = UDim2.new(1, 0, 0, 0)
-		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
-		lbl.Position = UDim2.fromScale(0.5, 0.5)
-		lbl.Font = Enum.Font.GothamMedium
-		lbl.TextSize = 16
-		lbl.TextWrapped = true
-		lbl.Text = ""
-		local padding = Instance.new("UIPadding")
-		padding.PaddingLeft = UDim.new(0, 14)
-		padding.PaddingRight = UDim.new(0, 14)
-		padding.PaddingTop = UDim.new(0, 10)
-		padding.PaddingBottom = UDim.new(0, 10)
-		padding.Parent = lbl
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 10)
-		corner.Parent = lbl
-		local stroke = Instance.new("UIStroke")
-		stroke.Thickness = 1
-		stroke.Color = Color3.fromRGB(80, 90, 140)
-		stroke.Transparency = 0.35
-		stroke.Parent = lbl
-		lbl.Parent = holder
-		toastLabel = lbl
+	while #activeToasts >= MAX_TOASTS do
+		dismissToast(activeToasts[1].id)
 	end
 
-	local lbl = toastLabel :: TextLabel
-	toastToken += 1
-	local token = toastToken
+	toastIdCounter += 1
+	local id = toastIdCounter
+	local slotIndex = #activeToasts
+	local startY = 10 + slotIndex * (64 + TOAST_GAP)
+
+	local iconDef = TOAST_ICONS[kind] or TOAST_ICONS.info
+
+	local toast = Instance.new("Frame")
+	toast.Name = "Toast_" .. id
+	toast.Size = UDim2.new(0, TOAST_WIDTH, 0, 0)
+	toast.AutomaticSize = Enum.AutomaticSize.Y
+	toast.BackgroundColor3 = Color3.fromRGB(24, 26, 40)
+	toast.BackgroundTransparency = 0.06
+	toast.BorderSizePixel = 0
+	toast.AnchorPoint = Vector2.new(1, 0)
+	toast.Position = UDim2.new(1, TOAST_WIDTH + 10, 0, startY)
+	toast.ZIndex = 500
+	toast.ClipsDescendants = true
+	toast.Parent = sg
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = toast
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = if kind == "streak_critical" or kind == "streak_urgent" then 2 else 1
+	stroke.Color = iconDef.color
+	stroke.Transparency = if kind == "streak_critical" then 0.25 else 0.5
+	stroke.Parent = toast
+
+	local accent = Instance.new("Frame")
+	accent.Size = UDim2.new(0, 4, 1, 0)
+	accent.BackgroundColor3 = iconDef.color
+	accent.BorderSizePixel = 0
+	accent.ZIndex = 502
+	accent.Parent = toast
+
+	local icon = Instance.new("TextLabel")
+	icon.Size = UDim2.new(0, 28, 0, 28)
+	icon.Position = UDim2.new(0, 14, 0, 10)
+	icon.BackgroundTransparency = 1
+	icon.Font = Enum.Font.GothamBold
+	icon.TextSize = 20
+	icon.Text = iconDef.text
+	icon.TextColor3 = iconDef.color
+	icon.ZIndex = 502
+	icon.Parent = toast
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -56, 0, 0)
+	lbl.AutomaticSize = Enum.AutomaticSize.Y
+	lbl.Position = UDim2.new(0, 48, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.GothamMedium
+	lbl.TextSize = 15
+	lbl.TextWrapped = true
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.ZIndex = 502
 	lbl.Text = msg
-	if kind == "success" then
-		lbl.TextColor3 = Color3.fromRGB(150, 255, 190)
-	elseif kind == "error" then
-		lbl.TextColor3 = Color3.fromRGB(255, 160, 160)
-	else
-		lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.Parent = toast
+
+	if kind == "streak_celebrate" then
+		toast.BackgroundColor3 = Color3.fromRGB(38, 34, 52)
 	end
-	lbl.Visible = true
-	lbl.TextTransparency = 1
-	TweenService:Create(lbl, TweenInfo.new(0.12, Enum.EasingStyle.Quad), { TextTransparency = 0 }):Play()
-	task.delay(3.2, function()
-		if token ~= toastToken then
-			return
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 12)
+	pad.PaddingBottom = UDim.new(0, 12)
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = lbl
+
+	if string.find(msg, "+", 1, true) then
+		local shimmer = Instance.new("Frame")
+		shimmer.Size = UDim2.fromScale(1, 1)
+		shimmer.BackgroundColor3 = Color3.new(1, 1, 1)
+		shimmer.BackgroundTransparency = 0.92
+		shimmer.ZIndex = 501
+		shimmer.Parent = toast
+
+		local shimCorner = Instance.new("UICorner")
+		shimCorner.CornerRadius = UDim.new(0, 12)
+		shimCorner.Parent = shimmer
+
+		local grad = Instance.new("UIGradient")
+		grad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.35, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 230, 120)),
+			ColorSequenceKeypoint.new(0.65, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(1, Color3.new(1, 1, 1)),
+		})
+		grad.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.35, 1),
+			NumberSequenceKeypoint.new(0.5, 0.6),
+			NumberSequenceKeypoint.new(0.65, 1),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		grad.Rotation = 25
+		grad.Offset = Vector2.new(-1, 0)
+		grad.Parent = shimmer
+
+		TweenService:Create(
+			grad,
+			TweenInfo.new(1.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 1),
+			{ Offset = Vector2.new(1, 0) }
+		):Play()
+	end
+
+	table.insert(activeToasts, { frame = toast, id = id })
+
+	local toastScale = Instance.new("UIScale")
+	toastScale.Scale = 1
+	toastScale.Parent = toast
+
+	TweenService:Create(
+		toast,
+		TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Position = UDim2.new(1, -10, 0, startY) }
+	):Play()
+
+	if kind == "streak_urgent" or kind == "streak_critical" then
+		local pulses = if kind == "streak_critical" then 2 else 1
+		for p = 1, pulses do
+			task.delay(0.38 + (p - 1) * 0.28, function()
+				if not toastScale.Parent then
+					return
+				end
+				TweenService:Create(
+					toastScale,
+					TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ Scale = 1.06 }
+				):Play()
+				task.delay(0.12, function()
+					if toastScale.Parent then
+						TweenService:Create(
+							toastScale,
+							TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+							{ Scale = 1 }
+						):Play()
+					end
+				end)
+			end)
 		end
-		local tw = TweenService:Create(lbl, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { TextTransparency = 1 })
-		tw:Play()
-		tw.Completed:Connect(function()
-			if token == toastToken then
-				lbl.Visible = false
-			end
-		end)
+	end
+
+	if kind == "error" then
+		SoundFacade.playOneShot("purchase_fail")
+	elseif kind == "streak_critical" then
+		SoundFacade.playOneShot("alert")
+	elseif kind == "streak_nudge" or kind == "streak_urgent" or kind == "streak_celebrate" then
+		SoundFacade.playOneShot("notification")
+	else
+		SoundFacade.playOneShot("notification")
+	end
+
+	task.delay(TOAST_LIFETIME, function()
+		dismissToast(id)
 	end)
 end
 
-function UIController.showRunResults(_results: any)
-	-- PayoutPanel handles run results display
+function UIController.showRunResults(results: any)
+	RunResultsBridge.show(results)
+end
+
+local function ensurePopupOnTop()
+	popup.ZIndex = 1000
+	for _, child in popup:GetChildren() do
+		if child:IsA("GuiObject") then
+			child.ZIndex = 1001
+			for _, d in child:GetDescendants() do
+				if d:IsA("GuiObject") then
+					d.ZIndex = 1002
+				end
+			end
+		end
+	end
 end
 
 function UIController.init()
@@ -1131,7 +1911,9 @@ function UIController.init()
 	popup = screenGui:WaitForChild("Popup") :: Frame
 	actionBar = screenGui:WaitForChild("ActionBar") :: Frame
 
-	UIController.closeAll()
+	ensurePopupOnTop()
+	ensureBackdrop()
+	UIController.closeAllInstant()
 
 	wireCloseButtons()
 	wireInventoryTabBar()
@@ -1145,6 +1927,19 @@ function UIController.init()
 	wireRebirthPanel()
 	wireEggStorePanel()
 	createActionBarButtons()
+
+	local okT, errT = pcall(function()
+		local dacGui = playerGui:WaitForChild("DAC", 20)
+		local tp = dacGui:WaitForChild("TrophyCasePanel", 20)
+		if not tp:IsA("ModuleScript") then
+			return
+		end
+		local TrophyCasePanel = require(tp :: ModuleScript)
+		TrophyCasePanel.mount(screenGui, UIController)
+	end)
+	if not okT then
+		warn("[DAC] TrophyCasePanel mount failed:", errT)
+	end
 
 	print("[DAC] UIController initialized")
 end

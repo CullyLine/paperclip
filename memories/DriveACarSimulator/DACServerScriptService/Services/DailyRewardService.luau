@@ -9,6 +9,8 @@ local DailyRewardConfig = require(DAC:WaitForChild("Config"):WaitForChild("Daily
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
@@ -126,6 +128,9 @@ function DailyRewardService.claim(player: Player): (boolean, string?)
 	data.dailyReward.streak = (data.dailyReward.streak % Constants.MAX_DAILY_STREAK) + 1
 	data.dailyReward.lastClaim = now
 	data.dailyReward.premiumBoxClaimed = false
+	data.dailyReward.lastClaimLostStreak = if hadLongBreak then prevStreak else 0
+
+	MilestoneCeremonyService.checkStreakMilestones(player, data, data.dailyReward.streak)
 
 	local dayIndex = data.dailyReward.streak
 	local dayDef = STREAK_REWARDS[dayIndex]
@@ -136,10 +141,14 @@ function DailyRewardService.claim(player: Player): (boolean, string?)
 	local mult = cycleMultiplierFor(data.dailyReward.dailyCycle or 1) :: number
 
 	local lines: { string } = {}
+	local claimItems: { any } = {}
 	for _, part in dayDef.rewards do
 		local amt = applyMult(part.amount, mult)
 		CurrencyService.add(player, part.currency, amt, "daily_reward")
 		table.insert(lines, `+{amt} {part.currency}`)
+		local cur = part.currency
+		local label = cur:sub(1, 1):upper() .. cur:sub(2)
+		table.insert(claimItems, { label = label, amount = amt, kind = cur })
 	end
 
 	local PremiumService = require(script.Parent:WaitForChild("PremiumService"))
@@ -151,14 +160,20 @@ function DailyRewardService.claim(player: Player): (boolean, string?)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 
+	AchievementService.onDailyClaimed(player)
+
 	local summary = `Day {dayIndex} ({mult}x): ` .. table.concat(lines, ", ")
 	if premiumMsg ~= "" then
 		summary ..= " • " .. premiumMsg
+		table.insert(claimItems, { label = premiumMsg, kind = "premium" })
 	end
 
 	Remotes.getEvent("Notification"):FireClient(player, {
-		type = "success",
+		type = "reward_claim",
+		title = "Daily Reward",
+		subtitle = `Day {dayIndex} ({mult}x)`,
 		message = summary,
+		items = claimItems,
 	})
 
 	return true, nil

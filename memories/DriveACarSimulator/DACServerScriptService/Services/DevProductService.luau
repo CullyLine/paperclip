@@ -1,6 +1,7 @@
 --!strict
 
 local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
@@ -9,10 +10,79 @@ local DevProductConfig = require(DAC:WaitForChild("Config"):WaitForChild("DevPro
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
 local DevProductService = {}
+
+local function robuxFromReceipt(productDef: any, receiptInfo: any): number
+	local spent = tonumber(receiptInfo.CurrencySpent) or 0
+	if spent > 0 then
+		return spent
+	end
+	return math.max(0, math.floor(tonumber(productDef.robuxPrice) or 0))
+end
+
+local function benefitLinesForReward(productDef: any, reward: any): { string }
+	if reward.type == "starter_pack" then
+		return { "+25,000 coins", "+500 gems", "+3 Meadow Eggs" }
+	end
+	if reward.type == "battle_pass_premium" then
+		return { "Premium battle pass track unlocked" }
+	end
+	if reward.currency then
+		return { `+{reward.amount} {reward.currency}` }
+	end
+	if reward.type == "instant_rebirth" then
+		return { "Instant rebirth completed" }
+	end
+	if reward.type == "auto_hatch" then
+		return { `Auto-hatched up to {reward.count} eggs` }
+	end
+	if reward.type == "skip_world" then
+		return { "Next world unlocked" }
+	end
+	if type(productDef.description) == "string" and productDef.description ~= "" then
+		return { productDef.description }
+	end
+	return { "Thank you for your purchase!" }
+end
+
+local function finalizePurchase(
+	player: Player,
+	data: any,
+	receiptInfo: any,
+	productKey: string,
+	productDef: any,
+	reward: any
+)
+	local robuxSpent = robuxFromReceipt(productDef, receiptInfo)
+	local deferred = MilestoneCeremonyService.recordRobuxSpend(player, data, robuxSpent, true)
+	MilestoneCeremonyService.queueDeferredSpendMilestones(player, deferred)
+
+	local benefits = benefitLinesForReward(productDef, reward)
+	local iconId = if type(productDef.iconId) == "string" and productDef.iconId ~= "" then productDef.iconId else "rbxassetid://0"
+
+	local payload: any = {
+		productType = "devproduct",
+		productKey = productKey,
+		displayName = tostring(productDef.name or "Purchase"),
+		iconId = iconId,
+		benefits = benefits,
+		robuxSpent = robuxSpent,
+		totalRobuxSpent = if type(data.totalRobuxSpent) == "number" then data.totalRobuxSpent else 0,
+	}
+
+	if reward.currency then
+		payload.currencyGrant = {
+			currency = reward.currency,
+			amount = tonumber(reward.amount) or 0,
+		}
+	end
+
+	Remotes.getEvent("PurchaseComplete"):FireClient(player, payload)
+end
 
 local function findProductById(productId: number): (string?, any?)
 	for id, product in DevProductConfig.Products do
@@ -24,7 +94,7 @@ local function findProductById(productId: number): (string?, any?)
 end
 
 function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchaseDecision
-	local player = game:GetService("Players"):GetPlayerByUserId(receiptInfo.PlayerId)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 	if not player then
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
@@ -72,6 +142,7 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 			type = "success",
 			message = "Starter Pack claimed! +25K coins, +500 gems, +3 Meadow Eggs",
 		})
+		finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
@@ -94,6 +165,7 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 			type = "success",
 			message = "Premium battle pass unlocked!",
 		})
+		finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
@@ -108,7 +180,6 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 		RebirthService.rebirth(player, true)
 	elseif reward.type == "auto_hatch" then
 		local EggService = require(script.Parent:WaitForChild("EggService"))
-		-- Hatch from the most abundant egg type
 		local bestEgg, bestCount = nil, 0
 		for eggId, count in data.eggs do
 			if count > bestCount then
@@ -127,12 +198,21 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 	end
 
 	data.processedReceiptIds[receiptKey] = true
+	finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
 	DataManager.save(player)
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
 function DevProductService.init()
 	MarketplaceService.ProcessReceipt = DevProductService.processReceipt
+
+	Remotes.getEvent("PurchaseThankYouAck").OnServerEvent:Connect(function(player: Player)
+		MilestoneCeremonyService.flushNextSpendMilestoneBatch(player)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		MilestoneCeremonyService.clearPendingSpendMilestones(player)
+	end)
 
 	Remotes.getEvent("PurchaseDevProduct").OnServerEvent:Connect(function(player, productKey)
 		if type(productKey) ~= "string" then

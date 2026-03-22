@@ -7,6 +7,7 @@ local Types = require(DAC:WaitForChild("Types"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
@@ -38,12 +39,21 @@ function CarService.buyCar(player: Player, carId: string): (boolean, string?)
 		end
 	end
 
+	local carCountBefore = 0
+	for _ in data.cars do
+		carCountBefore += 1
+	end
+
 	data.cars[carId] = {
 		id = carId,
 		gasLevel = 0,
 		powerLevel = 0,
 		speedLevel = 0,
 	}
+
+	if carCountBefore == 1 then
+		MilestoneCeremonyService.tryFirstTime(player, data, "FirstCarPurchased", nil)
+	end
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	return true, nil

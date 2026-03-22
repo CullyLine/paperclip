@@ -134,6 +134,9 @@ DevProductConfig.Products = {
 		description = "Unlock the premium reward track for Season 1: Midnight Velocity.",
 		productId = 0,
 		reward = { type = "battle_pass_premium" },
+		-- Limited-time FOMO badge label (StorePanel EventExpiring row)
+		eventBadgeLabel = "LAUNCH DRIVER",
+		eventBadgeExpiresAt = 2000000000,
 	},
 }
 

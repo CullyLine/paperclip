@@ -27,7 +27,7 @@ local registry: {
 	},
 } = {}
 
-local soundRoot: Folder
+local soundRoot: SoundGroup
 local musicA: Sound
 local musicB: Sound
 local usingA = true
@@ -35,14 +35,15 @@ local currentMusicWorld: string? = nil
 local ambientSound: Sound
 local currentAmbientWorld: string? = nil
 
+local sfxLoops: { [string]: Sound } = {}
+local sfxLoopVolumeMul: { [string]: number } = {}
+
 local masterEnabled = true
-local musicVolume = 0.7
-local sfxVolume = 0.8
-local ambientMul = 0.75 -- ambient uses sfx bus, scaled for headroom vs SFX
+local musicVolume = 0.35
+local sfxVolume = 0.25
+local ambientMul = 0.5 -- ambient uses sfx bus, scaled for headroom vs SFX
 
 local CROSSFADE_TIME = 0.85
-
-local WORLDS = { "grasslands", "desert", "frozen", "neon" }
 
 local AUDIO_WAIT_SECS = 8
 
@@ -139,30 +140,34 @@ local function ensureSounds()
 	if soundRoot then
 		return
 	end
-	soundRoot = Instance.new("Folder")
+	soundRoot = Instance.new("SoundGroup")
 	soundRoot.Name = "DACSounds"
+	soundRoot.Volume = 0.1
 	soundRoot.Parent = SoundService
 
 	musicA = Instance.new("Sound")
 	musicA.Name = "MusicA"
 	musicA.Looped = true
 	musicA.Volume = 0
+	musicA.SoundGroup = soundRoot
 	musicA.Parent = soundRoot
 
 	musicB = Instance.new("Sound")
 	musicB.Name = "MusicB"
 	musicB.Looped = true
 	musicB.Volume = 0
+	musicB.SoundGroup = soundRoot
 	musicB.Parent = soundRoot
 
 	ambientSound = Instance.new("Sound")
 	ambientSound.Name = "Ambient"
 	ambientSound.Looped = true
 	ambientSound.Volume = 0
+	ambientSound.SoundGroup = soundRoot
 	ambientSound.Parent = soundRoot
 end
 
-function SoundController.playOneShot(name: string)
+function SoundController.playLoop(name: string, pitch: number?, volumeScale: number?)
 	ensureSounds()
 	local reg = registry[name]
 	if not reg or reg.category ~= "sfx" then
@@ -175,31 +180,115 @@ function SoundController.playOneShot(name: string)
 	if reg.soundId == "rbxassetid://0" or reg.soundId == "" then
 		return
 	end
+	local mul = if volumeScale ~= nil then math.clamp(volumeScale, 0, 2) else 0.55
+	sfxLoopVolumeMul[name] = mul
+	local existing = sfxLoops[name]
+	if existing then
+		existing.PlaybackSpeed = pitch or 1
+		existing.Volume = vol * mul
+		if not existing.IsPlaying then
+			existing:Play()
+		end
+		return
+	end
 	local s = Instance.new("Sound")
+	s.Name = "Loop_" .. name
 	s.SoundId = reg.soundId
+	s.Looped = true
+	s.PlaybackSpeed = pitch or 1
+	s.Volume = vol * mul
+	s.SoundGroup = soundRoot
+	s.Parent = soundRoot
+	sfxLoops[name] = s
+	s:Play()
+end
+
+function SoundController.setLoopPitch(name: string, pitch: number)
+	local s = sfxLoops[name]
+	if s then
+		s.PlaybackSpeed = pitch
+	end
+end
+
+function SoundController.setLoopVolume(name: string, volumeScale: number)
+	sfxLoopVolumeMul[name] = math.clamp(volumeScale, 0, 2)
+	local s = sfxLoops[name]
+	if s then
+		s.Volume = categoryVolume("sfx") * sfxLoopVolumeMul[name]
+	end
+end
+
+function SoundController.stopLoop(name: string, fadeDuration: number?)
+	local s = sfxLoops[name]
+	if not s then
+		sfxLoopVolumeMul[name] = nil
+		return
+	end
+	local dur = fadeDuration or 0
+	if dur < 0.05 then
+		s:Stop()
+		s:Destroy()
+		sfxLoops[name] = nil
+		sfxLoopVolumeMul[name] = nil
+		return
+	end
+	local tw = tweenVolume(s, 0, dur)
+	tw.Completed:Connect(function()
+		if s.Parent then
+			s:Stop()
+			s:Destroy()
+		end
+		sfxLoops[name] = nil
+		sfxLoopVolumeMul[name] = nil
+	end)
+end
+
+local function resolveSfxSoundId(name: string): (string?, SoundCategory?)
+	local reg = registry[name]
+	if not reg then
+		return nil, nil
+	end
+	if reg.category ~= "sfx" then
+		return nil, nil
+	end
+	if reg.soundId ~= "" and reg.soundId ~= "rbxassetid://0" then
+		return reg.soundId, reg.category
+	end
+	local fb = registry["notification"]
+	if fb and fb.category == "sfx" and fb.soundId ~= "" and fb.soundId ~= "rbxassetid://0" then
+		return fb.soundId, fb.category
+	end
+	return nil, nil
+end
+
+function SoundController.playOneShot(name: string, pitch: number?)
+	ensureSounds()
+	local soundId, cat = resolveSfxSoundId(name)
+	if not soundId or not cat then
+		return
+	end
+	local vol = categoryVolume("sfx")
+	if vol < 0.001 then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = soundId
+	s.PlaybackSpeed = if pitch ~= nil then math.clamp(pitch, 0.5, 2) else 1
 	s.Volume = vol
+	s.SoundGroup = soundRoot
 	s.Parent = soundRoot
 	s:Play()
 	Debris:AddItem(s, 6)
 end
 
--- Legacy name used by older call sites
-function SoundController.play(soundName: string)
-	SoundController.playOneShot(soundName)
-end
-
-function SoundController.setMusic(enabled: boolean)
-	masterEnabled = enabled
-	SoundController.applySettings({
-		sound = enabled,
-		musicVolume = musicVolume,
-		sfxVolume = sfxVolume,
-	})
-end
-
-function SoundController.setSFX(enabled: boolean)
-	-- Kept for API compat; full mute uses settings.sound
-	sfxVolume = if enabled then math.max(sfxVolume, 0.01) else 0
+function SoundController.playOneShotPrefer(names: { string })
+	for _, name in names do
+		local soundId, cat = resolveSfxSoundId(name)
+		if soundId and cat then
+			SoundController.playOneShot(name)
+			return
+		end
+	end
 end
 
 function SoundController.applySettings(settings: { [string]: any }?)
@@ -227,6 +316,12 @@ function SoundController.applySettings(settings: { [string]: any }?)
 	end
 	if ambientSound.IsPlaying and currentAmbientWorld then
 		ambientSound.Volume = av
+	end
+
+	local sfxV = categoryVolume("sfx")
+	for loopName, snd in sfxLoops do
+		local mul = sfxLoopVolumeMul[loopName] or 0.55
+		snd.Volume = sfxV * mul
 	end
 end
 
@@ -288,60 +383,130 @@ function SoundController.setWorld(worldId: string)
 end
 
 local function registerDefaults()
-	-- World beds — disk: memories/DriveACarSimulator/Audio/music/<world>.ogg & ambient/<world>_amb.ogg
-	for _, id in WORLDS do
-		SoundController.register(`music_{id}`, "rbxassetid://0", "music") -- Audio/music/<id>.ogg
-		SoundController.register(`ambient_{id}`, "rbxassetid://0", "ambient") -- Audio/ambient/<id>_amb.ogg
-	end
+	-- All IDs sourced from game.ReplicatedStorage.Audio (TOS-approved uploads).
+	-- Hydration still runs as a fallback if names match registry keys.
 
-	-- Engine idle loops (vehicle wiring TBD) — Audio/engines/*.ogg
-	SoundController.register("engine_buggy", "rbxassetid://0", "sfx") -- buggy_idle.ogg
-	SoundController.register("engine_sedan", "rbxassetid://0", "sfx") -- sedan_idle.ogg
-	SoundController.register("engine_racer", "rbxassetid://0", "sfx") -- racer_idle.ogg
-	SoundController.register("engine_supercar", "rbxassetid://0", "sfx") -- supercar_idle.ogg
+	-- World music beds
+	SoundController.register("music_grasslands", "rbxassetid://1841647093", "music") -- Life in an Elevator
+	SoundController.register("music_desert", "rbxassetid://122720386196973", "music") -- Dealership (60s)
+	SoundController.register("music_frozen", "rbxassetid://7640700658", "music") -- Witches' Brew (133s)
+	SoundController.register("music_neon", "rbxassetid://97844915150974", "music") -- Rhythm Junkie (103s)
 
-	-- UI — Audio/ui/*.ogg
-	SoundController.register("click", "rbxassetid://0", "sfx") -- click.ogg
-	SoundController.register("purchase", "rbxassetid://0", "sfx") -- purchase_success.ogg
-	SoundController.register("purchase_fail", "rbxassetid://0", "sfx") -- purchase_fail.ogg
-	SoundController.register("tab_switch", "rbxassetid://0", "sfx") -- tab_switch.ogg
-	SoundController.register("panel_open", "rbxassetid://0", "sfx") -- panel_open.ogg
-	SoundController.register("panel_close", "rbxassetid://0", "sfx") -- panel_close.ogg
-	SoundController.register("notification", "rbxassetid://0", "sfx") -- notification.ogg
-	SoundController.register("level_up", "rbxassetid://0", "sfx") -- level_up.ogg
+	-- World ambience
+	SoundController.register("ambient_grasslands", "rbxassetid://73798751154555", "ambient") -- Lake
+	SoundController.register("ambient_desert", "rbxassetid://9059618023", "ambient") -- Defiance_Ambiance03
+	SoundController.register("ambient_frozen", "rbxassetid://11876250716", "ambient") -- snow
+	SoundController.register("ambient_neon", "rbxassetid://2843658663", "ambient") -- City Sounds
 
-	-- Egg hatch by rarity — Audio/hatch/<tier>.ogg (code still calls hatch until rarity is threaded)
-	SoundController.register("hatch", "rbxassetid://0", "sfx") -- common.ogg (default sting)
-	SoundController.register("hatch_common", "rbxassetid://0", "sfx") -- common.ogg
-	SoundController.register("hatch_uncommon", "rbxassetid://0", "sfx") -- uncommon.ogg
-	SoundController.register("hatch_rare", "rbxassetid://0", "sfx") -- rare.ogg
-	SoundController.register("hatch_epic", "rbxassetid://0", "sfx") -- epic.ogg
-	SoundController.register("hatch_legendary", "rbxassetid://0", "sfx") -- legendary.ogg
-	SoundController.register("hatch_mythic", "rbxassetid://0", "sfx") -- mythic.ogg
+	-- Engine idle loops
+	SoundController.register("engine_buggy", "rbxassetid://12843280490", "sfx") -- idle (generic)
+	SoundController.register("engine_sedan", "rbxassetid://8836845570", "sfx") -- Audi R8 Idle
+	SoundController.register("engine_racer", "rbxassetid://130983335056535", "sfx") -- V10
+	SoundController.register("engine_supercar", "rbxassetid://7136339316", "sfx") -- Aventador Low
+	SoundController.register("engine_wind", "rbxassetid://11876250654", "sfx") -- asphalt (road surface layer)
 
-	-- Rebirth fanfare layers — Audio/rebirth/*.ogg
-	SoundController.register("rebirth", "rbxassetid://0", "sfx") -- full sting (riser+layers); see rebirth/*.ogg
-	SoundController.register("rebirth_riser", "rbxassetid://0", "sfx") -- riser.ogg
-	SoundController.register("rebirth_whoosh", "rbxassetid://0", "sfx") -- whoosh.ogg
-	SoundController.register("rebirth_boom", "rbxassetid://0", "sfx") -- boom.ogg
-	SoundController.register("rebirth_confetti", "rbxassetid://0", "sfx") -- confetti.ogg
+	-- UI
+	SoundController.register("click", "rbxassetid://10630778959", "sfx") -- Click
+	SoundController.register("near_miss", "rbxassetid://14753859187", "sfx") -- bov_1 (whoosh)
+	SoundController.register("combo_break", "rbxassetid://14755055417", "sfx") -- low_med_off (engine cut)
+	SoundController.register("ui_whoosh", "rbxassetid://10849970849", "sfx") -- SpawnParticle (swoosh)
+	SoundController.register("purchase", "rbxassetid://9545920468", "sfx") -- GoldCorn (cha-ching)
+	SoundController.register("purchase_thankyou_buildup", "rbxassetid://9538232720", "sfx") -- PE-Electrical_BW.32224 (riser)
+	SoundController.register("purchase_thankyou_reveal", "rbxassetid://9545920468", "sfx") -- GoldCorn
+	SoundController.register("purchase_thankyou_reveal_vip", "rbxassetid://9660107771", "sfx") -- ClubSmash
+	SoundController.register("purchase_thankyou_reveal_whale", "rbxassetid://9660466869", "sfx") -- Stomp (heavy impact)
+	SoundController.register("purchase_fail", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179 (error buzz)
+	SoundController.register("error", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179
+	SoundController.register("tab_switch", "rbxassetid://9660507545", "sfx") -- Tap
+	SoundController.register("panel_open", "rbxassetid://7938564577", "sfx") -- WarmPluck
+	SoundController.register("panel_close", "rbxassetid://9660507545", "sfx") -- Tap
+	SoundController.register("equip_item", "rbxassetid://9591690518", "sfx") -- Absorb
+	SoundController.register("world_unlock", "rbxassetid://9460707764", "sfx") -- BustOpen
+	SoundController.register("world_travel", "rbxassetid://12842999193", "sfx") -- startup
+	SoundController.register("notification", "rbxassetid://10630729494", "sfx") -- UIBlip
+	SoundController.register("quest_progress", "rbxassetid://7938634444", "sfx") -- ui_sound_12
+	SoundController.register("ui_confirm", "rbxassetid://7938634444", "sfx") -- ui_sound_12
+	SoundController.register("cha_ching", "rbxassetid://10849997662", "sfx") -- Coin
+	SoundController.register("level_up", "rbxassetid://6971833728", "sfx") -- Item Collect
 
-	-- Driving — Audio/driving/*.ogg
-	SoundController.register("screech", "rbxassetid://0", "sfx") -- screech.ogg
-	SoundController.register("boost", "rbxassetid://0", "sfx") -- boost.ogg
-	SoundController.register("collision", "rbxassetid://0", "sfx") -- collision.ogg
-	SoundController.register("coin_pickup", "rbxassetid://0", "sfx") -- coin_pickup.ogg
-	SoundController.register("distance_marker", "rbxassetid://0", "sfx") -- distance_marker.ogg
-	SoundController.register("lap_horn", "rbxassetid://0", "sfx") -- lap_horn.ogg
+	-- Egg hatch (ascending intensity by rarity)
+	SoundController.register("hatch", "rbxassetid://9546777688", "sfx") -- Bubble (default sting)
+	SoundController.register("hatch_common", "rbxassetid://9546777688", "sfx") -- Bubble
+	SoundController.register("hatch_uncommon", "rbxassetid://9554965517", "sfx") -- blinky
+	SoundController.register("hatch_rare", "rbxassetid://10849970849", "sfx") -- SpawnParticle
+	SoundController.register("hatch_epic", "rbxassetid://9460707764", "sfx") -- BustOpen
+	SoundController.register("hatch_legendary", "rbxassetid://9660107771", "sfx") -- ClubSmash
+	SoundController.register("hatch_mythic", "rbxassetid://9660482478", "sfx") -- Explosion
+	SoundController.register("egg_crack_small", "rbxassetid://12946370827", "sfx") -- crackle_12
+	SoundController.register("egg_crack_medium", "rbxassetid://9729017179", "sfx") -- Punch
+	SoundController.register("egg_crack_large", "rbxassetid://9660466869", "sfx") -- Stomp
+	SoundController.register("egg_mythic_hum", "rbxassetid://9538232720", "sfx") -- PE-Electrical_BW.32224
+	SoundController.register("egg_mythic_resonance", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179
 
-	-- Fuel warnings — Audio/fuel/*.ogg
-	SoundController.register("fuel_warning_25", "rbxassetid://0", "sfx") -- warning_25.ogg
-	SoundController.register("fuel_warning_10", "rbxassetid://0", "sfx") -- warning_10.ogg
-	SoundController.register("fuel_warning_5", "rbxassetid://0", "sfx") -- warning_5.ogg
-	SoundController.register("fuel_empty", "rbxassetid://0", "sfx") -- empty_stall.ogg
+	-- Pet equip entrance (ascending intensity by rarity)
+	SoundController.register("pet_equip_common", "rbxassetid://9546777688", "sfx") -- Bubble
+	SoundController.register("pet_equip_uncommon", "rbxassetid://9591690518", "sfx") -- Absorb
+	SoundController.register("pet_equip_rare", "rbxassetid://10849970849", "sfx") -- SpawnParticle
+	SoundController.register("pet_equip_epic", "rbxassetid://7938564577", "sfx") -- WarmPluck
+	SoundController.register("pet_equip_legendary_beam", "rbxassetid://9538232720", "sfx") -- PE-Electrical_BW.32224
+	SoundController.register("pet_equip_legendary_impact", "rbxassetid://9575596194", "sfx") -- Impact
+	SoundController.register("pet_equip_mythic_tear", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179
+	SoundController.register("pet_equip_mythic_explosion", "rbxassetid://9660482478", "sfx") -- Explosion
 
-	-- World pickup / HUD (reuse coin ding until a distinct asset is sourced)
-	SoundController.register("currency", "rbxassetid://0", "sfx") -- coin_pickup.ogg (same file in Audio/)
+	-- Rebirth fanfare layers
+	SoundController.register("rebirth", "rbxassetid://9660107771", "sfx") -- ClubSmash (full sting)
+	SoundController.register("rebirth_riser", "rbxassetid://9538232720", "sfx") -- PE-Electrical_BW.32224
+	SoundController.register("rebirth_whoosh", "rbxassetid://9146096134", "sfx") -- StartedBoosting
+	SoundController.register("rebirth_boom", "rbxassetid://9660482478", "sfx") -- Explosion
+	SoundController.register("rebirth_confetti", "rbxassetid://9545920468", "sfx") -- GoldCorn
+
+	-- Driving HUD
+	SoundController.register("milestone", "rbxassetid://7938634444", "sfx") -- ui_sound_12
+	SoundController.register("combo", "rbxassetid://9554965517", "sfx") -- blinky
+	SoundController.register("speed_tier", "rbxassetid://9146096134", "sfx") -- StartedBoosting
+	SoundController.register("fuel_warning", "rbxassetid://9554965517", "sfx") -- blinky
+	SoundController.register("alert", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179
+	SoundController.register("fusion", "rbxassetid://9591690518", "sfx") -- Absorb
+
+	-- Driving SFX
+	SoundController.register("screech", "rbxassetid://11864334285", "sfx") -- drift
+	SoundController.register("boost", "rbxassetid://9146096251", "sfx") -- Boosting
+	SoundController.register("collision", "rbxassetid://9575596194", "sfx") -- Impact
+	SoundController.register("coin_pickup", "rbxassetid://10849997662", "sfx") -- Coin
+	SoundController.register("distance_marker", "rbxassetid://7938634444", "sfx") -- ui_sound_12
+	SoundController.register("lap_horn", "rbxassetid://14753859187", "sfx") -- bov_1
+
+	-- Fuel warnings
+	SoundController.register("fuel_warning_25", "rbxassetid://9554965517", "sfx") -- blinky (gentle beep)
+	SoundController.register("fuel_warning_10", "rbxassetid://9538241258", "sfx") -- PE-Electrical_BW.32179
+	SoundController.register("fuel_warning_5", "rbxassetid://9538232720", "sfx") -- PE-Electrical_BW.32224
+	SoundController.register("fuel_empty", "rbxassetid://14755055417", "sfx") -- low_med_off (engine stall)
+
+	-- Premium welcome
+	SoundController.register("premium_welcome", "rbxassetid://9545920468", "sfx") -- GoldCorn
+
+	-- World pickup / HUD
+	SoundController.register("currency", "rbxassetid://10849997662", "sfx") -- Coin
+
+	-- Event banner
+	SoundController.register("event_fanfare", "rbxassetid://9460707764", "sfx") -- BustOpen
+
+	-- Tutorial
+	SoundController.register("tutorial_step", "rbxassetid://9660507545", "sfx") -- Tap
+	SoundController.register("tutorial_complete", "rbxassetid://6971833728", "sfx") -- Item Collect
+
+	-- Payout panel
+	SoundController.register("payout_card_pop", "rbxassetid://9546777688", "sfx") -- Bubble
+	SoundController.register("payout_badge_tick", "rbxassetid://9660507545", "sfx") -- Tap
+	SoundController.register("payout_run_of_day", "rbxassetid://7938564577", "sfx") -- WarmPluck
+	SoundController.register("payout_tier_up", "rbxassetid://9545920468", "sfx") -- GoldCorn
+
+	-- Trophy
+	SoundController.register("trophy_bronze", "rbxassetid://9660507545", "sfx") -- Tap
+	SoundController.register("trophy_silver", "rbxassetid://7938564577", "sfx") -- WarmPluck
+	SoundController.register("trophy_gold", "rbxassetid://9545920468", "sfx") -- GoldCorn
+	SoundController.register("trophy_diamond", "rbxassetid://9660107771", "sfx") -- ClubSmash
+	SoundController.register("trophy_total_completion", "rbxassetid://6971833728", "sfx") -- Item Collect
 end
 
 function SoundController.init()
