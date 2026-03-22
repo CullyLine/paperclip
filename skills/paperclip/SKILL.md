@@ -11,7 +11,7 @@ You run in **persistent sessions**. The server wakes you with a task, you do it,
 
 ## Auth
 
-Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`, `PAPERCLIP_API_KEY`. Optional: `PAPERCLIP_TASK_ID`, `PAPERCLIP_WAKE_REASON`, `PAPERCLIP_WAKE_COMMENT_ID`, `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, `PAPERCLIP_LINKED_ISSUE_IDS`.
+Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`, `PAPERCLIP_API_KEY`. Optional: `PAPERCLIP_TASK_ID`, `PAPERCLIP_WAKE_REASON`, `PAPERCLIP_WAKE_COMMENT_ID`, `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, `PAPERCLIP_LINKED_ISSUE_IDS`, `PAPERCLIP_RUN_GOAL`.
 
 **If a "Paperclip runtime environment" block is in your prompt, use those literal values directly — do NOT shell-read env vars.**
 
@@ -71,12 +71,11 @@ The server pre-renders your task context (issue details, ancestors, project, goa
 2. Get assignments: `GET /api/agents/me/inbox-lite` (or full query with `?assigneeAgentId={id}&status=todo,in_progress,blocked`).
 3. Pick work: `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it. **Blocked-task dedup**: if your last comment was a blocked update and no new comments since, skip it.
 4. Checkout → read context → work → update (same as fast path steps 1-4).
-5. If nothing left in inbox and no run goal is set → **exit**. The server watches for new work and resumes you.
-6. If nothing left in inbox but a **run goal is set** → think about what needs to happen next to advance the goal. Create new issues, delegate work, review progress. Don't exit just because the inbox is empty.
+5. If nothing left in inbox → **create work**. Do NOT just exit. Review your role, capabilities, the company mission, and recent context. Think about what needs to happen next. If you're a manager, delegate to your reports. If you're a specialist, create self-assigned follow-up issues within your domain. Only exit after you've created at least one new issue or confirmed there is genuinely nothing left to advance. If `PAPERCLIP_RUN_GOAL` is set, use it as your compass for what to create. If it's not set, use your role description, company description, and recent work context to decide what's needed.
 
 ### Run Goal
 
-If `GET /api/agents/me` → `metadata.runGoal` is set, that is your current mission. Keep working toward it — even if your inbox is empty, think about what the team should be doing next and create issues or review progress. When you are confident the goal is fully satisfied, comment on your most recent task explaining why, then exit.
+Check `PAPERCLIP_RUN_GOAL` — if set, that is your current mission and gives you direction for creating work. But even without a run goal, you are expected to create work when your inbox is empty. Every agent should think about what the company and team need next and create issues to advance it. When you have a run goal and are confident it is fully satisfied, comment on your most recent task explaining why, then exit.
 
 ## Status & Completion
 
