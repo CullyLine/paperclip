@@ -19,47 +19,12 @@ import { ActivityRow } from "../components/ActivityRow";
 import { Identity } from "../components/Identity";
 import { timeAgo } from "../lib/timeAgo";
 import { cn, formatCents } from "../lib/utils";
-import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle, Crown, Zap, Square } from "lucide-react";
+import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle, Zap, Square } from "lucide-react";
 import { ActiveAgentsPanel } from "../components/ActiveAgentsPanel";
 import { ChartCard, RunActivityChart, PriorityChart, IssueStatusChart, SuccessRateChart } from "../components/ActivityCharts";
 import { PageSkeleton } from "../components/PageSkeleton";
 import type { Agent, Issue } from "@paperclipai/shared";
 import { PluginSlotOutlet } from "@/plugins/slots";
-
-const DURATION_PRESETS = [
-  { label: "2h", hours: 2 },
-  { label: "4h", hours: 4 },
-  { label: "6h", hours: 6 },
-  { label: "8h", hours: 8 },
-  { label: "12h", hours: 12 },
-];
-
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "0:00:00";
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function useLiveCountdown(expiresAt: string | null): number {
-  const [remaining, setRemaining] = useState(() => {
-    if (!expiresAt) return 0;
-    return Math.max(0, new Date(expiresAt).getTime() - Date.now());
-  });
-
-  useEffect(() => {
-    if (!expiresAt) { setRemaining(0); return; }
-    const target = new Date(expiresAt).getTime();
-    const update = () => setRemaining(Math.max(0, target - Date.now()));
-    update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, [expiresAt]);
-
-  return remaining;
-}
 
 function getRecentIssues(issues: Issue[]): Issue[] {
   return [...issues]
@@ -88,71 +53,43 @@ export function Dashboard() {
     [agents],
   );
 
-  const selfGovData = (ceoAgent?.metadata as Record<string, unknown> | null)?.selfGoverning as
-    | { expiresAt: string; condition?: string }
-    | null
-    | undefined;
-  const selfGovExpiresAt = selfGovData?.expiresAt ?? null;
-  const selfGovCondition = selfGovData?.condition ?? null;
-  const selfGovRemaining = useLiveCountdown(selfGovExpiresAt);
-  const selfGoverning = selfGovRemaining > 0;
-
-  const [selectedHours, setSelectedHours] = useState(6);
-  const [conditionText, setConditionText] = useState("");
-  const [sgMode, setSgMode] = useState<"timer" | "condition">("timer");
-
-  const startSelfGoverning = useMutation({
-    mutationFn: async (args: { hours: number; condition?: string }) => {
-      if (!ceoAgent) return;
-      const expiresAt = new Date(Date.now() + args.hours * 3600_000).toISOString();
-      const sgPayload: Record<string, unknown> = { expiresAt };
-      if (args.condition?.trim()) {
-        sgPayload.condition = args.condition.trim();
-      }
-      await agentsApi.update(ceoAgent.id, {
-        metadata: { ...(ceoAgent.metadata as Record<string, unknown> | null ?? {}), selfGoverning: sgPayload },
-      }, selectedCompanyId ?? undefined);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
-      setConditionText("");
-    },
-  });
-
-  const stopSelfGoverning = useMutation({
-    mutationFn: async () => {
-      if (!ceoAgent) return;
-      const meta = { ...(ceoAgent.metadata as Record<string, unknown> | null ?? {}) };
-      delete meta.selfGoverning;
-      await agentsApi.update(ceoAgent.id, { metadata: meta }, selectedCompanyId ?? undefined);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
-    },
-  });
-
   const liveAgents = useMemo(
     () => (agents ?? []).filter((a) => a.status !== "terminated"),
     [agents],
   );
 
-  const gigaModeOn = liveAgents.length > 0 &&
-    liveAgents.every((a) => !!(a.metadata as Record<string, unknown> | null)?.gigaMode);
+  const anyRunning = liveAgents.some((a) => (a as unknown as Record<string, unknown>).runMode === "persistent");
+  const allRunning = liveAgents.length > 0 && liveAgents.every((a) => (a as unknown as Record<string, unknown>).runMode === "persistent");
 
-  const toggleGigaMode = useMutation({
+  const invalidateAgents = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+  };
+
+  const runAll = useMutation({
     mutationFn: async () => {
-      const newValue = !gigaModeOn;
       await Promise.allSettled(
-        liveAgents.map((a) =>
-          agentsApi.update(a.id, {
-            metadata: { ...(a.metadata as Record<string, unknown> | null ?? {}), gigaMode: newValue },
-          }, selectedCompanyId ?? undefined),
-        ),
+        liveAgents.map((a) => agentsApi.run(a.id, selectedCompanyId ?? undefined)),
       );
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+    onSettled: invalidateAgents,
+  });
+
+  const sleepAll = useMutation({
+    mutationFn: async () => {
+      await Promise.allSettled(
+        liveAgents.map((a) => agentsApi.sleep(a.id, selectedCompanyId ?? undefined)),
+      );
     },
+    onSettled: invalidateAgents,
+  });
+
+  const rebootAll = useMutation({
+    mutationFn: async () => {
+      await Promise.allSettled(
+        liveAgents.map((a) => agentsApi.reboot(a.id, selectedCompanyId ?? undefined)),
+      );
+    },
+    onSettled: invalidateAgents,
   });
 
   useEffect(() => {
@@ -317,208 +254,68 @@ export function Dashboard() {
 
       <ActiveAgentsPanel companyId={selectedCompanyId!} />
 
-      {ceoAgent && (
+      {liveAgents.length > 0 && (
         <div className={cn(
           "border px-4 py-3 transition-colors",
-          selfGoverning
-            ? "border-emerald-500/30 bg-emerald-500/5"
+          anyRunning
+            ? "border-cyan-500/30 bg-cyan-500/5"
             : "border-border bg-card"
         )}>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <Crown className={cn(
+              <Zap className={cn(
                 "h-4 w-4 shrink-0",
-                selfGoverning ? "text-emerald-500" : "text-muted-foreground"
+                anyRunning ? "text-cyan-500" : "text-muted-foreground"
               )} />
               <div>
                 <p className={cn(
                   "text-sm font-medium",
-                  selfGoverning ? "text-emerald-700 dark:text-emerald-300" : "text-foreground"
+                  anyRunning ? "text-cyan-700 dark:text-cyan-300" : "text-foreground"
                 )}>
-                  Self-Governing Mode
+                  Agent Control
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {selfGoverning
-                    ? "CEO is autonomously reviewing progress, creating tasks, and delegating work."
-                    : "CEO exits heartbeat when no tasks are assigned. Set a timer to let the CEO work autonomously."}
+                  {allRunning
+                    ? "All agents are running persistently. They load context once and keep working."
+                    : anyRunning
+                      ? "Some agents are running. Use these controls to manage all agents at once."
+                      : "Agents are sleeping. Start them to begin persistent work sessions."}
                 </p>
               </div>
             </div>
 
-            {selfGoverning && (
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <p className="text-lg font-mono font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                    {formatCountdown(selfGovRemaining)}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">remaining</p>
-                </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {!allRunning && (
                 <button
-                  onClick={() => stopSelfGoverning.mutate()}
-                  disabled={stopSelfGoverning.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-red-300 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                  onClick={() => runAll.mutate()}
+                  disabled={runAll.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-cyan-500 text-white hover:bg-cyan-600 transition-colors disabled:opacity-50"
+                >
+                  <Zap className="h-3 w-3" />
+                  {runAll.isPending ? "Starting..." : "Run All"}
+                </button>
+              )}
+              {anyRunning && (
+                <button
+                  onClick={() => sleepAll.mutate()}
+                  disabled={sleepAll.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border text-foreground hover:bg-accent transition-colors disabled:opacity-50"
                 >
                   <Square className="h-3 w-3" />
-                  Stop
+                  {sleepAll.isPending ? "Sleeping..." : "Sleep All"}
                 </button>
-              </div>
-            )}
-          </div>
-
-          {selfGoverning && selfGovCondition && (
-            <div className="mt-2 px-2 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300">
-              <span className="font-medium">Goal:</span> {selfGovCondition}
-            </div>
-          )}
-
-          {!selfGoverning && (
-            <div className="mt-3 pt-3 border-t border-border/50 space-y-3">
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setSgMode("timer")}
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium transition-colors",
-                    sgMode === "timer"
-                      ? "bg-emerald-500 text-white"
-                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                  )}
-                >
-                  Timer
-                </button>
-                <button
-                  onClick={() => setSgMode("condition")}
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium transition-colors",
-                    sgMode === "condition"
-                      ? "bg-emerald-500 text-white"
-                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                  )}
-                >
-                  Until condition
-                </button>
-              </div>
-
-              {sgMode === "timer" && (
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1">
-                    {DURATION_PRESETS.map((p) => (
-                      <button
-                        key={p.hours}
-                        onClick={() => setSelectedHours(p.hours)}
-                        className={cn(
-                          "px-2.5 py-1 text-xs font-medium transition-colors",
-                          selectedHours === p.hours
-                            ? "bg-emerald-500 text-white"
-                            : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                        )}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => startSelfGoverning.mutate({ hours: selectedHours })}
-                    disabled={startSelfGoverning.isPending}
-                    className={cn(
-                      "ml-auto flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
-                      "bg-emerald-500 text-white hover:bg-emerald-600",
-                      "disabled:opacity-50 disabled:cursor-not-allowed"
-                    )}
-                  >
-                    <Crown className="h-3 w-3" />
-                    {startSelfGoverning.isPending ? "Starting…" : "Start"}
-                  </button>
-                </div>
               )}
-
-              {sgMode === "condition" && (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={conditionText}
-                    onChange={(e) => setConditionText(e.target.value)}
-                    placeholder="e.g. CEO is highly confident M2 is complete"
-                    className="w-full px-3 py-2 text-sm border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                  <div className="flex items-center gap-2">
-                    <p className="text-[10px] text-muted-foreground flex-1">
-                      Max runtime safety limit:
-                    </p>
-                    <div className="flex items-center gap-1">
-                      {DURATION_PRESETS.map((p) => (
-                        <button
-                          key={p.hours}
-                          onClick={() => setSelectedHours(p.hours)}
-                          className={cn(
-                            "px-2 py-0.5 text-[10px] font-medium transition-colors",
-                            selectedHours === p.hours
-                              ? "bg-emerald-500 text-white"
-                              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                          )}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => startSelfGoverning.mutate({ hours: selectedHours, condition: conditionText })}
-                      disabled={startSelfGoverning.isPending || !conditionText.trim()}
-                      className={cn(
-                        "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
-                        "bg-emerald-500 text-white hover:bg-emerald-600",
-                        "disabled:opacity-50 disabled:cursor-not-allowed"
-                      )}
-                    >
-                      <Crown className="h-3 w-3" />
-                      {startSelfGoverning.isPending ? "Starting…" : "Start"}
-                    </button>
-                  </div>
-                </div>
+              {anyRunning && (
+                <button
+                  onClick={() => rebootAll.mutate()}
+                  disabled={rebootAll.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-amber-300 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                >
+                  {rebootAll.isPending ? "Rebooting..." : "Reboot All"}
+                </button>
               )}
             </div>
-          )}
-        </div>
-      )}
-
-      {liveAgents.length > 0 && (
-        <div className={cn(
-          "flex items-center justify-between gap-3 border px-4 py-3 transition-colors",
-          gigaModeOn
-            ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border bg-card"
-        )}>
-          <div className="flex items-center gap-2.5">
-            <Zap className={cn(
-              "h-4 w-4 shrink-0",
-              gigaModeOn ? "text-amber-500" : "text-muted-foreground"
-            )} />
-            <div>
-              <p className={cn(
-                "text-sm font-medium",
-                gigaModeOn ? "text-amber-700 dark:text-amber-300" : "text-foreground"
-              )}>
-                Giga Mode
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {gigaModeOn
-                  ? "Agents power through their inbox — completing tasks back-to-back without waiting for the next heartbeat."
-                  : "Agents complete one task per heartbeat, then exit. Enable to let agents work through multiple tasks per run."}
-              </p>
-            </div>
           </div>
-          <button
-            onClick={() => toggleGigaMode.mutate()}
-            disabled={toggleGigaMode.isPending}
-            className={cn(
-              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-              gigaModeOn ? "bg-amber-500" : "bg-muted"
-            )}
-          >
-            <span className={cn(
-              "pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform",
-              gigaModeOn ? "translate-x-5" : "translate-x-0.5"
-            )} />
-          </button>
         </div>
       )}
 

@@ -57,6 +57,7 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
+  Square,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
@@ -598,28 +599,37 @@ export function AgentDetail() {
     setSelectedCompanyId(agent.companyId, { source: "route_sync" });
   }, [agent?.companyId, selectedCompanyId, setSelectedCompanyId]);
 
+  const invalidateAgent = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.agents.runtimeState(agentLookupRef) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.agents.taskSessions(agentLookupRef) });
+    if (resolvedCompanyId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
+      if (agent?.id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.heartbeats(resolvedCompanyId, agent.id) });
+      }
+    }
+  };
+
   const agentAction = useMutation({
-    mutationFn: async (action: "invoke" | "pause" | "resume" | "terminate") => {
+    mutationFn: async (action: "invoke" | "pause" | "resume" | "terminate" | "run" | "sleep" | "reboot" | "cancel-task" | "cancel-and-sleep") => {
       if (!agentLookupRef) return Promise.reject(new Error("No agent reference"));
       switch (action) {
         case "invoke": return agentsApi.invoke(agentLookupRef, resolvedCompanyId ?? undefined);
         case "pause": return agentsApi.pause(agentLookupRef, resolvedCompanyId ?? undefined);
         case "resume": return agentsApi.resume(agentLookupRef, resolvedCompanyId ?? undefined);
         case "terminate": return agentsApi.terminate(agentLookupRef, resolvedCompanyId ?? undefined);
+        case "run": return agentsApi.run(agentLookupRef, resolvedCompanyId ?? undefined);
+        case "sleep": return agentsApi.sleep(agentLookupRef, resolvedCompanyId ?? undefined);
+        case "reboot": return agentsApi.reboot(agentLookupRef, resolvedCompanyId ?? undefined);
+        case "cancel-task": return agentsApi.cancelTask(agentLookupRef, resolvedCompanyId ?? undefined);
+        case "cancel-and-sleep": return agentsApi.cancelAndSleep(agentLookupRef, resolvedCompanyId ?? undefined);
       }
     },
     onSuccess: (data, action) => {
       setActionError(null);
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.runtimeState(agentLookupRef) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.taskSessions(agentLookupRef) });
-      if (resolvedCompanyId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
-        if (agent?.id) {
-          queryClient.invalidateQueries({ queryKey: queryKeys.heartbeats(resolvedCompanyId, agent.id) });
-        }
-      }
+      invalidateAgent();
       if (action === "invoke" && data && typeof data === "object" && "id" in data) {
         navigate(`/agents/${canonicalAgentRef}/runs/${(data as HeartbeatRun).id}`);
       }
@@ -769,33 +779,41 @@ export function AgentDetail() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => agentAction.mutate("invoke")}
+            onClick={() => agentAction.mutate("run")}
             disabled={agentAction.isPending || isPendingApproval}
           >
             <Play className="h-3.5 w-3.5 sm:mr-1" />
-            <span className="hidden sm:inline">Run Heartbeat</span>
+            <span className="hidden sm:inline">Run</span>
           </Button>
-          {agent.status === "paused" ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => agentAction.mutate("resume")}
-              disabled={agentAction.isPending || isPendingApproval}
-            >
-              <Play className="h-3.5 w-3.5 sm:mr-1" />
-              <span className="hidden sm:inline">Resume</span>
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => agentAction.mutate("pause")}
-              disabled={agentAction.isPending || isPendingApproval}
-            >
-              <Pause className="h-3.5 w-3.5 sm:mr-1" />
-              <span className="hidden sm:inline">Pause</span>
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => agentAction.mutate("sleep")}
+            disabled={agentAction.isPending || isPendingApproval}
+          >
+            <Square className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">Sleep</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => agentAction.mutate("reboot")}
+            disabled={agentAction.isPending || isPendingApproval}
+            className="border-amber-300 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+          >
+            <RotateCcw className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">Reboot</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => agentAction.mutate("cancel-task")}
+            disabled={agentAction.isPending}
+            className="text-destructive hover:text-destructive"
+          >
+            <XCircle className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">Cancel Task</span>
+          </Button>
           <span className="hidden sm:inline"><StatusBadge status={agent.status} /></span>
           {mobileLiveRun && (
             <Link

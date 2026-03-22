@@ -131,6 +131,20 @@ export const agentsApi = {
       data,
     ),
   invoke: (id: string, companyId?: string) => api.post<HeartbeatRun>(agentPath(id, companyId, "/heartbeat/invoke"), {}),
+  run: (id: string, companyId?: string) =>
+    api.post<{ status: string; runId: string | null }>(agentPath(id, companyId, "/run"), {}),
+  sleep: (id: string, companyId?: string) =>
+    api.post<{ status: string }>(agentPath(id, companyId, "/sleep"), {}),
+  reboot: (id: string, companyId?: string) =>
+    api.post<{ status: string; runId: string | null }>(agentPath(id, companyId, "/reboot"), {}),
+  cancelTask: (id: string, companyId?: string) =>
+    api.post<{ status: string }>(agentPath(id, companyId, "/cancel-task"), {}),
+  cancelAndSleep: (id: string, companyId?: string) =>
+    api.post<{ status: string }>(agentPath(id, companyId, "/cancel-and-sleep"), {}),
+  contextFingerprint: (id: string, companyId?: string) =>
+    api.get<{ current: string; booted: string | null; stale: boolean; changedComponents: string[] }>(
+      agentPath(id, companyId, "/context-fingerprint"),
+    ),
   wakeup: (
     id: string,
     data: {
