@@ -24,6 +24,7 @@ import {
   accessService,
   approvalService,
   budgetService,
+  contextFingerprintService,
   heartbeatService,
   issueApprovalService,
   issueService,
@@ -64,6 +65,7 @@ export function agentRoutes(db: Db) {
   const issueApprovalsSvc = issueApprovalService(db);
   const secretsSvc = secretService(db);
   const workspaceOperations = workspaceOperationService(db);
+  const ctxFingerprint = contextFingerprintService(db);
   const strictSecretsMode = process.env.PAPERCLIP_SECRETS_STRICT_MODE === "true";
 
   function canCreateAgents(agent: { role: string; permissions: Record<string, unknown> | null | undefined }) {
@@ -1233,6 +1235,138 @@ export function agentRoutes(db: Db) {
     });
 
     res.json(agent);
+  });
+
+  // ── Context fingerprint ───────────────────────────────────────────
+  router.get("/agents/:id/context-fingerprint", async (req, res) => {
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+
+    const comparison = await ctxFingerprint.compareFingerprint(id);
+    if (!comparison) { res.status(404).json({ error: "Agent not found" }); return; }
+    res.json(comparison);
+  });
+
+  // ── Run / Sleep / Reboot ─────────────────────────────────────────
+  router.post("/agents/:id/run", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+
+    await svc.update(id, { runMode: "persistent", status: "idle" } as Partial<typeof agentsTable.$inferInsert>);
+
+    const run = await heartbeat.wakeup(id, {
+      source: "on_demand",
+      triggerDetail: "manual",
+    });
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.run_started",
+      entityType: "agent",
+      entityId: agent.id,
+    });
+
+    res.status(202).json({ status: "started", runId: run?.id ?? null });
+  });
+
+  router.post("/agents/:id/sleep", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+
+    await svc.update(id, { runMode: "off" } as Partial<typeof agentsTable.$inferInsert>);
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.sleep",
+      entityType: "agent",
+      entityId: agent.id,
+    });
+
+    res.json({ status: "sleeping" });
+  });
+
+  router.post("/agents/:id/reboot", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+
+    await heartbeat.cancelActiveForAgent(id);
+
+    await svc.update(id, {
+      currentRunSessionId: null,
+      runMode: "persistent",
+      rebootPending: false,
+    } as Partial<typeof agentsTable.$inferInsert>);
+
+    await ctxFingerprint.stampFingerprint(id);
+
+    const run = await heartbeat.wakeup(id, {
+      source: "on_demand",
+      triggerDetail: "manual",
+    });
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.rebooted",
+      entityType: "agent",
+      entityId: agent.id,
+    });
+
+    res.status(202).json({ status: "rebooting", runId: run?.id ?? null });
+  });
+
+  router.post("/agents/:id/cancel-task", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+
+    await heartbeat.cancelActiveForAgent(id);
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.task_cancelled",
+      entityType: "agent",
+      entityId: agent.id,
+    });
+
+    res.json({ status: "cancelled" });
+  });
+
+  router.post("/agents/:id/cancel-and-sleep", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+
+    await heartbeat.cancelActiveForAgent(id);
+    await svc.update(id, { runMode: "off" } as Partial<typeof agentsTable.$inferInsert>);
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.cancel_and_sleep",
+      entityType: "agent",
+      entityId: agent.id,
+    });
+
+    res.json({ status: "sleeping" });
   });
 
   router.delete("/agents/:id", async (req, res) => {

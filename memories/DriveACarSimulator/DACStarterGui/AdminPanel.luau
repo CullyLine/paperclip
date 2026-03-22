@@ -1125,7 +1125,7 @@ function AdminPanel.init()
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then return end
-		if input.KeyCode == Enum.KeyCode.Grave then
+		if input.KeyCode == Enum.KeyCode.Backquote then
 			AdminPanel.toggle()
 		end
 	end)
