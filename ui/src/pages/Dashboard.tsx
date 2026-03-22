@@ -60,6 +60,7 @@ export function Dashboard() {
 
   const anyRunning = liveAgents.some((a) => (a as unknown as Record<string, unknown>).runMode === "persistent");
   const allRunning = liveAgents.length > 0 && liveAgents.every((a) => (a as unknown as Record<string, unknown>).runMode === "persistent");
+  const [runGoalText, setRunGoalText] = useState("");
 
   const invalidateAgents = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
@@ -316,6 +317,25 @@ export function Dashboard() {
               )}
             </div>
           </div>
+
+          {!anyRunning && (
+            <div className="mt-3 pt-3 border-t border-border/50">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={runGoalText}
+                  onChange={(e) => setRunGoalText(e.target.value)}
+                  placeholder="Optional: set a run goal (e.g. 'Complete all M3 tasks')"
+                  className="flex-1 px-3 py-1.5 text-xs border border-border bg-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                />
+              </div>
+              {runGoalText.trim() && (
+                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                  Agents will evaluate this goal after each task and sleep when they believe it&apos;s met.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

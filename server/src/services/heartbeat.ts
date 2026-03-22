@@ -1545,6 +1545,7 @@ export function heartbeatService(db: Db) {
     const biller = resolveLedgerBiller(result);
     const ledgerScope = await resolveLedgerScopeForRun(db, agent.companyId, run);
 
+    const runFailed = run.status === "failed";
     await db
       .update(agentRuntimeState)
       .set({
@@ -1557,9 +1558,34 @@ export function heartbeatService(db: Db) {
         totalOutputTokens: sql`${agentRuntimeState.totalOutputTokens} + ${outputTokens}`,
         totalCachedInputTokens: sql`${agentRuntimeState.totalCachedInputTokens} + ${cachedInputTokens}`,
         totalCostCents: sql`${agentRuntimeState.totalCostCents} + ${additionalCostCents}`,
+        consecutiveFailures: runFailed
+          ? sql`${agentRuntimeState.consecutiveFailures} + 1`
+          : 0,
         updatedAt: new Date(),
       })
       .where(eq(agentRuntimeState.agentId, agent.id));
+
+    if (runFailed) {
+      const CIRCUIT_BREAKER_THRESHOLD = 3;
+      const [state] = await db
+        .select({ consecutiveFailures: agentRuntimeState.consecutiveFailures })
+        .from(agentRuntimeState)
+        .where(eq(agentRuntimeState.agentId, agent.id));
+      if (state && state.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+        logger.warn(
+          { agentId: agent.id, failures: state.consecutiveFailures },
+          "circuit-breaker: auto-pausing agent after consecutive failures",
+        );
+        await db
+          .update(agents)
+          .set({
+            runMode: "off",
+            pauseReason: `Circuit breaker: ${state.consecutiveFailures} consecutive failures`,
+            updatedAt: new Date(),
+          })
+          .where(eq(agents.id, agent.id));
+      }
+    }
 
     if (additionalCostCents > 0 || hasTokenUsage) {
       const costs = costService(db, budgetHooks);

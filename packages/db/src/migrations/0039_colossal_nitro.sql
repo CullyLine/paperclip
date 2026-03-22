@@ -1,0 +1,1 @@
+ALTER TABLE "agent_runtime_state" ADD COLUMN "consecutive_failures" integer DEFAULT 0 NOT NULL;
