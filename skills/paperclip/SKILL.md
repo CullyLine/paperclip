@@ -71,11 +71,12 @@ The server pre-renders your task context (issue details, ancestors, project, goa
 2. Get assignments: `GET /api/agents/me/inbox-lite` (or full query with `?assigneeAgentId={id}&status=todo,in_progress,blocked`).
 3. Pick work: `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it. **Blocked-task dedup**: if your last comment was a blocked update and no new comments since, skip it.
 4. Checkout → read context → work → update (same as fast path steps 1-4).
-5. If nothing left in inbox → **exit**. The server watches for new work and resumes you.
+5. If nothing left in inbox and no run goal is set → **exit**. The server watches for new work and resumes you.
+6. If nothing left in inbox but a **run goal is set** → think about what needs to happen next to advance the goal. Create new issues, delegate work, review progress. Don't exit just because the inbox is empty.
 
 ### Run Goal
 
-If `GET /api/agents/me` → `metadata.runGoal` is set, evaluate whether the goal is met after completing each task. When the goal is satisfied, comment on your most recent task explaining that the goal is met, then exit.
+If `GET /api/agents/me` → `metadata.runGoal` is set, that is your current mission. Keep working toward it — even if your inbox is empty, think about what the team should be doing next and create issues or review progress. When you are confident the goal is fully satisfied, comment on your most recent task explaining why, then exit.
 
 ## Status & Completion
 
