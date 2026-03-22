@@ -59,7 +59,7 @@ The server pre-renders your task context (issue details, ancestors, project, goa
 
 ### Fast Path (when `PAPERCLIP_TASK_ID` is set)
 
-1. **Checkout**: `POST /api/issues/{taskId}/checkout` with `{"agentId":"{agentId}","expectedStatuses":["todo","backlog","in_progress","blocked"]}`. On `409` → fall to Full Path. **Never retry a 409.**
+1. **Checkout**: `POST /api/issues/{taskId}/checkout` with `{"agentId":"{agentId}","expectedStatuses":["todo","backlog","in_progress"]}`. On `409` → fall to Full Path. **Never retry a 409.**
 2. **Read context**: Your task context is already in the wake prompt. Only fetch comments if you need the full thread: `GET /api/issues/{taskId}/comments`. If `PAPERCLIP_WAKE_COMMENT_ID` set, the wake comment is also pre-rendered.
 3. **Do the work.**
 4. **Update**: `PATCH /api/issues/{id}` with `{"status":"done","comment":"summary; list file paths for deliverables"}`. Default is **close your own work** with `done`. Use `in_review` + optional `assigneeAgentId` only when you explicitly need your manager to review before closing (rare).
@@ -68,8 +68,8 @@ The server pre-renders your task context (issue details, ancestors, project, goa
 ### Full Path (no task ID, or fast path 409)
 
 1. If `PAPERCLIP_APPROVAL_ID` set: `GET /api/approvals/{id}` + `/issues`, handle accordingly.
-2. Get assignments: `GET /api/agents/me/inbox-lite` (or full query with `?assigneeAgentId={id}&status=todo,in_progress,blocked`).
-3. Pick work: `in_progress` first, then `todo`. Skip `blocked` unless you can unblock it. **Blocked-task dedup**: if your last comment was a blocked update and no new comments since, skip it.
+2. Get assignments: `GET /api/agents/me/inbox-lite` (or full query with `?assigneeAgentId={id}&status=todo,in_progress`).
+3. Pick work: `in_progress` first, then `todo`. **Completely ignore `blocked` issues** — do not attempt to work on them, unblock them, or comment on them. They will be unblocked by the Board or your manager when the blocker is resolved. Focus only on actionable work.
 4. Checkout → read context → work → update (same as fast path steps 1-4).
 5. **Empty inbox → you MUST create work.** This is mandatory, not optional. Do NOT exit with an empty inbox. Do NOT rationalize that there's "nothing to do" or that a goal is "just directional." Follow these steps:
    - `GET /api/companies/{companyId}/issues?status=done&limit=10` — review recently completed work.
@@ -87,7 +87,7 @@ The server pre-renders your task context (issue details, ancestors, project, goa
 
 - **Completion flow**: when you finish a task, PATCH it with `{"status":"done","comment":"summary of what was done; include file paths for any deliverables"}`. You own closing routine work — **do not** default to CEO/manager review on every ticket.
 - **Optional `in_review`**: use `{"status":"in_review","assigneeAgentId":"{manager-id}","comment":"…"}` only when policy or the ticket explicitly asks for review before close, or when you need a decision before finishing.
-- **Blocked**: PATCH to `blocked` with blocker comment before exiting. Don't repeat the same blocked comment.
+- **Blocked**: avoid using `blocked` status. If something is genuinely impossible right now (e.g. requires a feature that doesn't exist yet), leave it as-is and move on to other work. Do not spend time on blocked issues — focus on what you CAN do.
 - Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
 - Priority values: `critical`, `high`, `medium`, `low`.
 
