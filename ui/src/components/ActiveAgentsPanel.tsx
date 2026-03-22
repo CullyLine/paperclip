@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { Link } from "@/lib/router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Issue } from "@paperclipai/shared";
 import { heartbeatsApi, type LiveRunForIssue } from "../api/heartbeats";
+import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import type { TranscriptEntry } from "../adapters";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, relativeTime } from "../lib/utils";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Square, RotateCcw } from "lucide-react";
 import { Identity } from "./Identity";
 import { RunTranscriptView } from "./transcript/RunTranscriptView";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
@@ -69,6 +70,7 @@ export function ActiveAgentsPanel({ companyId }: ActiveAgentsPanelProps) {
               transcript={transcriptByRun.get(run.id) ?? []}
               hasOutput={hasOutputForRun(run.id)}
               isActive={isRunActive(run)}
+              companyId={companyId}
             />
           ))}
         </div>
@@ -83,21 +85,50 @@ function AgentRunCard({
   transcript,
   hasOutput,
   isActive,
+  companyId,
 }: {
   run: LiveRunForIssue;
   issue?: Issue;
   transcript: TranscriptEntry[];
   hasOutput: boolean;
   isActive: boolean;
+  companyId: string;
 }) {
   const scrollRef = useAutoScroll<HTMLDivElement>([transcript.length]);
+  const queryClient = useQueryClient();
+
+  const { data: fingerprint } = useQuery({
+    queryKey: ["agent-fingerprint", run.agentId],
+    queryFn: () => agentsApi.contextFingerprint(run.agentId, companyId),
+    refetchInterval: 60_000,
+  });
+
+  const contextStale = fingerprint?.stale ?? false;
+
+  const sleepAgent = useMutation({
+    mutationFn: () => agentsApi.sleep(run.agentId, companyId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.liveRuns(companyId) });
+    },
+  });
+
+  const rebootAgent = useMutation({
+    mutationFn: () => agentsApi.reboot(run.agentId, companyId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.liveRuns(companyId) });
+    },
+  });
 
   return (
     <div className={cn(
       "flex h-[320px] flex-col overflow-hidden rounded-xl border shadow-sm",
-      isActive
-        ? "border-cyan-500/25 bg-cyan-500/[0.04] shadow-[0_16px_40px_rgba(6,182,212,0.08)]"
-        : "border-border bg-background/70",
+      contextStale
+        ? "border-amber-500/40 bg-amber-500/[0.04] shadow-[0_16px_40px_rgba(245,158,11,0.08)]"
+        : isActive
+          ? "border-cyan-500/25 bg-cyan-500/[0.04] shadow-[0_16px_40px_rgba(6,182,212,0.08)]"
+          : "border-border bg-background/70",
     )}>
       <div className="border-b border-border/60 px-3 py-3">
         <div className="flex items-start justify-between gap-2">
@@ -112,18 +143,50 @@ function AgentRunCard({
                 <span className="inline-flex h-2.5 w-2.5 rounded-full bg-muted-foreground/35" />
               )}
               <Identity name={run.agentName} size="sm" className="[&>span:last-child]:!text-[11px]" />
+              {contextStale && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 animate-pulse">
+                  Context changed
+                </span>
+              )}
             </div>
             <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span>{isActive ? "Live now" : run.finishedAt ? `Finished ${relativeTime(run.finishedAt)}` : `Started ${relativeTime(run.createdAt)}`}</span>
             </div>
           </div>
 
-          <Link
-            to={`/agents/${run.agentId}/runs/${run.id}`}
-            className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ExternalLink className="h-2.5 w-2.5" />
-          </Link>
+          <div className="flex items-center gap-1 shrink-0">
+            {isActive && (
+              <>
+                <button
+                  onClick={() => sleepAgent.mutate()}
+                  disabled={sleepAgent.isPending}
+                  className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  title="Sleep"
+                >
+                  <Square className="h-2.5 w-2.5" />
+                </button>
+                <button
+                  onClick={() => rebootAgent.mutate()}
+                  disabled={rebootAgent.isPending}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border bg-background/70 px-2 py-1 text-[10px] transition-colors",
+                    contextStale
+                      ? "border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 animate-pulse"
+                      : "border-border/70 text-muted-foreground hover:text-foreground",
+                  )}
+                  title={contextStale ? "Context changed — Reboot" : "Reboot"}
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                </button>
+              </>
+            )}
+            <Link
+              to={`/agents/${run.agentId}/runs/${run.id}`}
+              className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
+          </div>
         </div>
 
         {run.issueId && (

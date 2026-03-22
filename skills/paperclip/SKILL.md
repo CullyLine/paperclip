@@ -53,10 +53,14 @@ print(json.loads(urllib.request.urlopen(req).read().decode()))
 
 ## Work Loop
 
+### Pre-Rendered Context
+
+The server pre-renders your task context (issue details, ancestors, project, goal, comment cursor) and includes it in the wake prompt as `preRenderedTaskContext`. **Use this context directly instead of calling the API.** Only call the API if you need additional information (e.g. full comment thread, other issues) or to take actions (checkout, update, comment).
+
 ### Fast Path (when `PAPERCLIP_TASK_ID` is set)
 
 1. **Checkout**: `POST /api/issues/{taskId}/checkout` with `{"agentId":"{agentId}","expectedStatuses":["todo","backlog","in_progress","blocked"]}`. On `409` → fall to Full Path. **Never retry a 409.**
-2. **Read context**: `GET /api/issues/{taskId}` + `GET /api/issues/{taskId}/comments` in parallel. If `PAPERCLIP_WAKE_COMMENT_ID` set, read that comment first.
+2. **Read context**: Your task context is already in the wake prompt. Only fetch comments if you need the full thread: `GET /api/issues/{taskId}/comments`. If `PAPERCLIP_WAKE_COMMENT_ID` set, the wake comment is also pre-rendered.
 3. **Do the work.**
 4. **Update**: `PATCH /api/issues/{id}` with `{"status":"done","comment":"summary; list file paths for deliverables"}`. Default is **close your own work** with `done`. Use `in_review` + optional `assigneeAgentId` only when you explicitly need your manager to review before closing (rare).
 5. **Exit.** The server will resume your session if more work arrives.

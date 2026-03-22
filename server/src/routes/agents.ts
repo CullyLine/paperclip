@@ -1369,6 +1369,62 @@ export function agentRoutes(db: Db) {
     res.json({ status: "sleeping" });
   });
 
+  // ── Work Queue ─────────────────────────────────────────────────────
+  router.get("/agents/:id/work-queue", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+    const items = await heartbeat.workQueue.list(id);
+    res.json(items);
+  });
+
+  router.post("/agents/:id/work-queue", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+    const { issueId } = req.body as { issueId?: string };
+    if (!issueId) { res.status(400).json({ error: "issueId is required" }); return; }
+    const itemId = await heartbeat.workQueue.add(agent.companyId, id, issueId, "manual");
+    res.json({ id: itemId });
+  });
+
+  router.put("/agents/:id/work-queue/reorder", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+    const { items } = req.body as { items?: Array<{ id: string; queueOrder: number }> };
+    if (!Array.isArray(items)) { res.status(400).json({ error: "items array is required" }); return; }
+    await heartbeat.workQueue.reorder(items);
+    res.json({ status: "ok" });
+  });
+
+  router.delete("/agents/:id/work-queue/:itemId", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+    await heartbeat.workQueue.remove(req.params.itemId as string);
+    res.json({ status: "ok" });
+  });
+
+  router.delete("/agents/:id/work-queue", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
+    assertCompanyAccess(req, agent.companyId);
+    if (req.query.confirm !== "true") { res.status(400).json({ error: "confirm=true query param required" }); return; }
+    await heartbeat.workQueue.clearAll(id);
+    res.json({ status: "ok" });
+  });
+
   router.delete("/agents/:id", async (req, res) => {
     assertBoard(req);
     const id = req.params.id as string;

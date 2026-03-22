@@ -15,6 +15,8 @@ export const agentTaskSessions = pgTable(
     sessionDisplayId: text("session_display_id"),
     lastRunId: uuid("last_run_id").references(() => heartbeatRuns.id),
     lastError: text("last_error"),
+    /** Tracks what the agent has already seen for delta-resume: { lastCommentCursor, lastIssueUpdatedAt, seenCommentIds } */
+    lastKnowledgeState: jsonb("last_knowledge_state").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

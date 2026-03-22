@@ -281,6 +281,13 @@
       "when": 1774140260607,
       "tag": "0039_colossal_nitro",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1774140824390,
+      "tag": "0040_flimsy_stark_industries",
+      "breakpoints": true
     }
   ]
 }

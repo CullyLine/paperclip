@@ -145,6 +145,16 @@ export const agentsApi = {
     api.get<{ current: string; booted: string | null; stale: boolean; changedComponents: string[] }>(
       agentPath(id, companyId, "/context-fingerprint"),
     ),
+  workQueue: (id: string, companyId?: string) =>
+    api.get<WorkQueueItem[]>(agentPath(id, companyId, "/work-queue")),
+  workQueueAdd: (id: string, issueId: string, companyId?: string) =>
+    api.post<{ id: string }>(agentPath(id, companyId, "/work-queue"), { issueId }),
+  workQueueReorder: (id: string, items: Array<{ id: string; queueOrder: number }>, companyId?: string) =>
+    api.put<{ status: string }>(agentPath(id, companyId, "/work-queue/reorder"), { items }),
+  workQueueRemove: (id: string, itemId: string, companyId?: string) =>
+    api.delete<{ status: string }>(agentPath(id, companyId, `/work-queue/${encodeURIComponent(itemId)}`)),
+  workQueueClearAll: (id: string, companyId?: string) =>
+    api.delete<{ status: string }>(agentPath(id, companyId, "/work-queue?confirm=true")),
   wakeup: (
     id: string,
     data: {
@@ -161,6 +171,22 @@ export const agentsApi = {
   availableSkills: () =>
     api.get<{ skills: AvailableSkill[] }>("/skills/available"),
 };
+
+export interface WorkQueueItem {
+  id: string;
+  companyId: string;
+  agentId: string;
+  issueId: string | null;
+  queueOrder: number;
+  source: string;
+  status: string;
+  lockedRunId: string | null;
+  addedAt: string;
+  issueTitle: string | null;
+  issueIdentifier: string | null;
+  issueStatus: string | null;
+  issuePriority: string | null;
+}
 
 export interface AvailableSkill {
   name: string;

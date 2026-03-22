@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, bigint, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, bigint, integer, index, boolean } from "drizzle-orm/pg-core";
 import { agents } from "./agents.js";
 import { companies } from "./companies.js";
 
@@ -19,6 +19,12 @@ export const agentRuntimeState = pgTable(
     lastError: text("last_error"),
     /** Resets to 0 on success, increments on failure. Circuit-breaks at threshold. */
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    /** Start of the current cost-velocity sliding window. */
+    velocityWindowStart: timestamp("velocity_window_start", { withTimezone: true }),
+    /** Tokens consumed in the current velocity window. */
+    velocityWindowTokens: bigint("velocity_window_tokens", { mode: "number" }).notNull().default(0),
+    /** Runs completed in the current velocity window. */
+    velocityWindowRuns: integer("velocity_window_runs").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

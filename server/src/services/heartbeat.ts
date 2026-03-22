@@ -11,6 +11,7 @@ import {
   agentRuntimeState,
   agentTaskSessions,
   agentWakeupRequests,
+  agentWorkQueue,
   heartbeatRunEvents,
   heartbeatRuns,
   issues,
@@ -41,6 +42,8 @@ import {
   sanitizeRuntimeServiceBaseEnv,
 } from "./workspace-runtime.js";
 import { issueService } from "./issues.js";
+import { goalService } from "./goals.js";
+import { projectService } from "./projects.js";
 import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import {
@@ -605,6 +608,17 @@ function truncateDisplayId(value: string | null | undefined, max = 128) {
   return value.length > max ? value.slice(0, max) : value;
 }
 
+const PRIORITY_ORDER_MAP: Record<string, number> = {
+  critical: 0,
+  high: 100,
+  medium: 200,
+  low: 300,
+};
+
+function priorityToQueueOrder(priority: string | null | undefined): number {
+  return PRIORITY_ORDER_MAP[priority ?? "medium"] ?? 200;
+}
+
 function normalizeAgentNameKey(value: string | null | undefined) {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
@@ -701,6 +715,8 @@ export function heartbeatService(db: Db) {
   const runLogStore = getRunLogStore();
   const secretsSvc = secretService(db);
   const issuesSvc = issueService(db);
+  const goalsSvc = goalService(db);
+  const projectsSvc = projectService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const workspaceOperationsSvc = workspaceOperationService(db);
   const activeRunExecutions = new Set<string>();
@@ -1162,6 +1178,7 @@ export function heartbeatService(db: Db) {
     sessionDisplayId: string | null;
     lastRunId: string | null;
     lastError: string | null;
+    lastKnowledgeState?: Record<string, unknown> | null;
   }) {
     const existing = await getTaskSession(
       input.companyId,
@@ -1170,15 +1187,19 @@ export function heartbeatService(db: Db) {
       input.taskKey,
     );
     if (existing) {
+      const patch: Partial<typeof agentTaskSessions.$inferInsert> = {
+        sessionParamsJson: input.sessionParamsJson,
+        sessionDisplayId: input.sessionDisplayId,
+        lastRunId: input.lastRunId,
+        lastError: input.lastError,
+        updatedAt: new Date(),
+      };
+      if (input.lastKnowledgeState !== undefined) {
+        patch.lastKnowledgeState = input.lastKnowledgeState;
+      }
       return db
         .update(agentTaskSessions)
-        .set({
-          sessionParamsJson: input.sessionParamsJson,
-          sessionDisplayId: input.sessionDisplayId,
-          lastRunId: input.lastRunId,
-          lastError: input.lastError,
-          updatedAt: new Date(),
-        })
+        .set(patch)
         .where(eq(agentTaskSessions.id, existing.id))
         .returning()
         .then((rows) => rows[0] ?? null);
@@ -1195,6 +1216,7 @@ export function heartbeatService(db: Db) {
         sessionDisplayId: input.sessionDisplayId,
         lastRunId: input.lastRunId,
         lastError: input.lastError,
+        lastKnowledgeState: input.lastKnowledgeState ?? null,
       })
       .returning()
       .then((rows) => rows[0] ?? null);
@@ -1546,6 +1568,22 @@ export function heartbeatService(db: Db) {
     const ledgerScope = await resolveLedgerScopeForRun(db, agent.companyId, run);
 
     const runFailed = run.status === "failed";
+    const runTokens = inputTokens + outputTokens;
+    const now = new Date();
+    const VELOCITY_WINDOW_MS = 5 * 60 * 1000;
+
+    const [currentState] = await db
+      .select({
+        velocityWindowStart: agentRuntimeState.velocityWindowStart,
+        velocityWindowTokens: agentRuntimeState.velocityWindowTokens,
+        velocityWindowRuns: agentRuntimeState.velocityWindowRuns,
+      })
+      .from(agentRuntimeState)
+      .where(eq(agentRuntimeState.agentId, agent.id));
+
+    const windowStart = currentState?.velocityWindowStart;
+    const windowExpired = !windowStart || (now.getTime() - new Date(windowStart).getTime()) > VELOCITY_WINDOW_MS;
+
     await db
       .update(agentRuntimeState)
       .set({
@@ -1561,7 +1599,14 @@ export function heartbeatService(db: Db) {
         consecutiveFailures: runFailed
           ? sql`${agentRuntimeState.consecutiveFailures} + 1`
           : 0,
-        updatedAt: new Date(),
+        velocityWindowStart: windowExpired ? now : undefined,
+        velocityWindowTokens: windowExpired
+          ? runTokens
+          : sql`${agentRuntimeState.velocityWindowTokens} + ${runTokens}`,
+        velocityWindowRuns: windowExpired
+          ? 1
+          : sql`${agentRuntimeState.velocityWindowRuns} + 1`,
+        updatedAt: now,
       })
       .where(eq(agentRuntimeState.agentId, agent.id));
 
@@ -1581,7 +1626,32 @@ export function heartbeatService(db: Db) {
           .set({
             runMode: "off",
             pauseReason: `Circuit breaker: ${state.consecutiveFailures} consecutive failures`,
-            updatedAt: new Date(),
+            updatedAt: now,
+          })
+          .where(eq(agents.id, agent.id));
+      }
+    }
+
+    const VELOCITY_TOKEN_THRESHOLD = 500_000;
+    if (!windowExpired && runTokens > 0) {
+      const [velocityState] = await db
+        .select({
+          velocityWindowTokens: agentRuntimeState.velocityWindowTokens,
+          velocityWindowRuns: agentRuntimeState.velocityWindowRuns,
+        })
+        .from(agentRuntimeState)
+        .where(eq(agentRuntimeState.agentId, agent.id));
+      if (velocityState && velocityState.velocityWindowTokens > VELOCITY_TOKEN_THRESHOLD) {
+        logger.warn(
+          { agentId: agent.id, tokens: velocityState.velocityWindowTokens, runs: velocityState.velocityWindowRuns },
+          "cost-velocity-kill: auto-sleeping agent due to high token velocity",
+        );
+        await db
+          .update(agents)
+          .set({
+            runMode: "off",
+            pauseReason: `Cost velocity exceeded: ${velocityState.velocityWindowTokens} tokens in ${velocityState.velocityWindowRuns} runs within 5 minutes`,
+            updatedAt: now,
           })
           .where(eq(agents.id, agent.id));
       }
@@ -1605,6 +1675,130 @@ export function heartbeatService(db: Db) {
         occurredAt: new Date(),
       });
     }
+  }
+
+  async function preRenderTaskContext(
+    companyId: string,
+    issueId: string,
+    wakeCommentId?: string | null,
+    knowledgeState?: Record<string, unknown> | null,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const issue = await issuesSvc.getById(issueId);
+      if (!issue || issue.companyId !== companyId) return null;
+
+      const [ancestors, project, goal, commentCursor, wakeComment] = await Promise.all([
+        issuesSvc.getAncestors(issue.id),
+        issue.projectId ? projectsSvc.getById(issue.projectId) : null,
+        issue.goalId
+          ? goalsSvc.getById(issue.goalId)
+          : !issue.projectId
+            ? goalsSvc.getDefaultCompanyGoal(issue.companyId)
+            : null,
+        issuesSvc.getCommentCursor(issue.id),
+        wakeCommentId ? issuesSvc.getComment(wakeCommentId) : null,
+      ]);
+
+      let deltaComments: unknown[] | null = null;
+      const priorCursor = knowledgeState?.lastCommentCursor as string | null | undefined;
+      if (priorCursor) {
+        const allComments = await issuesSvc.listComments(issueId);
+        const cursorIdx = allComments.findIndex((c: { id: string }) => c.id === priorCursor);
+        deltaComments = cursorIdx >= 0 ? allComments.slice(cursorIdx + 1) : null;
+      }
+
+      return {
+        issue: {
+          id: issue.id,
+          identifier: issue.identifier,
+          title: issue.title,
+          description: issue.description,
+          status: issue.status,
+          priority: issue.priority,
+          projectId: issue.projectId,
+          goalId: goal?.id ?? issue.goalId,
+          parentId: issue.parentId,
+          assigneeAgentId: issue.assigneeAgentId,
+          assigneeUserId: issue.assigneeUserId,
+          updatedAt: issue.updatedAt,
+        },
+        ancestors: ancestors.map((a) => ({
+          id: a.id,
+          identifier: a.identifier,
+          title: a.title,
+          status: a.status,
+          priority: a.priority,
+        })),
+        project: project ? { id: project.id, name: project.name, status: project.status, targetDate: project.targetDate } : null,
+        goal: goal ? { id: goal.id, title: goal.title, status: goal.status, level: goal.level, parentId: goal.parentId } : null,
+        commentCursor,
+        wakeComment: wakeComment && wakeComment.issueId === issue.id ? wakeComment : null,
+        deltaComments,
+        isDelta: !!priorCursor,
+      };
+    } catch (err) {
+      logger.warn({ err, issueId }, "pre-render-task-context: failed");
+      return null;
+    }
+  }
+
+  async function ensureWorkQueueItem(
+    companyId: string,
+    agentId: string,
+    issueId: string,
+    source: string,
+  ) {
+    const existing = await db
+      .select({ id: agentWorkQueue.id })
+      .from(agentWorkQueue)
+      .where(
+        and(
+          eq(agentWorkQueue.agentId, agentId),
+          eq(agentWorkQueue.issueId, issueId),
+          inArray(agentWorkQueue.status, ["pending", "locked"]),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (existing) return existing.id;
+
+    const issue = await db
+      .select({ priority: issues.priority })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+    const queueOrder = priorityToQueueOrder(issue?.priority);
+
+    const [item] = await db
+      .insert(agentWorkQueue)
+      .values({ companyId, agentId, issueId, queueOrder, source })
+      .returning();
+    return item.id;
+  }
+
+  async function markWorkQueueItemCompleted(agentId: string, issueId: string) {
+    await db
+      .update(agentWorkQueue)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentWorkQueue.agentId, agentId),
+          eq(agentWorkQueue.issueId, issueId),
+          inArray(agentWorkQueue.status, ["pending", "locked"]),
+        ),
+      );
+  }
+
+  async function unlockWorkQueueItemForRun(runId: string) {
+    await db
+      .update(agentWorkQueue)
+      .set({ status: "pending", lockedRunId: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentWorkQueue.lockedRunId, runId),
+          eq(agentWorkQueue.status, "locked"),
+        ),
+      );
   }
 
   async function startNextQueuedRunForAgent(agentId: string) {
@@ -2371,6 +2565,11 @@ export function heartbeatService(db: Db) {
           },
         });
         await releaseIssueExecutionAndPromote(finalizedRun);
+        if (issueId && outcome === "succeeded") {
+          await markWorkQueueItemCompleted(agent.id, issueId).catch(() => undefined);
+        } else if (issueId) {
+          await unlockWorkQueueItemForRun(finalizedRun.id).catch(() => undefined);
+        }
       }
 
       if (finalizedRun) {
@@ -2384,6 +2583,16 @@ export function heartbeatService(db: Db) {
               adapterType: agent.adapterType,
             });
           } else {
+            const preRendered = parseObject((context as Record<string, unknown>).preRenderedTaskContext);
+            const commentCursor = preRendered.commentCursor as Record<string, unknown> | null;
+            const knowledgeState: Record<string, unknown> | null = issueId
+              ? {
+                  issueId,
+                  lastCommentCursor: commentCursor?.latestCommentId ?? null,
+                  lastIssueUpdatedAt: (preRendered.issue as Record<string, unknown> | null)?.updatedAt ?? null,
+                  updatedAtRun: finalizedRun.id,
+                }
+              : null;
             await upsertTaskSession({
               companyId: agent.companyId,
               agentId: agent.id,
@@ -2393,6 +2602,7 @@ export function heartbeatService(db: Db) {
               sessionDisplayId: nextSessionState.displayId,
               lastRunId: finalizedRun.id,
               lastError: outcome === "succeeded" ? null : (adapterResult.errorMessage ?? "run_failed"),
+              lastKnowledgeState: knowledgeState,
             });
           }
         }
@@ -2670,6 +2880,18 @@ export function heartbeatService(db: Db) {
 
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
+
+    if (issueId && !enrichedContextSnapshot.preRenderedTaskContext) {
+      let priorKnowledgeState: Record<string, unknown> | null = null;
+      if (taskKey) {
+        const session = await getTaskSession(agent.companyId, agent.id, agent.adapterType, taskKey);
+        priorKnowledgeState = (session?.lastKnowledgeState as Record<string, unknown>) ?? null;
+      }
+      const preRendered = await preRenderTaskContext(agent.companyId, issueId, wakeCommentId, priorKnowledgeState);
+      if (preRendered) {
+        enrichedContextSnapshot.preRenderedTaskContext = preRendered;
+      }
+    }
 
     const writeSkippedRequest = async (skipReason: string) => {
       await db.insert(agentWakeupRequests).values({
@@ -2999,6 +3221,13 @@ export function heartbeatService(db: Db) {
       if (outcome.kind === "coalesced") return outcome.run;
 
       const newRun = outcome.run;
+
+      if (issueId) {
+        await ensureWorkQueueItem(agent.companyId, agent.id, issueId, source).catch((err) => {
+          logger.warn({ err, agentId, issueId }, "work-queue: failed to insert item");
+        });
+      }
+
       publishLiveEvent({
         companyId: newRun.companyId,
         type: "heartbeat.run.queued",
@@ -3108,6 +3337,12 @@ export function heartbeatService(db: Db) {
         updatedAt: new Date(),
       })
       .where(eq(agentWakeupRequests.id, wakeupRequest.id));
+
+    if (issueId) {
+      await ensureWorkQueueItem(agent.companyId, agent.id, issueId, source).catch((err) => {
+        logger.warn({ err, agentId, issueId }, "work-queue: failed to insert item");
+      });
+    }
 
     publishLiveEvent({
       companyId: newRun.companyId,
@@ -3516,6 +3751,68 @@ export function heartbeatService(db: Db) {
         .orderBy(desc(heartbeatRuns.startedAt))
         .limit(1);
       return run ?? null;
+    },
+
+    workQueue: {
+      list: async (agentId: string) => {
+        return db
+          .select({
+            id: agentWorkQueue.id,
+            companyId: agentWorkQueue.companyId,
+            agentId: agentWorkQueue.agentId,
+            issueId: agentWorkQueue.issueId,
+            queueOrder: agentWorkQueue.queueOrder,
+            source: agentWorkQueue.source,
+            status: agentWorkQueue.status,
+            lockedRunId: agentWorkQueue.lockedRunId,
+            addedAt: agentWorkQueue.addedAt,
+            issueTitle: issues.title,
+            issueIdentifier: issues.identifier,
+            issueStatus: issues.status,
+            issuePriority: issues.priority,
+          })
+          .from(agentWorkQueue)
+          .leftJoin(issues, eq(agentWorkQueue.issueId, issues.id))
+          .where(
+            and(
+              eq(agentWorkQueue.agentId, agentId),
+              inArray(agentWorkQueue.status, ["pending", "locked"]),
+            ),
+          )
+          .orderBy(asc(agentWorkQueue.queueOrder), asc(agentWorkQueue.addedAt));
+      },
+
+      add: async (companyId: string, agentId: string, issueId: string, source = "manual") => {
+        return ensureWorkQueueItem(companyId, agentId, issueId, source);
+      },
+
+      reorder: async (items: Array<{ id: string; queueOrder: number }>) => {
+        for (const item of items) {
+          await db
+            .update(agentWorkQueue)
+            .set({ queueOrder: item.queueOrder, updatedAt: new Date() })
+            .where(eq(agentWorkQueue.id, item.id));
+        }
+      },
+
+      remove: async (itemId: string) => {
+        await db
+          .update(agentWorkQueue)
+          .set({ status: "removed", updatedAt: new Date() })
+          .where(eq(agentWorkQueue.id, itemId));
+      },
+
+      clearAll: async (agentId: string) => {
+        await db
+          .update(agentWorkQueue)
+          .set({ status: "removed", updatedAt: new Date() })
+          .where(
+            and(
+              eq(agentWorkQueue.agentId, agentId),
+              eq(agentWorkQueue.status, "pending"),
+            ),
+          );
+      },
     },
   };
 }

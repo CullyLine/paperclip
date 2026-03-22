@@ -19,6 +19,7 @@ import { PageTabBar } from "../components/PageTabBar";
 import { adapterLabels, roleLabels } from "../components/agent-config-primitives";
 import { getUIAdapter, buildTranscript } from "../adapters";
 import { StatusBadge } from "../components/StatusBadge";
+import { WorkQueuePanel } from "../components/WorkQueuePanel";
 import { agentStatusDot, agentStatusDotDefault } from "../lib/status-colors";
 import { MarkdownBody } from "../components/MarkdownBody";
 import { CopyText } from "../components/CopyText";
@@ -957,6 +958,7 @@ export function AgentDetail() {
           runtimeState={runtimeState}
           agentId={agent.id}
           agentRouteId={canonicalAgentRef}
+          companyId={resolvedCompanyId ?? undefined}
         />
       )}
 
@@ -1093,6 +1095,7 @@ function AgentOverview({
   runtimeState,
   agentId,
   agentRouteId,
+  companyId,
 }: {
   agent: Agent;
   runs: HeartbeatRun[];
@@ -1100,11 +1103,15 @@ function AgentOverview({
   runtimeState?: AgentRuntimeState;
   agentId: string;
   agentRouteId: string;
+  companyId?: string;
 }) {
   return (
     <div className="space-y-8">
       {/* Latest Run */}
       <LatestRunCard runs={runs} agentId={agentRouteId} />
+
+      {/* Work Queue */}
+      <WorkQueuePanel agentId={agentId} companyId={companyId} />
 
       {/* Charts */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
