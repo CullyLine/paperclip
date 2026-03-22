@@ -267,6 +267,13 @@
       "when": 1773756922363,
       "tag": "0037_friendly_eddie_brock",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1774138703891,
+      "tag": "0038_bumpy_runaways",
+      "breakpoints": true
     }
   ]
 }

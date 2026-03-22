@@ -69,10 +69,10 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
     ...lines,
     secretsNote,
     "",
-    "IMPORTANT (Windows/PowerShell):",
-    "- Shell environment variables may NOT be inherited by subprocesses. Use the literal values above instead of $env: references.",
-    "- Use Invoke-RestMethod for ALL API calls. Do NOT use curl or curl.exe — PowerShell mangles JSON curly braces {} in command arguments.",
-    "- For non-Paperclip secrets (user-configured API keys), use PowerShell syntax: $env:VAR_NAME",
+    "IMPORTANT:",
+    "- Use the literal values above directly in API calls — do NOT run shell commands to read env vars.",
+    "- Use Python (urllib.request) for ALL Paperclip API calls. Do NOT use curl, Invoke-RestMethod, or Invoke-WebRequest — they have escaping issues with JSON on Windows.",
+    "- For non-Paperclip secrets (user-configured API keys), access via shell env: $env:VAR_NAME (PowerShell) or $VAR_NAME (bash).",
     "",
     "",
   ].join("\n");
@@ -80,13 +80,16 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
 
 function renderApiAccessNote(env: Record<string, string>): string {
   if (!hasNonEmptyEnvValue(env, "PAPERCLIP_API_URL") || !hasNonEmptyEnvValue(env, "PAPERCLIP_API_KEY")) return "";
+  const apiUrl = env.PAPERCLIP_API_URL ?? "";
+  const apiKey = env.PAPERCLIP_API_KEY ?? "";
+  const runId = env.PAPERCLIP_RUN_ID ?? "";
   return [
     "Paperclip API access note:",
-    "Use run_shell_command with curl to make Paperclip API requests.",
+    "Use Python (urllib.request) for ALL Paperclip API calls. Do NOT use curl or Invoke-RestMethod.",
     "GET example:",
-    `  run_shell_command({ command: "curl -s -H \\"Authorization: Bearer $PAPERCLIP_API_KEY\\" \\"$PAPERCLIP_API_URL/api/agents/me\\"" })`,
+    `  run_shell_command({ command: "python -c \\"import urllib.request,json; req=urllib.request.Request('${apiUrl}/api/agents/me',headers={'Authorization':'Bearer ${apiKey}'}); print(json.loads(urllib.request.urlopen(req).read().decode()))\\"" })`,
     "POST/PATCH example:",
-    `  run_shell_command({ command: "curl -s -X POST -H \\"Authorization: Bearer $PAPERCLIP_API_KEY\\" -H 'Content-Type: application/json' -H \\"X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID\\" -d '{...}' \\"$PAPERCLIP_API_URL/api/issues/{id}/checkout\\"" })`,
+    `  run_shell_command({ command: "python -c \\"import urllib.request,json; body=json.dumps({'status':'done','comment':'Done.'}).encode(); req=urllib.request.Request('${apiUrl}/api/issues/{id}',data=body,method='PATCH',headers={'Content-Type':'application/json','Authorization':'Bearer ${apiKey}','X-Paperclip-Run-Id':'${runId}'}); print(json.loads(urllib.request.urlopen(req).read().decode()))\\"" })`,
     "",
     "",
   ].join("\n");

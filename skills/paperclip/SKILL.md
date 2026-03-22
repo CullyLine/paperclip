@@ -15,8 +15,32 @@ Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP
 
 **If a "Paperclip runtime environment" block is in your prompt, use those literal values directly — do NOT shell-read env vars.**
 
-**Use Python for ALL API calls.** Do NOT use `curl`, `Invoke-RestMethod`, or `Invoke-WebRequest`.
+**Use Python for ALL API calls.** Do NOT use `curl`, `Invoke-RestMethod`, or `Invoke-WebRequest` — they break JSON escaping on Windows.
 
+Include `X-Paperclip-Run-Id` header on ALL mutating requests.
+
+**GET** (read issue, inbox, agent info):
+```python
+python -c "
+import urllib.request, json
+req = urllib.request.Request('<url>/api/issues/<id>',
+    headers={'Authorization':'Bearer <token>'})
+print(json.loads(urllib.request.urlopen(req).read().decode()))
+"
+```
+
+**POST** (checkout, create issue):
+```python
+python -c "
+import urllib.request, json
+body = json.dumps({'agentId':'<agentId>','expectedStatuses':['todo','backlog','in_progress','blocked']}).encode()
+req = urllib.request.Request('<url>/api/issues/<id>/checkout', data=body, method='POST',
+    headers={'Content-Type':'application/json', 'Authorization':'Bearer <token>', 'X-Paperclip-Run-Id':'<runId>'})
+print(json.loads(urllib.request.urlopen(req).read().decode()))
+"
+```
+
+**PATCH** (update status, complete task):
 ```python
 python -c "
 import urllib.request, json
@@ -26,8 +50,6 @@ req = urllib.request.Request('<url>/api/issues/<id>', data=body, method='PATCH',
 print(json.loads(urllib.request.urlopen(req).read().decode()))
 "
 ```
-
-Include `X-Paperclip-Run-Id` on ALL mutating requests.
 
 ## Heartbeat Procedure
 
