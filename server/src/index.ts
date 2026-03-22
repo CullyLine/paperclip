@@ -26,7 +26,8 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
-import { heartbeatService, reconcilePersistedRuntimeServicesOnStartup } from "./services/index.js";
+import { heartbeatService, contextFingerprintService, reconcilePersistedRuntimeServicesOnStartup } from "./services/index.js";
+import { agents } from "@paperclipai/db";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
@@ -556,6 +557,32 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "periodic heartbeat recovery failed");
         });
     }, config.heartbeatSchedulerIntervalMs);
+
+    const ctxFingerprint = contextFingerprintService(db as any);
+    setInterval(() => {
+      void (async () => {
+        try {
+          const persistentAgents = await (db as any)
+            .select({ id: agents.id, autoRebootOnContextChange: agents.autoRebootOnContextChange, lastBootedContextFingerprint: agents.lastBootedContextFingerprint })
+            .from(agents)
+            .where(and(eq(agents.runMode, "persistent"), eq(agents.autoRebootOnContextChange, true)));
+
+          for (const agent of persistentAgents) {
+            if (!agent.lastBootedContextFingerprint) continue;
+            const comparison = await ctxFingerprint.compareFingerprint(agent.id);
+            if (comparison?.stale) {
+              await ctxFingerprint.markRebootPending(agent.id);
+              logger.info(
+                { agentId: agent.id, current: comparison.current, booted: comparison.booted },
+                "context-change-monitor: marked agent for reboot-after-task",
+              );
+            }
+          }
+        } catch (err) {
+          logger.error({ err }, "context-change-monitor tick failed");
+        }
+      })();
+    }, 60_000);
   }
   
   if (config.databaseBackupEnabled) {

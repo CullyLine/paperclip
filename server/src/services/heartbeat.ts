@@ -26,6 +26,7 @@ import type { AdapterExecutionResult, AdapterInvocationMeta, AdapterSessionCodec
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { costService } from "./costs.js";
+import { contextFingerprintService } from "./context-fingerprint.js";
 import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
@@ -707,6 +708,7 @@ export function heartbeatService(db: Db) {
     cancelWorkForScope: cancelBudgetScopeWork,
   };
   const budgets = budgetService(db, budgetHooks);
+  const ctxFingerprint = contextFingerprintService(db);
 
   async function getAgent(agentId: string) {
     return db
@@ -1585,6 +1587,20 @@ export function heartbeatService(db: Db) {
       if (!agent) return [];
       if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") {
         return [];
+      }
+
+      if (agent.runMode === "off") return [];
+
+      if (agent.rebootPending) {
+        await db
+          .update(agents)
+          .set({
+            currentRunSessionId: null,
+            rebootPending: false,
+            updatedAt: new Date(),
+          })
+          .where(eq(agents.id, agentId));
+        logger.info({ agentId }, "reboot-after-task: cleared session for pending reboot");
       }
       const policy = parseHeartbeatPolicy(agent);
       const runningCount = await countRunningRunsForAgent(agentId);
