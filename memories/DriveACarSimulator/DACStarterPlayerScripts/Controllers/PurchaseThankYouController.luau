@@ -78,7 +78,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 
 	local vignette = Instance.new("Frame")
 	vignette.Size = UDim2.fromScale(1, 1)
-	vignette.BackgroundColor3 = Color3.fromRGB(10, 5, 20)
+	vignette.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	vignette.BackgroundTransparency = 1
 	vignette.ZIndex = 951
 	vignette.Parent = sg
@@ -95,38 +95,31 @@ local function showThankYou(payload: any, onDone: () -> ())
 	card.AnchorPoint = Vector2.new(0.5, 0.5)
 	card.Position = UDim2.new(0.5, 0, 0.65, 0)
 	card.Size = UDim2.fromOffset(400, 340)
-	card.BackgroundColor3 = Color3.fromRGB(14, 10, 28)
-	card.BackgroundTransparency = 0.5
+	card.BackgroundColor3 = Color3.fromRGB(255, 214, 238)
+	card.BackgroundTransparency = 0.02
 	card.ZIndex = 960
 	card.Parent = sg
-	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
 	local stroke = Instance.new("UIStroke", card)
-	stroke.Thickness = if tier == "supporter" or tier == "vip" then 2.8 else 2.5
+	stroke.Thickness = 2.5
 	local gold = Color3.fromRGB(255, 213, 79)
 	local brightGold = Color3.fromRGB(255, 225, 100)
-	stroke.Color = if tier == "supporter" then brightGold else gold
-	local cardGrad = Instance.new("UIGradient", card)
-	cardGrad.Rotation = 90
-	cardGrad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 28, 15)),
-		ColorSequenceKeypoint.new(0.3, Color3.fromRGB(14, 10, 28)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 15, 10)),
-	})
+	stroke.Color = Color3.fromRGB(42, 42, 64)
 
 	local headline = Instance.new("TextLabel")
 	headline.BackgroundTransparency = 1
-	headline.Font = Enum.Font.GothamBlack
+	headline.Font = Enum.Font.GothamBold
 	headline.TextSize = 18
-	headline.TextColor3 = gold
+	headline.TextColor3 = Color3.fromRGB(30, 30, 30)
 	headline.TextTransparency = 1
 	headline.ZIndex = 965
 	headline.Parent = card
 
 	local subline = Instance.new("TextLabel")
 	subline.BackgroundTransparency = 1
-	subline.Font = Enum.Font.GothamBold
+	subline.Font = Enum.Font.Gotham
 	subline.TextSize = 12
-	subline.TextColor3 = Color3.fromRGB(220, 210, 230)
+	subline.TextColor3 = Color3.fromRGB(80, 80, 90)
 	subline.TextTransparency = 1
 	subline.ZIndex = 965
 	subline.Parent = card
@@ -163,14 +156,14 @@ local function showThankYou(payload: any, onDone: () -> ())
 	spot.Size = UDim2.fromOffset(90, 90)
 	spot.AnchorPoint = Vector2.new(0.5, 0.5)
 	spot.Position = UDim2.new(0.5, 0, 0, 125)
-	spot.BackgroundColor3 = Color3.fromRGB(30, 24, 55)
+	spot.BackgroundColor3 = Color3.fromRGB(240, 195, 220)
 	spot.ZIndex = 975
 	spot.Parent = card
 	Instance.new("UICorner", spot).CornerRadius = UDim.new(0, 14)
 	local spotStroke = Instance.new("UIStroke", spot)
 	spotStroke.Thickness = if tier == "supporter" then 2.5 else 2
-	spotStroke.Color = Color3.fromRGB(255, 220, 100)
-	spotStroke.Transparency = 0.1
+	spotStroke.Color = Color3.fromRGB(42, 42, 64)
+	spotStroke.Transparency = 0
 
 	local icon = Instance.new("ImageLabel")
 	icon.BackgroundTransparency = 1
@@ -187,14 +180,14 @@ local function showThankYou(payload: any, onDone: () -> ())
 		b.Size = UDim2.fromOffset(70, 16)
 		b.AnchorPoint = Vector2.new(0.5, 0)
 		b.Position = UDim2.new(0.5, 0, 1, 4)
-		b.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
+		b.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
 		b.ZIndex = 976
 		b.Parent = spot
 		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
 		local bl = Instance.new("TextLabel")
 		bl.BackgroundTransparency = 1
 		bl.Size = UDim2.fromScale(1, 1)
-		bl.Font = Enum.Font.GothamBlack
+		bl.Font = Enum.Font.GothamBold
 		bl.TextSize = 8
 		bl.TextColor3 = Color3.new(1, 1, 1)
 		bl.Text = "PERMANENT"
@@ -204,9 +197,9 @@ local function showThankYou(payload: any, onDone: () -> ())
 
 	local itemName = Instance.new("TextLabel")
 	itemName.BackgroundTransparency = 1
-	itemName.Font = Enum.Font.GothamBlack
+	itemName.Font = Enum.Font.GothamBold
 	itemName.TextSize = 16
-	itemName.TextColor3 = Color3.new(1, 1, 1)
+	itemName.TextColor3 = Color3.fromRGB(30, 30, 30)
 	itemName.TextTransparency = 1
 	itemName.Text = type(payload.displayName) == "string" and payload.displayName or "Thank you!"
 	itemName.Position = UDim2.new(0.5, 0, 0, 178)
@@ -277,7 +270,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 			row.BackgroundTransparency = 1
 			row.Font = Enum.Font.Gotham
 			row.TextSize = 11
-			row.TextColor3 = Color3.fromRGB(180, 220, 180)
+			row.TextColor3 = Color3.fromRGB(40, 100, 60)
 			row.TextXAlignment = Enum.TextXAlignment.Left
 			row.Text = "✓ " .. line
 			row.Size = UDim2.new(1, 0, 0, 16)
@@ -287,7 +280,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	end
 
 	local divider = Instance.new("Frame")
-	divider.BackgroundColor3 = gold
+	divider.BackgroundColor3 = Color3.fromRGB(42, 42, 64)
 	divider.BackgroundTransparency = 1
 	divider.Size = UDim2.new(0.7, 0, 0, 1)
 	divider.Position = UDim2.new(0.5, 0, 0, 190)
@@ -297,24 +290,20 @@ local function showThankYou(payload: any, onDone: () -> ())
 
 	local enjoy = Instance.new("TextButton")
 	enjoy.Name = "Enjoy"
-	enjoy.Font = Enum.Font.GothamBlack
+	enjoy.Font = Enum.Font.GothamBold
 	enjoy.TextSize = 16
-	enjoy.TextColor3 = Color3.fromRGB(20, 15, 40)
+	enjoy.TextColor3 = Color3.new(1, 1, 1)
 	enjoy.Text = "ENJOY!"
-	enjoy.AutoButtonColor = false
+	enjoy.AutoButtonColor = true
 	enjoy.Size = UDim2.new(0.5, 0, 0, 42)
 	enjoy.AnchorPoint = Vector2.new(0.5, 1)
 	enjoy.Position = UDim2.new(0.5, 0, 1, -24)
-	enjoy.BackgroundColor3 = gold
+	enjoy.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
 	enjoy.BackgroundTransparency = 1
 	enjoy.TextTransparency = 1
 	enjoy.ZIndex = 965
 	enjoy.Parent = card
 	Instance.new("UICorner", enjoy).CornerRadius = UDim.new(0, 10)
-	local estroke = Instance.new("UIStroke", enjoy)
-	estroke.Thickness = 1.5
-	estroke.Color = Color3.fromRGB(255, 240, 140)
-	estroke.Transparency = 0.15
 
 	local scale = Instance.new("UIScale")
 	scale.Scale = 0.6
@@ -392,14 +381,14 @@ local function showThankYou(payload: any, onDone: () -> ())
 			dot.Size = UDim2.fromOffset(math.random(2, 4), math.random(2, 4))
 			dot.Position = UDim2.new(math.random(), 0, 0, -8)
 			if tier == "whale" then
-				dot.BackgroundColor3 = Color3.fromHSV(math.random(), 0.7, 1)
+				dot.BackgroundColor3 = Color3.fromHSV(math.random(), 0.3, 1)
 			elseif tier == "supporter" and math.random(1, 5) == 1 then
 				dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			else
 				dot.BackgroundColor3 = Color3.fromRGB(
-					math.random(235, 255),
-					math.random(200, 220),
-					math.random(60, 90)
+					math.random(220, 255),
+					math.random(180, 220),
+					math.random(200, 240)
 				)
 			end
 			dot.BackgroundTransparency = 0.2
@@ -491,9 +480,11 @@ local function showThankYou(payload: any, onDone: () -> ())
 
 	if tier == "vip" or tier == "whale" then
 		task.spawn(function()
+			local baseStroke = Color3.fromRGB(42, 42, 64)
+			local accentStroke = Color3.fromRGB(80, 60, 120)
 			while sg.Parent do
 				local t = os.clock() * (if tier == "whale" then 0.33 else 0.5)
-				stroke.Color = gold:Lerp(Color3.fromRGB(255, 240, 160), (math.sin(t) + 1) * 0.5)
+				stroke.Color = baseStroke:Lerp(accentStroke, (math.sin(t) + 1) * 0.5)
 				task.wait(0.05)
 			end
 		end)
@@ -502,7 +493,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	if tier == "whale" then
 		task.spawn(function()
 			while sg.Parent do
-				glow.BackgroundColor3 = Color3.fromHSV((os.clock() * 0.3) % 1, 0.5, 1)
+				glow.BackgroundColor3 = Color3.fromHSV((os.clock() * 0.3) % 1, 0.25, 1)
 				task.wait(0.03)
 			end
 		end)

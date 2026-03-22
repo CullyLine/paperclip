@@ -267,8 +267,8 @@ local function showPopup()
 	for i, line in lines do
 		local row = Instance.new("Frame")
 		row.Size = UDim2.new(1, 0, 0, 36)
-		row.BackgroundColor3 = Color3.fromRGB(35, 28, 55)
-		row.BackgroundTransparency = 0.15
+		row.BackgroundColor3 = Color3.fromRGB(240, 195, 220)
+		row.BackgroundTransparency = 0.3
 		row.LayoutOrder = i
 		row.Parent = rowsFrame
 		local corner = Instance.new("UICorner")
@@ -280,7 +280,7 @@ local function showPopup()
 		t.BackgroundTransparency = 1
 		t.Font = Enum.Font.Gotham
 		t.TextSize = 13
-		t.TextColor3 = Color3.fromRGB(220, 210, 245)
+		t.TextColor3 = Color3.fromRGB(40, 40, 50)
 		t.TextXAlignment = Enum.TextXAlignment.Left
 		t.TextWrapped = true
 		t.Text = line
@@ -347,26 +347,17 @@ function RetentionController.init()
 	card.Size = UDim2.fromOffset(340, 320)
 	card.Position = UDim2.new(0.5, 0, 0.5, 0)
 	card.AnchorPoint = Vector2.new(0.5, 0.5)
-	card.BackgroundColor3 = Color3.fromRGB(25, 20, 45)
-	card.BackgroundTransparency = 0.04
+	card.BackgroundColor3 = Color3.fromRGB(255, 214, 238)
+	card.BackgroundTransparency = 0.02
 	card.ZIndex = 2
 	card.Parent = sg
 	local cardCorner = Instance.new("UICorner")
 	cardCorner.CornerRadius = UDim.new(0, 14)
 	cardCorner.Parent = card
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 1.5
-	stroke.Color = Color3.fromRGB(140, 100, 220)
-	stroke.Transparency = 0.15
+	stroke.Thickness = 2.5
+	stroke.Color = Color3.fromRGB(42, 42, 64)
 	stroke.Parent = card
-	local grad = Instance.new("UIGradient")
-	grad.Rotation = 90
-	grad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 25, 60)),
-		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 20, 45)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(35, 25, 60)),
-	})
-	grad.Parent = card
 
 	local header = Instance.new("TextLabel")
 	header.Name = "HeaderLabel"
@@ -374,25 +365,26 @@ function RetentionController.init()
 	header.Position = UDim2.new(0.5, 0, 0, 16)
 	header.AnchorPoint = Vector2.new(0.5, 0)
 	header.BackgroundTransparency = 1
-	header.Font = Enum.Font.GothamBlack
+	header.Font = Enum.Font.GothamBold
 	header.TextSize = 22
-	header.TextColor3 = Color3.fromRGB(255, 220, 140)
+	header.TextColor3 = Color3.fromRGB(30, 30, 30)
 	header.Text = "Don't go yet!"
 	header.ZIndex = 3
 	header.Parent = card
 
 	local dismiss = Instance.new("TextButton")
 	dismiss.Name = "DismissBtn"
-	dismiss.Size = UDim2.fromOffset(28, 28)
-	dismiss.Position = UDim2.new(1, -8, 0, 8)
+	dismiss.Size = UDim2.fromOffset(32, 32)
+	dismiss.Position = UDim2.new(1, -6, 0, 4)
 	dismiss.AnchorPoint = Vector2.new(1, 0)
-	dismiss.BackgroundTransparency = 1
-	dismiss.Text = "✕"
+	dismiss.BackgroundColor3 = Color3.fromRGB(255, 34, 34)
+	dismiss.Text = "X"
 	dismiss.Font = Enum.Font.GothamBold
-	dismiss.TextSize = 14
-	dismiss.TextColor3 = Color3.fromRGB(120, 100, 140)
+	dismiss.TextSize = 18
+	dismiss.TextColor3 = Color3.new(1, 1, 1)
 	dismiss.ZIndex = 4
 	dismiss.Parent = card
+	Instance.new("UICorner", dismiss).CornerRadius = UDim.new(0, 8)
 	dismiss.MouseButton1Click:Connect(function()
 		touchActivity()
 		hidePopup()
@@ -405,7 +397,7 @@ function RetentionController.init()
 	body.BackgroundTransparency = 1
 	body.Font = Enum.Font.Gotham
 	body.TextSize = 15
-	body.TextColor3 = Color3.fromRGB(235, 230, 255)
+	body.TextColor3 = Color3.fromRGB(50, 50, 50)
 	body.TextWrapped = true
 	body.TextXAlignment = Enum.TextXAlignment.Left
 	body.TextYAlignment = Enum.TextYAlignment.Top
@@ -429,7 +421,7 @@ function RetentionController.init()
 	cta.Size = UDim2.new(1, -32, 0, 44)
 	cta.Position = UDim2.new(0.5, 0, 1, -16)
 	cta.AnchorPoint = Vector2.new(0.5, 1)
-	cta.BackgroundColor3 = Color3.fromRGB(120, 80, 220)
+	cta.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
 	cta.TextColor3 = Color3.new(1, 1, 1)
 	cta.Font = Enum.Font.GothamBold
 	cta.TextSize = 16

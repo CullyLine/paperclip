@@ -1,4 +1,8 @@
 --!strict
+--[[
+	Playtime gem countdown HUD.
+	UI is pre-built in StarterGui.DACPlaytimeGem; this script only wires behavior.
+]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,86 +21,22 @@ local PlaytimeGemHUD = {}
 
 function PlaytimeGemHUD.init()
 	local player = Players.LocalPlayer
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "DACPlaytimeGem"
-	gui.ResetOnSpawn = false
-	gui.Parent = player:WaitForChild("PlayerGui")
-
-	local root = Instance.new("Frame")
-	root.Name = "Root"
-	root.Size = UDim2.new(0, 280, 0, 44)
-	root.Position = UDim2.new(1, -290, 0, 88)
-	root.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
-	root.BackgroundTransparency = 0.2
-	root.BorderSizePixel = 0
-	root.Parent = gui
-	local rootScale = Instance.new("UIScale")
-	rootScale.Scale = 1
-	rootScale.Parent = root
-	local rootCorner = Instance.new("UICorner")
-	rootCorner.CornerRadius = UDim.new(0, 8)
-	rootCorner.Parent = root
-
-	local gemIcon = Instance.new("TextLabel")
-	gemIcon.Name = "GemIcon"
-	gemIcon.BackgroundTransparency = 1
-	gemIcon.Size = UDim2.fromOffset(22, 22)
-	gemIcon.Position = UDim2.new(0, 6, 0.5, -11)
-	gemIcon.Font = Enum.Font.GothamBold
-	gemIcon.TextSize = 18
-	gemIcon.Text = "◆"
-	gemIcon.TextColor3 = Color3.fromRGB(200, 140, 255)
-	gemIcon.TextXAlignment = Enum.TextXAlignment.Center
-	gemIcon.Parent = root
-
-	local ringStroke = Instance.new("UIStroke")
-	ringStroke.Name = "RingStroke"
-	ringStroke.Thickness = 2
-	ringStroke.Transparency = 0.55
-	ringStroke.Color = Color3.fromRGB(90, 80, 140)
-	ringStroke.Parent = root
-
-	local label = Instance.new("TextLabel")
-	label.Name = "TimeLabel"
-	label.Size = UDim2.new(1, -40, 0, 22)
-	label.Position = UDim2.new(0, 32, 0, 4)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 14
-	label.TextColor3 = Color3.fromRGB(200, 120, 255)
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = root
-
-	local barBg = Instance.new("Frame")
-	barBg.Name = "ProgressBg"
-	barBg.Size = UDim2.new(1, -40, 0, 6)
-	barBg.Position = UDim2.new(0, 32, 1, -10)
-	barBg.BackgroundColor3 = Color3.fromRGB(20, 22, 40)
-	barBg.BorderSizePixel = 0
-	barBg.Parent = root
-	local barBgCorner = Instance.new("UICorner")
-	barBgCorner.CornerRadius = UDim.new(1, 0)
-	barBgCorner.Parent = barBg
-
-	local barFill = Instance.new("Frame")
-	barFill.Name = "Fill"
-	barFill.Size = UDim2.new(0, 0, 1, 0)
-	barFill.BackgroundColor3 = Color3.fromRGB(180, 100, 255)
-	barFill.BorderSizePixel = 0
-	barFill.Parent = barBg
-	local barFillCorner = Instance.new("UICorner")
-	barFillCorner.CornerRadius = UDim.new(1, 0)
-	barFillCorner.Parent = barFill
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gui = playerGui:WaitForChild("DACPlaytimeGem") :: ScreenGui
+	local root = gui:WaitForChild("Root") :: Frame
+	local rootScale = root:WaitForChild("UIScale") :: UIScale
+	local gemIcon = root:WaitForChild("GemIcon") :: TextLabel
+	local ringStroke = root:WaitForChild("RingStroke") :: UIStroke
+	local label = root:WaitForChild("TimeLabel") :: TextLabel
+	local barBg = root:WaitForChild("ProgressBg") :: Frame
+	local barFill = barBg:WaitForChild("Fill") :: Frame
 
 	local need = Constants.PLAYTIME_GEM_INTERVAL or 300
 	local lastLeft = need
 	local lastPlaytimeProgress = 0
-	local urgencyConn: RBXScriptConnection? = nil
 
 	local function update(data: any)
-		if not data then
-			return
-		end
+		if not data then return end
 		local p = data.playtimeSecondsSinceGem or 0
 		lastPlaytimeProgress = p
 		need = Constants.PLAYTIME_GEM_INTERVAL or 300
@@ -121,7 +61,7 @@ function PlaytimeGemHUD.init()
 		end
 	end
 
-	urgencyConn = RunService.RenderStepped:Connect(function()
+	RunService.RenderStepped:Connect(function()
 		setUrgencyVisuals(lastLeft)
 	end)
 
@@ -150,13 +90,9 @@ function PlaytimeGemHUD.init()
 				NumberSequenceKeypoint.new(1, 1),
 			})
 			eg.Parent = edgeGlow
-			TweenService:Create(edgeGlow, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				BackgroundTransparency = 1,
-			}):Play()
+			TweenService:Create(edgeGlow, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
 			task.delay(0.5, function()
-				if edgeGlow.Parent then
-					edgeGlow:Destroy()
-				end
+				if edgeGlow.Parent then edgeGlow:Destroy() end
 			end)
 
 			rootScale.Scale = 1
@@ -171,23 +107,17 @@ function PlaytimeGemHUD.init()
 			local pool = MicrocopyConfig.PlaytimeGemReward
 			local template = pool[math.random(1, #pool)]
 			local secs = lastPlaytimeProgress
-			if secs < 1 then
-				secs = Constants.PLAYTIME_GEM_INTERVAL or 300
-			end
+			if secs < 1 then secs = Constants.PLAYTIME_GEM_INTERVAL or 300 end
 			local mins = math.max(1, math.floor(secs / 60))
 			local flavor = template:gsub("{AMOUNT}", "1"):gsub("{MINUTES}", tostring(mins))
 			VFXFacade.currencyPopup("gems", 1, flavor)
 			HUD.pulseCurrencyLabel("gems")
 			local bright = Color3.fromRGB(255, 200, 255)
 			local orig = label.TextColor3
-			TweenService:Create(label, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				TextColor3 = bright,
-			}):Play()
+			TweenService:Create(label, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextColor3 = bright }):Play()
 			task.delay(0.14, function()
 				if label.Parent then
-					TweenService:Create(label, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-						TextColor3 = orig,
-					}):Play()
+					TweenService:Create(label, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextColor3 = orig }):Play()
 				end
 			end)
 		end

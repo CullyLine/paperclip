@@ -16,14 +16,12 @@ local MenuHub = require(parent:WaitForChild("MenuHub"))
 MenuHub.init()
 
 local DailyRewardPanel = require(parent:WaitForChild("DailyRewardPanel"))
-local LeaderboardPanel = require(parent:WaitForChild("LeaderboardPanel"))
 local WorldPanel = require(parent:WaitForChild("WorldPanel"))
 local BattlePassPanel = require(parent:WaitForChild("BattlePassPanel"))
 local QuestPanel = require(parent:WaitForChild("QuestPanel"))
 local PetIndexPanel = require(parent:WaitForChild("PetIndexPanel"))
 
 DailyRewardPanel.init()
-LeaderboardPanel.init()
 WorldPanel.init()
 BattlePassPanel.init()
 QuestPanel.init()
@@ -76,6 +74,10 @@ end)
 
 safeInit("AdminPanel", function()
 	require(parent:WaitForChild("AdminPanel")).init()
+end)
+
+safeInit("LeaderboardPanel", function()
+	require(parent:WaitForChild("LeaderboardPanel")).init()
 end)
 
 print("[DAC] GUI initialized (all modules)")

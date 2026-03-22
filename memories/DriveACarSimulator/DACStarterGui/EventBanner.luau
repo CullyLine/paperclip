@@ -1,8 +1,7 @@
 --!strict
 --[[
 	Top HUD banner during Founder's Bonus launch window with countdown to window end.
-	Slides in from top with bounce ease, shimmering gold stroke, tick pulse on
-	countdown seconds, and slide-out + flash when the event window closes.
+	UI is pre-built in StarterGui.DACEventBanner; this script only wires behavior.
 ]]
 
 local Players = game:GetService("Players")
@@ -34,57 +33,12 @@ end
 
 function EventBanner.init()
 	local player = Players.LocalPlayer
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "DACEventBanner"
-	gui.ResetOnSpawn = false
-	gui.Enabled = false
-	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 100
-	gui.Parent = player:WaitForChild("PlayerGui")
-
-	local bar = Instance.new("Frame")
-	bar.Name = "Bar"
-	bar.Size = UDim2.new(0.92, 0, 0, 56)
-	bar.Position = UDim2.new(0.5, 0, 0, -60)
-	bar.AnchorPoint = Vector2.new(0.5, 0)
-	bar.BackgroundColor3 = Color3.fromRGB(40, 28, 8)
-	bar.BorderSizePixel = 0
-	bar.Parent = gui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = bar
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 2
-	stroke.Color = Color3.fromRGB(255, 200, 80)
-	stroke.Parent = bar
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Headline"
-	label.Size = UDim2.new(1, -16, 0, 22)
-	label.Position = UDim2.new(0, 8, 0, 4)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 16
-	label.TextColor3 = Color3.fromRGB(255, 230, 140)
-	label.Text = "FOUNDER'S BONUS: 2x COINS!"
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Top
-	label.Parent = bar
-
-	local subLabel = Instance.new("TextLabel")
-	subLabel.Name = "Sub"
-	subLabel.Size = UDim2.new(1, -16, 0, 22)
-	subLabel.Position = UDim2.new(0, 8, 0, 30)
-	subLabel.BackgroundTransparency = 1
-	subLabel.Font = Enum.Font.Gotham
-	subLabel.TextSize = 13
-	subLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
-	subLabel.Text = ""
-	subLabel.TextXAlignment = Enum.TextXAlignment.Left
-	subLabel.TextYAlignment = Enum.TextYAlignment.Top
-	subLabel.Parent = bar
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gui = playerGui:WaitForChild("DACEventBanner") :: ScreenGui
+	local bar = gui:WaitForChild("Bar") :: Frame
+	local stroke = bar:WaitForChild("Stroke") :: UIStroke
+	local label = bar:WaitForChild("Headline") :: TextLabel
+	local subLabel = bar:WaitForChild("Sub") :: TextLabel
 
 	local endsAtUnix: number? = nil
 	local headlineLine: string = "FOUNDER'S BONUS: 2x COINS!"
@@ -92,28 +46,17 @@ function EventBanner.init()
 	local OFFSCREEN_POS = UDim2.new(0.5, 0, 0, -60)
 
 	local function slideIn()
-		if isSliding then
-			return
-		end
+		if isSliding then return end
 		isSliding = true
 		bar.Position = OFFSCREEN_POS
-		local tween = TweenService:Create(
-			bar,
-			TweenInfo.new(0.6, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out),
-			{ Position = REST_POS }
-		)
+		local tween = TweenService:Create(bar, TweenInfo.new(0.6, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), { Position = REST_POS })
 		tween:Play()
-		tween.Completed:Connect(function()
-			isSliding = false
-		end)
+		tween.Completed:Connect(function() isSliding = false end)
 	end
 
 	local function slideOut()
-		if isSliding then
-			return
-		end
+		if isSliding then return end
 		isSliding = true
-
 		local flash = Instance.new("Frame")
 		flash.Size = UDim2.new(1, 0, 1, 0)
 		flash.BackgroundColor3 = Color3.fromRGB(255, 230, 140)
@@ -121,19 +64,9 @@ function EventBanner.init()
 		flash.BorderSizePixel = 0
 		flash.ZIndex = 10
 		flash.Parent = bar
-
-		TweenService:Create(
-			flash,
-			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ BackgroundTransparency = 1 }
-		):Play()
-
+		TweenService:Create(flash, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
 		task.delay(0.15, function()
-			local outTween = TweenService:Create(
-				bar,
-				TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In),
-				{ Position = OFFSCREEN_POS }
-			)
+			local outTween = TweenService:Create(bar, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Position = OFFSCREEN_POS })
 			outTween:Play()
 			outTween.Completed:Wait()
 			gui.Enabled = false
@@ -142,14 +75,11 @@ function EventBanner.init()
 		end)
 	end
 
-	-- Shimmer: cycle stroke between warm gold and bright gold
 	local shimmerPhase = 0
 	local SHIMMER_SPEED = 1.8
 
 	local function startShimmer()
-		if shimmerConnection then
-			return
-		end
+		if shimmerConnection then return end
 		shimmerPhase = 0
 		shimmerConnection = RunService.RenderStepped:Connect(function(dt)
 			shimmerPhase += dt * SHIMMER_SPEED
@@ -160,26 +90,18 @@ function EventBanner.init()
 	end
 
 	local function stopShimmer()
-		if shimmerConnection then
-			shimmerConnection:Disconnect()
-			shimmerConnection = nil
-		end
+		if shimmerConnection then shimmerConnection:Disconnect(); shimmerConnection = nil end
 		stroke.Color = Color3.fromRGB(255, 200, 80)
 		stroke.Thickness = 2
 	end
 
 	local function stopUrgentPulse()
-		if urgentPulseConnection then
-			urgentPulseConnection:Disconnect()
-			urgentPulseConnection = nil
-		end
+		if urgentPulseConnection then urgentPulseConnection:Disconnect(); urgentPulseConnection = nil end
 		stroke.Color = Color3.fromRGB(255, 200, 80)
 	end
 
 	local function startUrgentPulse()
-		if urgentPulseConnection then
-			return
-		end
+		if urgentPulseConnection then return end
 		local t0 = os.clock()
 		urgentPulseConnection = RunService.RenderStepped:Connect(function()
 			local phase = (os.clock() - t0) * 4
@@ -190,78 +112,47 @@ function EventBanner.init()
 	end
 
 	local function tickPulse()
-		local up = TweenService:Create(
-			label,
-			TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ TextSize = 18 }
-		)
+		local up = TweenService:Create(label, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextSize = 18 })
 		up:Play()
 		up.Completed:Wait()
-		TweenService:Create(
-			label,
-			TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ TextSize = 16 }
-		):Play()
+		TweenService:Create(label, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextSize = 16 }):Play()
 	end
 
 	local function refresh()
-		if not endsAtUnix then
-			return
-		end
+		if not endsAtUnix then return end
 		local left = endsAtUnix - os.time()
 		local currentSec = math.max(0, math.floor(left))
-
 		label.Text = headlineLine
 		if left < 3600 and left > 0 then
 			if lastUrgentLine == nil then
 				lastUrgentLine = MicrocopyConfig.EventCountdown[math.random(1, #MicrocopyConfig.EventCountdown)]
 			end
-			subLabel.Text = `{lastUrgentLine}  •  {formatCountdown(left)}`
+			subLabel.Text = `{lastUrgentLine}  \u{2022}  {formatCountdown(left)}`
 		else
 			lastUrgentLine = nil
 			subLabel.Text = `Ends in {formatCountdown(left)}`
 		end
-
 		if left < 300 and left > 0 then
-			if not urgentPulseConnection then
-				stopShimmer()
-				startUrgentPulse()
-			end
-		elseif left < 3600 and left > 0 then
-			if urgentPulseConnection then
-				stopUrgentPulse()
-			end
-			startShimmer()
+			if not urgentPulseConnection then stopShimmer(); startUrgentPulse() end
 		else
-			if urgentPulseConnection then
-				stopUrgentPulse()
-			end
+			if urgentPulseConnection then stopUrgentPulse() end
 			startShimmer()
 		end
-
 		if lastCountdownSec ~= nil and currentSec ~= lastCountdownSec and currentSec > 0 then
 			task.spawn(tickPulse)
 		end
 		lastCountdownSec = currentSec
-
 		if left <= 0 then
-			slideOut()
-			stopShimmer()
-			stopUrgentPulse()
-			lastUrgentLine = nil
+			slideOut(); stopShimmer(); stopUrgentPulse(); lastUrgentLine = nil
 		end
 	end
 
 	RunService.RenderStepped:Connect(function()
-		if gui.Enabled and endsAtUnix then
-			refresh()
-		end
+		if gui.Enabled and endsAtUnix then refresh() end
 	end)
 
 	Remotes.getEvent("LaunchEventState").OnClientEvent:Connect(function(state: any)
-		if type(state) ~= "table" then
-			return
-		end
+		if type(state) ~= "table" then return end
 		if state.founderActive == true and type(state.founderEndsAtUnix) == "number" then
 			endsAtUnix = state.founderEndsAtUnix
 			headlineLine = MicrocopyConfig.EventBannerHeadlines[math.random(1, #MicrocopyConfig.EventBannerHeadlines)]
@@ -270,19 +161,14 @@ function EventBanner.init()
 			gui.Enabled = true
 			slideIn()
 			startShimmer()
-
 			if not hasPlayedFanfare then
 				hasPlayedFanfare = true
 				SoundFacade.playOneShot("event_fanfare")
 			end
-
 			refresh()
 		else
 			if gui.Enabled then
-				slideOut()
-				stopShimmer()
-				stopUrgentPulse()
-				lastUrgentLine = nil
+				slideOut(); stopShimmer(); stopUrgentPulse(); lastUrgentLine = nil
 			end
 		end
 	end)

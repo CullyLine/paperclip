@@ -1,0 +1,70 @@
+---
+description: Roblox UI must be pre-built in StarterGui, not generated at runtime by scripts
+globs:
+  - memories/DriveACarSimulator/**/*.luau
+  - memories/DownhillMadness/**/*.luau
+alwaysApply: false
+---
+
+# Roblox UI: Pre-Built Instances, Not Runtime Generation
+
+All static UI elements MUST be pre-built as Instances in `StarterGui` (via `execute_luau` MCP tool or manual Studio placement). Scripts reference them with `WaitForChild()`.
+
+**NEVER** use `Instance.new()` to create static UI shells (root frames, title bars, scroll containers, labels, buttons with fixed text). This makes UI invisible to Studio's visual editor and prevents the user from tweaking layouts, colors, and sizes directly.
+
+## What goes in pre-built UI (StarterGui)
+
+- Root panel frames (position, size, background, corner radius, stroke)
+- Title bars with close buttons
+- Scroll frames / grid containers with layout objects
+- Static labels (headers, progress text, status)
+- Static buttons (close, submit, toggle)
+- Decorative elements (gradients, strokes, padding)
+
+## What stays code-generated (Instance.new)
+
+- Data-driven rows (pet cards, leaderboard entries, quest rows, store items)
+- Ephemeral feedback (flash text, celebration overlays, sparkle particles)
+- Temporary animation targets (UIScale created for a punch effect)
+- Elements that are created and destroyed per-refresh
+
+## Pattern
+
+```lua
+-- CORRECT: reference pre-built shell
+function MyPanel.init()
+    local sg = MenuHub.getScreenGui()
+    local root = sg:WaitForChild("MyPanelRoot") :: Frame
+    MenuHub.registerPanel("mypanel", root)
+
+    local titleBar = root:WaitForChild("TitleBar") :: Frame
+    titleBar:WaitForChild("Close").MouseButton1Click:Connect(function()
+        root.Visible = false
+    end)
+
+    local scroll = root:WaitForChild("Scroll") :: ScrollingFrame
+
+    -- Dynamic rows are still code-generated
+    for _, item in dataList do
+        local row = Instance.new("Frame")
+        row.Parent = scroll
+    end
+end
+```
+
+```lua
+-- WRONG: generating the entire UI at runtime
+function MyPanel.init()
+    local sg = MenuHub.getScreenGui()
+    local root = Instance.new("Frame")          -- NO
+    root.Name = "MyPanelRoot"                    -- NO
+    root.Size = UDim2.new(0, 460, 0, 400)       -- NO
+    root.Parent = sg                             -- NO
+    local titleBar = Instance.new("Frame")       -- NO
+    titleBar.Parent = root                       -- NO
+end
+```
+
+## Building the shell
+
+Use the `execute_luau` MCP tool to create pre-built UI under `game.StarterGui.DACMain` (or the appropriate ScreenGui). Then use `set_script_source` to update the script to reference those instances via `WaitForChild`.

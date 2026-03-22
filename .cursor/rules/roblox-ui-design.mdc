@@ -1,0 +1,80 @@
+---
+description: Visual design guide for Drive a Car Simulator UI — match the existing Pets Inventory panel style
+globs:
+  - memories/DriveACarSimulator/**/*.luau
+alwaysApply: false
+---
+
+# DAC UI Design Guide
+
+All new UI must match the existing game's visual style. The **Pets Inventory panel** (`DAC/Inventory Pets.PNG`) is the canonical reference. Study it before creating or modifying any UI.
+
+Reference screenshots live in `DAC/*.PNG` — always check them before designing.
+
+## Panel Anatomy (mandatory structure)
+
+Every panel follows this exact layout:
+
+1. **Tab bar** (if multi-tab) — White pill-shaped container, centered at top of screen, dark silhouette icons inside. Sits *above* the panel, not inside it.
+2. **Title** — Floats above-left of the panel frame, *outside* the border. Colorful icon + bold white text with dark TextStroke. Never inside a title bar.
+3. **Close button** — Bright red rounded square, white **✕**, top-right corner of the panel.
+4. **Panel body** — Pastel pink-to-lavender background with a subtle watermark pattern (faded silhouettes of content type). Thick dark rounded border (2-3px charcoal/navy). Large corner radius (12-16px).
+5. **Content area** — Scrollable grid or list inside the body.
+6. **Bottom bar** (if needed) — Action buttons + filter icons + search, pinned at bottom of panel.
+
+## Color Palette
+
+| Role | Color | Notes |
+|------|-------|-------|
+| Panel background | Pastel pink `#FFD6EE` → lavender `#E0D6FF` | Soft gradient or solid. Subtle watermark pattern overlay |
+| Panel border | Dark charcoal `#2A2A40` | Thick (2-3px), UIStroke |
+| Close button | Bright red `#FF2222` | White ✕, rounded square, always top-right |
+| Positive action | Emerald green `#2ECC71` | "Equip", "Claim", "Rebirth" buttons |
+| Negative/toggle off | Red `#FF4444` | "No Pets", disabled toggles |
+| Title text | White `#FFFFFF` | Dark TextStroke (black or near-black) |
+| Body text | Dark `#1E1E1E` on light panels | Or white with stroke for HUD overlays |
+| Currency gold | `#FFD54F` | Coin amounts |
+| Currency purple | `#CE93D8` | Crystal/gem amounts |
+| Section headers | Gray rounded bar `#CCCCCC` | Bold dark text inside |
+
+## Shape Language
+
+- **Everything is rounded and chunky.** No thin lines, sharp corners, or minimal design.
+- Panel corners: `UDim.new(0, 14)` or larger
+- Button corners: `UDim.new(0, 8)`
+- Card/cell corners: `UDim.new(0, 8)`
+- Tab bar: Fully rounded pill (`UDim.new(0.5, 0)`)
+- Input fields: Rounded gray border, light fill
+
+## Typography
+
+- **GothamBlack** for panel titles and major headers
+- **GothamBold** for buttons, labels, card text, section headers
+- **Gotham** for secondary/body text only
+- Never use thin, light, or serif fonts
+- Titles outside panels: white text + dark TextStroke (Thickness ~2, Color `#000000`)
+- All text must be readable at a glance — large sizes, high contrast
+
+## Icons
+
+- **Tab bar icons**: Dark silhouettes on white pill background. No color, no outlines — just solid black shapes.
+- **Title icons**: Colorful, emoji-style or rendered 3D-style icons. Each panel has a unique icon (shopping cart for Store, egg for Eggs, paw for Pets, gear for Settings, etc.)
+- **Action icons**: Simple dark silhouettes in bottom bars (lock, trash, tag shapes)
+
+## Item Cards (grid cells)
+
+- Light background (white or very light pastel)
+- Rounded corners
+- Item image fills most of the card
+- Name/stat label below the image, bold, dark text
+- Equipped items get a green checkmark overlay
+- Rarity indicated by subtle border color glow (not text)
+
+## What NOT to do
+
+- Do not use dark/navy backgrounds for panel bodies (that's the code-generated fallback look, not the design target)
+- Do not put titles inside the panel frame — they float outside, above-left
+- Do not use flat, minimal, or Material Design aesthetics
+- Do not use UIGradient for dark-to-darker panel backgrounds
+- Do not create small cramped text — everything should feel big, bold, and bubbly
+- Do not skip the watermark pattern on panel backgrounds
