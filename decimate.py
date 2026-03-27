@@ -53,14 +53,27 @@ for obj in bpy.context.scene.objects:
     mid_faces = len(remeshed.data.polygons)
     print(f"After voxel remesh (size={voxel_size}): {mid_faces} faces")
 
-    # Step 2: Decimate if still above target
-    if mid_faces > target_faces:
-        ratio = target_faces / mid_faces
+    # Step 2: Decimate until at or below target (Blender often needs multiple passes)
+    iteration = 0
+    while len(remeshed.data.polygons) > target_faces * 1.08:
+        cur = len(remeshed.data.polygons)
+        if cur <= target_faces:
+            break
+        # Collapse ratio = fraction of faces to KEEP (0–1)
+        ratio = max(0.03, min(0.999, target_faces / cur))
         dec = remeshed.modifiers.new("Decimate", 'DECIMATE')
         dec.decimate_type = 'COLLAPSE'
         dec.ratio = ratio
         bpy.ops.object.modifier_apply(modifier="Decimate")
-        print(f"After decimate: {len(remeshed.data.polygons)} faces")
+        iteration += 1
+        new_count = len(remeshed.data.polygons)
+        print(f"After decimate pass {iteration}: {new_count} faces (ratio={ratio:.4f})")
+        if iteration > 12:
+            print("Decimate: max iterations reached")
+            break
+        if new_count >= cur * 0.995:
+            print("Decimate: no further reduction, stopping")
+            break
 
     # Step 3: Smart UV Project so we have UVs for texture baking
     bpy.ops.object.select_all(action='DESELECT')

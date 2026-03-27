@@ -1256,7 +1256,16 @@ export function agentRoutes(db: Db) {
     const agent = await svc.getById(id);
     if (!agent) { res.status(404).json({ error: "Agent not found" }); return; }
 
-    await svc.update(id, { runMode: "persistent", status: "idle" } as Partial<typeof agentsTable.$inferInsert>);
+    const runGoal = typeof req.body?.runGoal === "string" && req.body.runGoal.trim().length > 0
+      ? req.body.runGoal.trim()
+      : undefined;
+
+    const updatePayload: Partial<typeof agentsTable.$inferInsert> = { runMode: "persistent", status: "idle" };
+    if (runGoal !== undefined) {
+      const existingMeta = (agent.metadata ?? {}) as Record<string, unknown>;
+      updatePayload.metadata = { ...existingMeta, runGoal };
+    }
+    await svc.update(id, updatePayload);
 
     const run = await heartbeat.wakeup(id, {
       source: "on_demand",

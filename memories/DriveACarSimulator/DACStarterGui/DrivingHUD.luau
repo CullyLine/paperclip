@@ -1,18 +1,50 @@
 --!strict
+--[[
+	POLA-432: Optional `DrivingUI.MobileSteerPedals` (Left/Right + Fill) shows lateral steer
+	intensity on touch. There are no discrete throttle/brake controls — speed is auto-driven;
+	see DrivingController (touch drag → steer only). Studio template: STUDIO_TEMPLATES.md.
+
+	POLA-438: There is no RPM/tach/gear readout — only speed (studs/s), power, fuel. Redline
+	polish uses `DrivingController.getRedlineNorm()` (speed / run cap) with Speed frame stroke,
+	speed dial shake, shift-up flash, optional `rev_limiter` loop in SoundController.
+
+	POLA-468: Optional `DrivingUI.VehicleReset` (large `Btn` + optional `CooldownFill` / `TimerLabel`)
+	wires to `DrivingController.vehicleResetIntent()` — same two-step flow as R / gamepad Y.
+
+	POLA-443: Fuel meter `Gas` frame — `FuelPanicStroke` amber border pulse under 20% (5–20% band),
+	`fuel_low_warn` chirp (8s cap), one-shot red flash when entering <5% or hitting empty then
+	steady stroke (no looping red pulse).
+
+	POLA-457: Cosmetic handbrake/drift — **no** vehicle physics (`DrivingController` header). Optional
+	pre-built `DrivingUI.HandbrakeHud` (Icon + optional Btn); Shift / gamepad R1 / UI hold → tint +
+	pulse + SFX via `DrivingController.isHandbrakeEngaged()`.
+]]
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HapticService = game:GetService("HapticService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local Constants = require(DAC:WaitForChild("Constants"))
+local HudSafeArea = require(DAC:WaitForChild("HudSafeArea"))
+local HudLayoutConfig = require(DAC:WaitForChild("Config"):WaitForChild("HudLayoutConfig"))
 local SpeedMilestoneConfig = require(DAC:WaitForChild("Config"):WaitForChild("SpeedMilestoneConfig"))
 local SpeedTierCopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("SpeedTierCopyConfig"))
 local SocialFeedConfig = require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
+local ClientPerformanceProfile = require(DAC:WaitForChild("ClientPerformanceProfile"))
 
 local DrivingHUD = {}
+
+-- Idempotent init: GuiBootstrap guard + defense against duplicate driving HUD listeners.
+local drivingHudInitDone = false
+local drivingHudLayoutDisconnect: (() -> ())? = nil
 
 local player = Players.LocalPlayer
 local playerGui: PlayerGui = player:WaitForChild("PlayerGui") :: PlayerGui
@@ -31,6 +63,8 @@ local travelFrame: ImageLabel
 local travelLabel: TextLabel
 local lapsLabel: TextLabel
 local recordFrame: Instance?
+local steerHintLabel: TextLabel? = nil
+local lastSteerHintMode: string? = nil
 
 local isVisible = false
 local maxGas = 0
@@ -42,22 +76,111 @@ local currentPower = 0
 local bestDistance = 0
 
 local DrivingController: any = nil
+-- POLA-420: optional `DrivingUI.LightsToggle` (pre-built in Studio); cycles off → low → high
+-- POLA-425: optional `DrivingUI.Horn` + `Btn` — mobile honk; keyboard H, gamepad L1
+local headlightHudMode = 0
+local headlightApplyUi: (() -> ())? = nil
+
+local function resetHeadlightHudToOff()
+	headlightHudMode = 0
+	if headlightApplyUi then
+		headlightApplyUi()
+	end
+end
+
 local hudMilestoneFlashBusy = false
 local hudNearMissFlashBusy = false
 local hudComboCelebrationBusy = false
 local hudComboBreakBusy = false
 local hudTierNameFlashBusy = false
 local hudAccelCalloutBusy = false
+local engineIgnitionFlashBusy = false
 local lastSpeedTierKey: string? = nil
 local tierNameFlashQueue: { string } = {}
 local accelCalloutQueue: { string } = {}
 
 local speedUIScale: UIScale? = nil
+local speedHudFrame: Frame? = nil
+local speedRedlineStroke: UIStroke? = nil
+local prevRedlineNormStored = 0.0
+local revLimiterActive = false
+
+-- POLA-438: speed/run-cap ratio (no tach in data model)
+local REDLINE_VISUAL = 0.86
+local REDLINE_SOUND_ON = 0.88
+local REDLINE_SOUND_OFF = 0.76
 
 local lastAlmostSpeedToastClock = 0.0
 local lastAlmostSpeedToastThreshold: number? = nil
 local ALMOST_SPEED_TOAST_COOLDOWN_SEC = 28.0
 local lastGasPercentForHudSfx = 1.0
+local prevGasPercentForFuelJuice = 1.0
+local fuelShimmerBusy = false
+local lastBoostReadySfxClock = -999.0
+local LOW_FUEL_SLOW_PULSE_SEC = 2.8
+-- POLA-443: scarcity bands on `Gas` frame border stroke (pre-built `FuelPanicStroke`)
+local CRITICAL_FUEL_MAX = 0.05
+local LOW_FUEL_AMBER_MAX = 0.20
+local FUEL_LOW_WARN_CHIRP_COOLDOWN_SEC = 8.0
+local FUEL_HUD_CRITICAL_FLASH_SEC = 0.42
+local prevGasPctForBand = 1.0
+local prevGasIntForEmpty = 0
+local fuelHudCriticalFlashUntil = 0.0
+local lastFuelLowWarnChirpClock = -999.0
+
+-- POLA-432 optional MobileSteerPedals (pre-built under DrivingUI)
+local mobilePedalsRoot: Frame? = nil
+local mobilePedalLeftFill: GuiObject? = nil
+local mobilePedalRightFill: GuiObject? = nil
+local mobilePedalLeftStroke: UIStroke? = nil
+local mobilePedalRightStroke: UIStroke? = nil
+local mobilePedalLeftScale: UIScale? = nil
+local mobilePedalRightScale: UIScale? = nil
+local mobilePedalLeftGrad: UIGradient? = nil
+local mobilePedalRightGrad: UIGradient? = nil
+local lastTouchSteerActive = false
+local lastLeftPedalShown = 0.0
+local lastRightPedalShown = 0.0
+local lastHapticSteerTier = -1
+
+-- POLA-457 optional `DrivingUI.HandbrakeHud` (see STUDIO_TEMPLATES.md)
+local handbrakeHudRoot: Frame? = nil
+local handbrakeHudIcon: ImageLabel? = nil
+local handbrakeHudScale: UIScale? = nil
+local handbrakeHudRim: UIStroke? = nil
+local prevHandbrakeHudEngaged = false
+local handbrakeIconTween: Tween? = nil
+
+-- POLA-468: optional `DrivingUI.VehicleReset` (pre-built; mobile-first tap target)
+local vehicleResetRoot: Frame? = nil
+local vehicleResetBtn: GuiButton? = nil
+local vehicleResetCooldownFill: Frame? = nil
+local vehicleResetTimerLabel: TextLabel? = nil
+local vehicleResetStatusLabel: TextLabel? = nil
+local C_HB_NEUTRAL = Color3.fromRGB(255, 255, 255)
+local C_HB_ENGAGED = Color3.fromRGB(255, 88, 168)
+
+--[[
+	POLA-676: `DrivingUI` is often a short bottom band; scale-Y positions stack near-miss
+	(~0.78) and combo celebration (~0.35) into the same vertical pocket on small phones.
+	When the viewport or frame is compact, move combo higher and near-miss lower.
+	Returns: comboCelebrationY, comboBreakY, nearMissY (scale 0–1 within `drivingUI`).
+]]
+local function getHudFlashYPositions(): (number, number, number)
+	local h = drivingUI.AbsoluteSize.Y
+	if h < 1 then
+		h = 400
+	end
+	local vw = HudSafeArea.getViewportWidth()
+	local cam = Workspace.CurrentCamera
+	local vh = if cam then cam.ViewportSize.Y else 700
+	local compact = vw <= HudLayoutConfig.compactViewportWidth or vh < 640
+	local shortFrame = h < 220
+	if compact or shortFrame then
+		return 0.26, 0.34, 0.86
+	end
+	return 0.35, 0.42, 0.78
+end
 
 local C_SPEED_WHITE = Color3.fromRGB(255, 255, 255)
 local C_SPEED_YELLOW = Color3.fromRGB(255, 230, 80)
@@ -113,6 +236,68 @@ local function speedTierKeyForSpeed(speed: number): string
 	return k
 end
 
+local function tryPlayBoostReadyDebounced()
+	local now = os.clock()
+	if now - lastBoostReadySfxClock < 3.0 then
+		return
+	end
+	lastBoostReadySfxClock = now
+	SoundFacade.playOneShot("boost_ready")
+end
+
+local function triggerFuelRechargeShimmer()
+	if not gasBar or gasBar.Parent == nil or fuelShimmerBusy then
+		return
+	end
+	if ClientPerformanceProfile.uiJuiceStrength() < 0.35 then
+		return
+	end
+	if maxGas <= 0 then
+		return
+	end
+	local gp = math.clamp(currentGas / maxGas, 0, 1)
+	if gp < 0.06 then
+		return
+	end
+	fuelShimmerBusy = true
+	tryPlayBoostReadyDebounced()
+
+	local sweep = Instance.new("Frame")
+	sweep.Name = "FuelRechargeShimmer"
+	sweep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	sweep.BackgroundTransparency = 0.62
+	sweep.BorderSizePixel = 0
+	sweep.ZIndex = (gasBar.ZIndex or 1) + 2
+	sweep.Size = UDim2.new(0, 22, 0.88, 0)
+	sweep.AnchorPoint = Vector2.new(0.5, 0.5)
+	sweep.Position = UDim2.new(0, -14, 0.5, 0)
+	sweep.Parent = gasBar
+
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.45, 0.35),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	grad.Parent = sweep
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = sweep
+
+	TweenService:Create(sweep, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = UDim2.new(1, 14, 0.5, 0),
+		BackgroundTransparency = 0.94,
+	}):Play()
+	task.delay(0.5, function()
+		if sweep.Parent then
+			sweep:Destroy()
+		end
+		fuelShimmerBusy = false
+	end)
+end
+
 local function tryGetDrivingController()
 	if DrivingController then return end
 	local ok, mod = pcall(function()
@@ -131,6 +316,111 @@ local function tryGetDrivingController()
 	end
 end
 
+--[[
+	POLA-436: ephemeral "ENGINE ON" line (~300–600ms fade) + optional speed dial twitch.
+	Runs after `DrivingController.startRun` ignition SFX (deferred callback).
+]]
+function DrivingHUD.flashEngineIgnition()
+	if not drivingUI or not isVisible or engineIgnitionFlashBusy then
+		return
+	end
+	engineIgnitionFlashBusy = true
+
+	if speedUIScale then
+		local sc = speedUIScale
+		TweenService:Create(sc, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.1 }):Play()
+		task.delay(0.09, function()
+			if sc.Parent then
+				TweenService:Create(sc, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Scale = 0.98 }):Play()
+			end
+		end)
+		task.delay(0.2, function()
+			if sc.Parent then
+				TweenService:Create(sc, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			end
+		end)
+	end
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "EngineIgnitionFlash"
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.new(0, 280, 0, 32)
+	lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+	lbl.Position = UDim2.new(0.5, 0, 0.58, 0)
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextSize = 22
+	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	lbl.TextStrokeTransparency = 0.35
+	lbl.TextStrokeColor3 = Color3.fromRGB(25, 25, 45)
+	lbl.Text = MicrocopyConfig.DrivingHudEngineIgnitionFlash
+	lbl.TextTransparency = 1
+	lbl.ZIndex = 18
+	lbl.Parent = drivingUI
+
+	TweenService:Create(lbl, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextTransparency = 0,
+	}):Play()
+	task.delay(0.28, function()
+		if lbl.Parent then
+			TweenService:Create(lbl, TweenInfo.new(0.48, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			}):Play()
+		end
+	end)
+	task.delay(0.82, function()
+		engineIgnitionFlashBusy = false
+		if lbl.Parent then
+			lbl:Destroy()
+		end
+	end)
+end
+
+local hudShiftUpFlashBusy = false
+
+local function flashShiftUpRedline()
+	if not drivingUI or not isVisible or hudShiftUpFlashBusy then
+		return
+	end
+	hudShiftUpFlashBusy = true
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "RedlineShiftFlash"
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.new(0, 260, 0, 36)
+	lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+	lbl.Position = UDim2.new(0.5, 0, 0.44, 0)
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextSize = 24
+	lbl.TextColor3 = Color3.fromRGB(255, 90, 70)
+	lbl.TextStrokeTransparency = 0.3
+	lbl.TextStrokeColor3 = Color3.fromRGB(40, 10, 10)
+	lbl.Text = MicrocopyConfig.DrivingHudShiftUpFlash
+	lbl.TextTransparency = 1
+	lbl.ZIndex = 19
+	lbl.Parent = drivingUI
+	local sc = Instance.new("UIScale")
+	sc.Scale = 0.82
+	sc.Parent = lbl
+	TweenService:Create(sc, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.06 }):Play()
+	TweenService:Create(lbl, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextTransparency = 0,
+	}):Play()
+	task.delay(0.35, function()
+		if lbl.Parent then
+			TweenService:Create(lbl, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			}):Play()
+		end
+	end)
+	task.delay(0.82, function()
+		hudShiftUpFlashBusy = false
+		if lbl.Parent then
+			lbl:Destroy()
+		end
+	end)
+end
+
 function DrivingHUD.show(stats: { gas: number, speed: number, power: number })
 	maxGas = stats.gas
 	currentGas = stats.gas
@@ -144,28 +434,91 @@ function DrivingHUD.show(stats: { gas: number, speed: number, power: number })
 	lastAlmostSpeedToastClock = 0.0
 	lastAlmostSpeedToastThreshold = nil
 	lastGasPercentForHudSfx = 1.0
+	prevGasPercentForFuelJuice = 1.0
+	prevGasPctForBand = 1.0
+	prevGasIntForEmpty = 0
+	fuelHudCriticalFlashUntil = 0.0
+	lastFuelLowWarnChirpClock = -999.0
+	lastSteerHintMode = nil
+	lastTouchSteerActive = false
+	lastLeftPedalShown = 0
+	lastRightPedalShown = 0
+	lastHapticSteerTier = -1
+	prevRedlineNormStored = 0
+	revLimiterActive = false
 	isVisible = true
+	resetHeadlightHudToOff()
 	if drivingUI then
 		drivingUI.Visible = true
 	end
 	if travelFrame then
 		travelFrame.Visible = true
 	end
+	task.defer(function()
+		if isVisible and gasBar then
+			triggerFuelRechargeShimmer()
+		end
+	end)
 end
 
 function DrivingHUD.hide()
 	isVisible = false
+	if revLimiterActive then
+		SoundFacade.stopLoop("rev_limiter", 0.12)
+		revLimiterActive = false
+	end
+	prevRedlineNormStored = 0
+	if speedRedlineStroke then
+		speedRedlineStroke.Transparency = 1
+	end
 	lastSpeedTierKey = nil
+	lastSteerHintMode = nil
+	lastTouchSteerActive = false
+	lastHapticSteerTier = -1
+	if steerHintLabel then
+		steerHintLabel.Visible = false
+	end
+	prevGasPctForBand = 1.0
+	prevGasIntForEmpty = 0
+	fuelHudCriticalFlashUntil = 0.0
 	if drivingUI then
 		drivingUI.Visible = false
 	end
 	if travelFrame then
 		travelFrame.Visible = false
 	end
+	prevHandbrakeHudEngaged = false
+	if handbrakeIconTween then
+		handbrakeIconTween:Cancel()
+		handbrakeIconTween = nil
+	end
+	if handbrakeHudIcon then
+		handbrakeHudIcon.ImageColor3 = C_HB_NEUTRAL
+	end
+	if handbrakeHudScale then
+		handbrakeHudScale.Scale = 1
+	end
+	if handbrakeHudRim then
+		handbrakeHudRim.Transparency = 1
+	end
+	if vehicleResetCooldownFill then
+		vehicleResetCooldownFill.Size = UDim2.new(0, 0, 1, 0)
+	end
+	if vehicleResetTimerLabel then
+		vehicleResetTimerLabel.Visible = false
+	end
+	if vehicleResetStatusLabel then
+		vehicleResetStatusLabel.Visible = false
+	end
+	if vehicleResetBtn then
+		vehicleResetBtn.Active = true
+		vehicleResetBtn.AutoButtonColor = true
+	end
 end
 
 local function render()
 	if not isVisible then return end
+	tryGetDrivingController()
 
 	if DrivingController then
 		local state = DrivingController.getRunState()
@@ -177,50 +530,96 @@ local function render()
 		end
 	end
 
+	local redlineNorm = if DrivingController and DrivingController.getRedlineNorm then DrivingController.getRedlineNorm() else 0
+
 	local gasPercent = if maxGas > 0 then math.clamp(currentGas / maxGas, 0, 1) else 0
+
+	local enterCriticalBand = prevGasPctForBand >= CRITICAL_FUEL_MAX and gasPercent < CRITICAL_FUEL_MAX and gasPercent > 0
+	local crossEmpty = prevGasIntForEmpty > 0 and currentGas == 0
+	if isVisible and (enterCriticalBand or crossEmpty) then
+		fuelHudCriticalFlashUntil = os.clock() + FUEL_HUD_CRITICAL_FLASH_SEC
+	end
+
 	VFXFacade.fuelPanic(gasPercent)
 	if lastGasPercentForHudSfx >= 0.05 and gasPercent < 0.05 then
 		SoundFacade.playOneShot("fuel_warning")
 	end
 	lastGasPercentForHudSfx = gasPercent
 
+	if isVisible and gasPercent >= CRITICAL_FUEL_MAX and gasPercent < LOW_FUEL_AMBER_MAX then
+		local now = os.clock()
+		if now - lastFuelLowWarnChirpClock >= FUEL_LOW_WARN_CHIRP_COOLDOWN_SEC then
+			lastFuelLowWarnChirpClock = now
+			SoundFacade.playOneShot("fuel_low_warn")
+		end
+	end
+
+	if prevGasPercentForFuelJuice < 0.88 and gasPercent >= 0.96 and gasPercent - prevGasPercentForFuelJuice > 0.04 then
+		task.defer(triggerFuelRechargeShimmer)
+	end
+	prevGasPercentForFuelJuice = gasPercent
+
 	if gasBar then
 		gasBar.Size = UDim2.new(gasPercent * 0.5, 0, gasBar.Size.Y.Scale, 0)
 	end
 
+	local contMotion = ClientPerformanceProfile.allowsContinuousScreenMotion()
 	if gasText then
 		gasText.Text = tostring(math.floor(currentGas))
 		if gasPercent < 0.05 then
-			gasText.TextTransparency = 0.25 + 0.55 * math.abs(math.sin(os.clock() * 10))
+			if contMotion then
+				gasText.TextTransparency = 0.25 + 0.55 * math.abs(math.sin(os.clock() * 10))
+			else
+				gasText.TextTransparency = 0.35
+			end
 		else
 			gasText.TextTransparency = 0
 		end
 	end
 
 	if gasPanicStroke then
-		if gasPercent < 0.05 then
-			gasPanicStroke.Color = Color3.fromRGB(255, 45, 45)
-			gasPanicStroke.Thickness = 3.2 + 1.8 * math.abs(math.sin(os.clock() * 11))
-			gasPanicStroke.Transparency = 0.05 + 0.2 * math.abs(math.sin(os.clock() * 11))
-		elseif gasPercent < 0.10 then
-			gasPanicStroke.Color = Color3.fromRGB(255, 70, 70)
-			gasPanicStroke.Thickness = 2.8 + 1.2 * math.abs(math.sin(os.clock() * 8))
-			gasPanicStroke.Transparency = 0.1 + 0.15 * math.abs(math.sin(os.clock() * 8))
-		elseif gasPercent < 0.25 then
-			gasPanicStroke.Color = Color3.fromRGB(255, 190, 70)
-			gasPanicStroke.Thickness = 2.2 + 0.6 * math.abs(math.sin(os.clock() * 5))
-			gasPanicStroke.Transparency = 0.2 + 0.25 * math.abs(math.sin(os.clock() * 5))
+		if gasPercent >= CRITICAL_FUEL_MAX and gasPercent < LOW_FUEL_AMBER_MAX then
+			local pulse = 0.5
+			if contMotion then
+				pulse += 0.5 * math.sin((os.clock() * (2 * math.pi)) / LOW_FUEL_SLOW_PULSE_SEC)
+			end
+			local amber = Color3.fromRGB(255, 165, 0)
+			local amberLight = Color3.fromRGB(255, 215, 130)
+			gasPanicStroke.Color = amber:Lerp(amberLight, pulse)
+			gasPanicStroke.Thickness = 2.0 + 1.35 * pulse
+			gasPanicStroke.Transparency = 0.06 + 0.24 * (1 - pulse)
+		elseif gasPercent < CRITICAL_FUEL_MAX then
+			if os.clock() < fuelHudCriticalFlashUntil then
+				local t = (fuelHudCriticalFlashUntil - os.clock()) / FUEL_HUD_CRITICAL_FLASH_SEC
+				t = math.clamp(t, 0, 1)
+				gasPanicStroke.Color = Color3.fromRGB(255, 28, 28)
+				gasPanicStroke.Thickness = 3.0 + 4.2 * t
+				gasPanicStroke.Transparency = 0.02 + 0.14 * (1 - t)
+			else
+				gasPanicStroke.Color = Color3.fromRGB(255, 45, 45)
+				gasPanicStroke.Thickness = 3.2
+				gasPanicStroke.Transparency = 0.08
+			end
 		else
 			gasPanicStroke.Transparency = 1
 		end
 	end
 
+	prevGasPctForBand = gasPercent
+	prevGasIntForEmpty = currentGas
+
 	if gasGoldenStroke then
 		if VFXFacade.isFirstRunOfDay() then
-			local pulse = 0.85 + 0.15 * math.sin(os.clock() * 3.5)
-			gasGoldenStroke.Color = Color3.fromRGB(255, 215, 60):Lerp(Color3.fromRGB(255, 240, 160), 0.5 + 0.5 * math.sin(os.clock() * 2))
-			gasGoldenStroke.Thickness = 2.5 + 1.0 * pulse
-			gasGoldenStroke.Transparency = 0.05 + 0.1 * (1 - pulse)
+			if contMotion then
+				local pulse = 0.85 + 0.15 * math.sin(os.clock() * 3.5)
+				gasGoldenStroke.Color = Color3.fromRGB(255, 215, 60):Lerp(Color3.fromRGB(255, 240, 160), 0.5 + 0.5 * math.sin(os.clock() * 2))
+				gasGoldenStroke.Thickness = 2.5 + 1.0 * pulse
+				gasGoldenStroke.Transparency = 0.05 + 0.1 * (1 - pulse)
+			else
+				gasGoldenStroke.Color = Color3.fromRGB(255, 225, 100)
+				gasGoldenStroke.Thickness = 2.9
+				gasGoldenStroke.Transparency = 0.08
+			end
 		else
 			gasGoldenStroke.Transparency = 1
 		end
@@ -229,6 +628,42 @@ local function render()
 	if speedText then
 		speedText.Text = tostring(math.floor(currentSpeed))
 		speedText.TextColor3 = speedToColor(currentSpeed)
+	end
+
+	if speedRedlineStroke and speedHudFrame and speedHudFrame.Parent then
+		if redlineNorm >= REDLINE_VISUAL then
+			if contMotion then
+				local pulse = 0.5 + 0.5 * math.sin(os.clock() * 11)
+				speedRedlineStroke.Transparency = 0.12 + 0.38 * (1 - pulse)
+				speedRedlineStroke.Thickness = 2.0 + 2.8 * pulse
+			else
+				speedRedlineStroke.Transparency = 0.22
+				speedRedlineStroke.Thickness = 3.2
+			end
+		else
+			speedRedlineStroke.Transparency = 1
+		end
+	end
+
+	if
+		redlineNorm >= REDLINE_VISUAL
+		and prevRedlineNormStored < REDLINE_VISUAL
+		and drivingUI
+		and drivingUI.Visible
+	then
+		flashShiftUpRedline()
+	end
+
+	if redlineNorm >= REDLINE_SOUND_ON then
+		if not revLimiterActive then
+			SoundFacade.playLoop("rev_limiter", 1.05, 0.28)
+			revLimiterActive = true
+		end
+	elseif redlineNorm < REDLINE_SOUND_OFF then
+		if revLimiterActive then
+			SoundFacade.stopLoop("rev_limiter", 0.12)
+			revLimiterActive = false
+		end
 	end
 
 	if isVisible and DrivingController and DrivingController.popAccelCallout then
@@ -254,10 +689,209 @@ local function render()
 	end
 
 	if speedUIScale then
+		local baseScale = 1.0
 		if currentSpeed >= 300 then
-			speedUIScale.Scale = 1.0 + 0.08 * (0.5 + 0.5 * math.sin(os.clock() * 6))
-		else
-			speedUIScale.Scale = 1.0
+			baseScale = 1.0 + 0.08 * (0.5 + 0.5 * math.sin(os.clock() * 6))
+		end
+		if redlineNorm >= REDLINE_VISUAL then
+			baseScale *= 1.0 + 0.038 * math.abs(math.sin(os.clock() * 13.5))
+		end
+		speedUIScale.Scale = baseScale
+	end
+
+	if isVisible and mobilePedalsRoot and mobilePedalsRoot.Parent and drivingUI and drivingUI.Visible then
+		tryGetDrivingController()
+		if DrivingController and DrivingController.getSteerInput and DrivingController.getSteerHintMode then
+			local mode = DrivingController.getSteerHintMode()
+			local touchMode = mode == "touch"
+			mobilePedalsRoot.Visible = touchMode
+			if touchMode then
+				local steer = math.clamp(DrivingController.getSteerInput(), -1, 1)
+				local leftAmt = math.clamp(-steer, 0, 1)
+				local rightAmt = math.clamp(steer, 0, 1)
+				local touchActive = false
+				if DrivingController.isTouchSteerActive then
+					touchActive = DrivingController.isTouchSteerActive()
+				end
+
+				local mag = math.max(leftAmt, rightAmt)
+				local tier = math.floor(mag * 3)
+				if touchActive then
+					if tier > lastHapticSteerTier and tier >= 1 and UserInputService.TouchEnabled then
+						pcall(function()
+							if HapticService:IsMotorSupported(Enum.UserInputType.Touch, Enum.VibrationMotor.Small) then
+								HapticService:SetMotor(Enum.UserInputType.Touch, Enum.VibrationMotor.Small, 0.25)
+							end
+						end)
+					end
+					lastHapticSteerTier = tier
+				else
+					lastHapticSteerTier = -1
+				end
+
+				if mobilePedalLeftFill then
+					mobilePedalLeftFill.Size = UDim2.new(1, 0, leftAmt * 0.92, 0)
+				end
+				if mobilePedalRightFill then
+					mobilePedalRightFill.Size = UDim2.new(1, 0, rightAmt * 0.92, 0)
+				end
+				if mobilePedalLeftStroke then
+					mobilePedalLeftStroke.Transparency = 1 - 0.55 * leftAmt
+				end
+				if mobilePedalRightStroke then
+					mobilePedalRightStroke.Transparency = 1 - 0.55 * rightAmt
+				end
+				if mobilePedalLeftGrad then
+					local a = 0.35 + 0.65 * leftAmt
+					mobilePedalLeftGrad.Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0.5 - 0.35 * a),
+						NumberSequenceKeypoint.new(1, 0.85 - 0.25 * a),
+					})
+				end
+				if mobilePedalRightGrad then
+					local a = 0.35 + 0.65 * rightAmt
+					mobilePedalRightGrad.Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0.5 - 0.35 * a),
+						NumberSequenceKeypoint.new(1, 0.85 - 0.25 * a),
+					})
+				end
+
+				if lastTouchSteerActive and not touchActive and (lastLeftPedalShown > 0.08 or lastRightPedalShown > 0.08) then
+					local function punch(scale: UIScale?)
+						if not scale or not scale.Parent then
+							return
+						end
+						TweenService:Create(scale, TweenInfo.new(0.14, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.1 }):Play()
+						task.delay(0.09, function()
+							if scale.Parent then
+								TweenService:Create(scale, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+							end
+						end)
+					end
+					if lastLeftPedalShown > 0.08 then
+						punch(mobilePedalLeftScale)
+					end
+					if lastRightPedalShown > 0.08 then
+						punch(mobilePedalRightScale)
+					end
+				end
+				lastTouchSteerActive = touchActive
+				lastLeftPedalShown = leftAmt
+				lastRightPedalShown = rightAmt
+			else
+				lastTouchSteerActive = false
+				lastHapticSteerTier = -1
+				lastLeftPedalShown = 0
+				lastRightPedalShown = 0
+			end
+		end
+	end
+
+	if isVisible and handbrakeHudRoot and handbrakeHudRoot.Parent and drivingUI and drivingUI.Visible and handbrakeHudIcon then
+		tryGetDrivingController()
+		local hbEng = false
+		if DrivingController and DrivingController.isHandbrakeEngaged then
+			hbEng = DrivingController.isHandbrakeEngaged()
+		end
+		if hbEng ~= prevHandbrakeHudEngaged then
+			prevHandbrakeHudEngaged = hbEng
+			if handbrakeIconTween then
+				handbrakeIconTween:Cancel()
+				handbrakeIconTween = nil
+			end
+			if hbEng then
+				handbrakeIconTween = TweenService:Create(
+					handbrakeHudIcon,
+					TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ ImageColor3 = C_HB_ENGAGED }
+				)
+				handbrakeIconTween:Play()
+				if handbrakeHudScale then
+					TweenService:Create(
+						handbrakeHudScale,
+						TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+						{ Scale = 1.18 }
+					):Play()
+					task.delay(0.1, function()
+						if handbrakeHudScale and handbrakeHudScale.Parent then
+							TweenService:Create(
+								handbrakeHudScale,
+								TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+								{ Scale = 1.06 }
+							):Play()
+						end
+					end)
+					task.delay(0.26, function()
+						if handbrakeHudScale and handbrakeHudScale.Parent then
+							TweenService:Create(
+								handbrakeHudScale,
+								TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+								{ Scale = 1 }
+							):Play()
+						end
+					end)
+				end
+				if handbrakeHudRim then
+					handbrakeHudRim.Transparency = 0.22
+				end
+			else
+				handbrakeIconTween = TweenService:Create(
+					handbrakeHudIcon,
+					TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ ImageColor3 = C_HB_NEUTRAL }
+				)
+				handbrakeIconTween:Play()
+				if handbrakeHudRim then
+					TweenService:Create(
+						handbrakeHudRim,
+						TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{ Transparency = 1 }
+					):Play()
+				end
+			end
+		end
+	end
+
+	if isVisible and vehicleResetRoot and vehicleResetRoot.Parent and drivingUI and drivingUI.Visible then
+		tryGetDrivingController()
+		if
+			DrivingController
+			and DrivingController.getVehicleResetCooldownUntil
+			and DrivingController.getVehicleResetArmExpires
+		then
+			local now = os.clock()
+			local cdUntil = DrivingController.getVehicleResetCooldownUntil()
+			local armUntil = DrivingController.getVehicleResetArmExpires()
+			local remCd = math.max(0, cdUntil - now)
+			local armed = armUntil > now and remCd <= 0.05
+			if vehicleResetTimerLabel then
+				if remCd > 0.05 then
+					vehicleResetTimerLabel.Visible = true
+					vehicleResetTimerLabel.Text = string.format("%ds", math.max(1, math.ceil(remCd)))
+				else
+					vehicleResetTimerLabel.Visible = false
+				end
+			end
+			if vehicleResetCooldownFill then
+				local p = if remCd > 0.05 then 1 - (remCd / Constants.VEHICLE_RESET_COOLDOWN_SEC) else 0
+				p = math.clamp(p, 0, 1)
+				vehicleResetCooldownFill.Size = UDim2.new(p, 0, 1, 0)
+			end
+			if vehicleResetBtn then
+				vehicleResetBtn.Active = remCd <= 0.05
+				vehicleResetBtn.AutoButtonColor = remCd <= 0.05
+			end
+			if vehicleResetStatusLabel then
+				if armed then
+					vehicleResetStatusLabel.Text = MicrocopyConfig.VehicleResetMicroStatusAgain
+					vehicleResetStatusLabel.Visible = true
+				elseif remCd > 0.05 then
+					vehicleResetStatusLabel.Text = MicrocopyConfig.VehicleResetMicroStatusWait
+					vehicleResetStatusLabel.Visible = true
+				else
+					vehicleResetStatusLabel.Visible = false
+				end
+			end
 		end
 	end
 
@@ -289,10 +923,32 @@ local function render()
 
 	if travelLabel then
 		local miles = currentDistance / 5280
-		travelLabel.Text = string.format("%.1f Miles Driven", miles)
+		travelLabel.Text = MicrocopyConfig.DrivingHudTravelMilesLine:gsub("{MILES}", string.format("%.1f", miles))
 	end
 	if lapsLabel then
-		lapsLabel.Text = tostring(currentLaps) .. " Laps Driven"
+		lapsLabel.Text = MicrocopyConfig.DrivingHudLapsDrivenLine:gsub("{LAPS}", tostring(currentLaps))
+	end
+
+	if steerHintLabel and isVisible then
+		tryGetDrivingController()
+		local mode = "keyboard"
+		if DrivingController and DrivingController.getSteerHintMode then
+			mode = DrivingController.getSteerHintMode()
+		end
+		if mode ~= lastSteerHintMode then
+			lastSteerHintMode = mode
+			if mode == "touch" then
+				steerHintLabel.Text = MicrocopyConfig.DrivingHudSteerHintTouch
+			elseif mode == "gamepad" then
+				steerHintLabel.Text = MicrocopyConfig.DrivingHudSteerHintGamepad
+			else
+				steerHintLabel.Text = MicrocopyConfig.DrivingHudSteerHintKeyboard
+			end
+		end
+		steerHintLabel.Visible = true
+	elseif steerHintLabel then
+		steerHintLabel.Visible = false
+		lastSteerHintMode = nil
 	end
 
 	if recordFrame and currentDistance > bestDistance then
@@ -397,12 +1053,13 @@ local function render()
 			if type(nm) == "string" and nm ~= "" then
 				hudNearMissFlashBusy = true
 				SoundFacade.playOneShot("near_miss")
+				local _, _, nearMissY = getHudFlashYPositions()
 				local lbl = Instance.new("TextLabel")
 				lbl.Name = "NearMissHudFlash"
 				lbl.BackgroundTransparency = 1
 				lbl.Size = UDim2.new(0.88, 0, 0, 40)
 				lbl.AnchorPoint = Vector2.new(0.5, 0.5)
-				lbl.Position = UDim2.new(0.5, 0, 0.78, 0)
+				lbl.Position = UDim2.new(0.5, 0, nearMissY, 0)
 				lbl.Font = Enum.Font.GothamBold
 				lbl.TextSize = 22
 				lbl.TextColor3 = Color3.fromRGB(255, 245, 200)
@@ -443,6 +1100,7 @@ local function render()
 				local comboCount = if type((pack :: any).comboCount) == "number" then (pack :: any).comboCount else 2
 				if headline ~= "" then
 					hudComboCelebrationBusy = true
+					local comboY, _, _ = getHudFlashYPositions()
 					local pitch = math.clamp(1 + 0.04 * math.max(0, comboCount - 2), 0.88, 1.38)
 					SoundFacade.playOneShot("combo", pitch)
 					local holder = Instance.new("Frame")
@@ -450,7 +1108,7 @@ local function render()
 					holder.BackgroundTransparency = 1
 					holder.Size = UDim2.new(0.88, 0, 0, 72)
 					holder.AnchorPoint = Vector2.new(0.5, 0.5)
-					holder.Position = UDim2.new(0.5, 0, 0.35, 0)
+					holder.Position = UDim2.new(0.5, 0, comboY, 0)
 					holder.ZIndex = 21
 					holder.Parent = drivingUI
 					local hl = Instance.new("TextLabel")
@@ -517,12 +1175,13 @@ local function render()
 				local body = if type((pack :: any).body) == "string" then (pack :: any).body else ""
 				if headline ~= "" then
 					hudComboBreakBusy = true
+					local _, breakY = getHudFlashYPositions()
 					local holder = Instance.new("Frame")
 					holder.Name = "ComboBreakFlash"
 					holder.BackgroundTransparency = 1
 					holder.Size = UDim2.new(0.88, 0, 0, 72)
 					holder.AnchorPoint = Vector2.new(0.5, 0.5)
-					holder.Position = UDim2.new(0.5, 0, 0.42, 0)
+					holder.Position = UDim2.new(0.5, 0, breakY, 0)
 					holder.ZIndex = 21
 					holder.Parent = drivingUI
 					local hl = Instance.new("TextLabel")
@@ -660,13 +1319,43 @@ local function render()
 			end)
 		end
 	end
+
+	prevRedlineNormStored = redlineNorm
 end
 
 function DrivingHUD.init()
+	if drivingHudInitDone then
+		return
+	end
+	drivingHudInitDone = true
+
 	local screenGui = playerGui:WaitForChild("DACMain") :: ScreenGui
 	local pInfo = screenGui:WaitForChild("PlayerInfo") :: Frame
 	drivingUI = pInfo:WaitForChild("DrivingUI") :: Frame
 	drivingUI.Visible = false
+
+	local function applyDrivingUiBottomSafe()
+		local sg = playerGui:FindFirstChild("DACMain") :: ScreenGui?
+		if not sg then
+			return
+		end
+		local l, t, r, b = HudSafeArea.getManualInsetsForScreenGui(sg)
+		local em = if (l + t + r + b) > 0 then HudLayoutConfig.edgeMarginPx else 0
+		local pad = drivingUI:FindFirstChild("DACDrivingUiSafePad") :: UIPadding?
+		if not pad then
+			pad = Instance.new("UIPadding")
+			pad.Name = "DACDrivingUiSafePad"
+			pad.Parent = drivingUI
+		end
+		-- Top/sides come from PlayerInfo safe pad; bottom is needed when ActionBar is hidden during a run (home indicator).
+		pad.PaddingBottom = UDim.new(0, math.floor(b + em + 0.5))
+	end
+	applyDrivingUiBottomSafe()
+	if drivingHudLayoutDisconnect then
+		drivingHudLayoutDisconnect()
+		drivingHudLayoutDisconnect = nil
+	end
+	drivingHudLayoutDisconnect = HudSafeArea.onLayoutChanged(applyDrivingUiBottomSafe)
 
 	local gasFrame = drivingUI:FindFirstChild("Gas")
 	if gasFrame then
@@ -704,6 +1393,7 @@ function DrivingHUD.init()
 
 	local speedFrame = drivingUI:FindFirstChild("Speed")
 	if speedFrame and speedFrame:IsA("Frame") then
+		speedHudFrame = speedFrame
 		speedText = speedFrame:FindFirstChild("TextLabel") :: TextLabel
 		local sc = speedFrame:FindFirstChildOfClass("UIScale")
 		if not sc then
@@ -712,6 +1402,18 @@ function DrivingHUD.init()
 			sc.Parent = speedFrame
 		end
 		speedUIScale = sc
+		local rStroke = speedFrame:FindFirstChild("SpeedRedlineStroke") :: UIStroke?
+		if not rStroke then
+			rStroke = Instance.new("UIStroke")
+			rStroke.Name = "SpeedRedlineStroke"
+			rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			rStroke.LineJoinMode = Enum.LineJoinMode.Round
+			rStroke.Color = Color3.fromRGB(255, 52, 48)
+			rStroke.Thickness = 2.4
+			rStroke.Transparency = 1
+			rStroke.Parent = speedFrame
+		end
+		speedRedlineStroke = rStroke
 	end
 
 	local powerFrame = drivingUI:FindFirstChild("Power")
@@ -734,7 +1436,346 @@ function DrivingHUD.init()
 		end
 	end
 
+	local sh = drivingUI:FindFirstChild("SteerHint")
+	if sh and sh:IsA("TextLabel") then
+		steerHintLabel = sh
+	else
+		local lbl = Instance.new("TextLabel")
+		lbl.Name = "SteerHint"
+		lbl.BackgroundTransparency = 1
+		lbl.AnchorPoint = Vector2.new(0.5, 1)
+		lbl.Position = UDim2.new(0.5, 0, 1, -10)
+		lbl.Size = UDim2.new(0.92, 0, 0, 24)
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 15
+		lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+		lbl.TextStrokeTransparency = 0.45
+		lbl.TextStrokeColor3 = Color3.fromRGB(20, 20, 40)
+		lbl.TextWrapped = true
+		lbl.TextXAlignment = Enum.TextXAlignment.Center
+		lbl.ZIndex = 12
+		lbl.Visible = false
+		lbl.Parent = drivingUI
+		steerHintLabel = lbl
+	end
+
 	tryGetDrivingController()
+
+	-- POLA-432: optional pre-built MobileSteerPedals → lateral intensity (no throttle/brake gameplay)
+	local function wireMobileSteerPedals()
+		local root = drivingUI:FindFirstChild("MobileSteerPedals")
+		if not root or not root:IsA("Frame") then
+			return
+		end
+		mobilePedalsRoot = root
+		root.Visible = false
+
+		local function prepSide(side: Instance, green: boolean): (GuiObject?, UIScale?, UIGradient?)
+			if not side:IsA("GuiObject") then
+				return nil, nil, nil
+			end
+			local fill = side:FindFirstChild("Fill")
+			if not fill or not fill:IsA("GuiObject") then
+				return nil, nil, nil
+			end
+			fill.AnchorPoint = Vector2.new(0.5, 1)
+			fill.Position = UDim2.new(0.5, 0, 1, 0)
+			fill.Size = UDim2.new(1, 0, 0, 0)
+			fill.BorderSizePixel = 0
+			local grad = fill:FindFirstChildOfClass("UIGradient")
+			if not grad then
+				grad = Instance.new("UIGradient")
+				grad.Rotation = 90
+				if green then
+					grad.Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(28, 95, 55)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 255, 165)),
+					})
+				else
+					grad.Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 28, 36)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 115, 95)),
+					})
+				end
+				grad.Parent = fill
+			end
+			local sc = side:FindFirstChildOfClass("UIScale")
+			if not sc then
+				sc = Instance.new("UIScale")
+				sc.Scale = 1
+				sc.Parent = side
+			end
+			return fill, sc, grad
+		end
+
+		local left = root:FindFirstChild("Left")
+		if left then
+			local f, s, g = prepSide(left, true)
+			mobilePedalLeftFill = f
+			mobilePedalLeftScale = s
+			mobilePedalLeftGrad = g
+			if left:IsA("GuiObject") then
+				mobilePedalLeftStroke = left:FindFirstChildOfClass("UIStroke")
+			end
+		end
+		local right = root:FindFirstChild("Right")
+		if right then
+			local f, s, g = prepSide(right, false)
+			mobilePedalRightFill = f
+			mobilePedalRightScale = s
+			mobilePedalRightGrad = g
+			if right:IsA("GuiObject") then
+				mobilePedalRightStroke = right:FindFirstChildOfClass("UIStroke")
+			end
+		end
+	end
+
+	local function wireHeadlightsToggle()
+		local lt = drivingUI:FindFirstChild("LightsToggle")
+		if not lt or not lt:IsA("Frame") then
+			return
+		end
+		local btn = lt:FindFirstChild("Btn") :: GuiButton?
+		if not btn then
+			return
+		end
+		local offIcon = lt:FindFirstChild("Off") :: ImageLabel?
+		local lowIcon = lt:FindFirstChild("Low") :: ImageLabel?
+		local highIcon = lt:FindFirstChild("High") :: ImageLabel?
+		local glow = lt:FindFirstChild("ActiveGlow") :: UIStroke?
+		local scale = lt:FindFirstChildOfClass("UIScale") :: UIScale?
+		if not scale then
+			local ns = Instance.new("UIScale")
+			ns.Scale = 1
+			ns.Parent = lt
+			scale = ns
+		end
+
+		local function applyUi()
+			local mode = headlightHudMode
+			if offIcon then
+				offIcon.Visible = mode == 0
+			end
+			if lowIcon then
+				lowIcon.Visible = mode == 1
+			end
+			if highIcon then
+				highIcon.Visible = mode == 2
+			end
+			if glow then
+				glow.Transparency = if mode == 0 then 1 else 0.35
+			end
+		end
+
+		headlightApplyUi = applyUi
+
+		local function bumpJuice()
+			TweenService:Create(scale, TweenInfo.new(0.14, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.12 }):Play()
+			task.delay(0.1, function()
+				if scale.Parent then
+					TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+				end
+			end)
+		end
+
+		btn.MouseButton1Click:Connect(function()
+			tryGetDrivingController()
+			local prev = headlightHudMode
+			headlightHudMode = (headlightHudMode + 1) % 3
+			bumpJuice()
+			if prev == 0 and headlightHudMode > 0 then
+				SoundFacade.playOneShot("lights_toggle_on")
+			elseif headlightHudMode == 0 then
+				SoundFacade.playOneShot("lights_toggle_off")
+			elseif headlightHudMode == 2 then
+				SoundFacade.playOneShot("lights_toggle_on")
+			else
+				SoundFacade.playOneShot("lights_toggle_off")
+			end
+			applyUi()
+			if DrivingController and DrivingController.setHeadlightMode then
+				DrivingController.setHeadlightMode(headlightHudMode)
+			end
+		end)
+
+		applyUi()
+	end
+
+	local function wireHornHud()
+		local hornFrame = drivingUI:FindFirstChild("Horn") :: Frame?
+		if not hornFrame then
+			return
+		end
+		local btn = hornFrame:FindFirstChild("Btn") :: GuiButton?
+		if not btn then
+			return
+		end
+		local scale = hornFrame:FindFirstChildOfClass("UIScale") :: UIScale?
+		if not scale then
+			local ns = Instance.new("UIScale")
+			ns.Scale = 1
+			ns.Parent = hornFrame
+			scale = ns
+		end
+
+		local function punchHornIcon()
+			TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.14 }):Play()
+			task.delay(0.08, function()
+				if scale.Parent then
+					TweenService:Create(scale, TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+				end
+			end)
+		end
+
+		task.defer(function()
+			tryGetDrivingController()
+			if DrivingController and DrivingController.registerHornHudPunch then
+				DrivingController.registerHornHudPunch(punchHornIcon)
+			end
+		end)
+
+		btn.MouseButton1Down:Connect(function()
+			tryGetDrivingController()
+			if DrivingController and DrivingController.honkUiButtonDown then
+				DrivingController.honkUiButtonDown()
+			end
+		end)
+		btn.MouseButton1Up:Connect(function()
+			tryGetDrivingController()
+			if DrivingController and DrivingController.honkUiButtonUp then
+				DrivingController.honkUiButtonUp()
+			end
+		end)
+	end
+
+	wireMobileSteerPedals()
+	wireHeadlightsToggle()
+	wireHornHud()
+
+	local function wireHandbrakeHud()
+		local root = drivingUI:FindFirstChild("HandbrakeHud")
+		if not root or not root:IsA("Frame") then
+			return
+		end
+		local icon = root:FindFirstChild("Icon") :: ImageLabel?
+		if not icon then
+			return
+		end
+		handbrakeHudRoot = root
+		handbrakeHudIcon = icon
+		icon.ImageColor3 = C_HB_NEUTRAL
+		local sc = root:FindFirstChildOfClass("UIScale") :: UIScale?
+		if not sc then
+			sc = Instance.new("UIScale")
+			sc.Scale = 1
+			sc.Parent = root
+		end
+		handbrakeHudScale = sc
+		handbrakeHudRim = root:FindFirstChild("Rim") :: UIStroke?
+		if handbrakeHudRim then
+			handbrakeHudRim.Transparency = 1
+		end
+		local btn = root:FindFirstChild("Btn") :: GuiButton?
+		if btn then
+			btn.MouseButton1Down:Connect(function()
+				tryGetDrivingController()
+				if DrivingController and DrivingController.handbrakeUiButtonDown then
+					DrivingController.handbrakeUiButtonDown()
+				end
+			end)
+			btn.MouseButton1Up:Connect(function()
+				tryGetDrivingController()
+				if DrivingController and DrivingController.handbrakeUiButtonUp then
+					DrivingController.handbrakeUiButtonUp()
+				end
+			end)
+		end
+	end
+
+	wireHandbrakeHud()
+
+	local function wireVehicleReset()
+		local root = drivingUI:FindFirstChild("VehicleReset")
+		if not root or not root:IsA("Frame") then
+			return
+		end
+		vehicleResetRoot = root
+		local btn = root:FindFirstChild("Btn") :: GuiButton?
+		if btn then
+			vehicleResetBtn = btn
+			btn.MouseButton1Click:Connect(function()
+				tryGetDrivingController()
+				if DrivingController and DrivingController.vehicleResetIntent then
+					DrivingController.vehicleResetIntent()
+				end
+			end)
+		end
+		local fill = root:FindFirstChild("CooldownFill")
+		if fill and fill:IsA("Frame") then
+			vehicleResetCooldownFill = fill
+			fill.Size = UDim2.new(0, 0, 1, 0)
+		end
+		local tl = root:FindFirstChild("TimerLabel") :: TextLabel?
+		if not tl then
+			tl = root:FindFirstChild("Timer") :: TextLabel?
+		end
+		if tl then
+			vehicleResetTimerLabel = tl
+			tl.Visible = false
+		end
+		local st = root:FindFirstChild("Status") :: TextLabel?
+		if st then
+			vehicleResetStatusLabel = st
+			st.Visible = false
+		end
+	end
+
+	wireVehicleReset()
+
+	local function wireStopButton()
+		local stopRoot = drivingUI:FindFirstChild("StopRun") :: Frame?
+		if not stopRoot then
+			stopRoot = Instance.new("Frame")
+			stopRoot.Name = "StopRun"
+			stopRoot.BackgroundTransparency = 1
+			stopRoot.AnchorPoint = Vector2.new(1, 0)
+			stopRoot.Position = UDim2.new(1, -8, 0, 8)
+			stopRoot.Size = UDim2.new(0, 80, 0, 32)
+			stopRoot.ZIndex = 15
+			stopRoot.Parent = drivingUI
+		end
+		local stopBtn = stopRoot:FindFirstChild("Btn") :: TextButton?
+		if not stopBtn then
+			stopBtn = Instance.new("TextButton")
+			stopBtn.Name = "Btn"
+			stopBtn.Size = UDim2.new(1, 0, 1, 0)
+			stopBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+			stopBtn.BackgroundTransparency = 0.25
+			stopBtn.Font = Enum.Font.GothamBold
+			stopBtn.TextSize = 14
+			stopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+			stopBtn.Text = "STOP"
+			stopBtn.ZIndex = 16
+			stopBtn.AutoButtonColor = true
+			stopBtn.Parent = stopRoot
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = stopBtn
+		end
+		stopBtn.MouseButton1Click:Connect(function()
+			SoundFacade.playOneShot("click")
+			Remotes.getEvent("EndRun"):FireServer()
+		end)
+	end
+
+	wireStopButton()
+
+	tryGetDrivingController()
+	if DrivingController and DrivingController.registerEngineIgnitionFx then
+		DrivingController.registerEngineIgnitionFx(function()
+			DrivingHUD.flashEngineIgnition()
+		end)
+	end
 
 	RunService.RenderStepped:Connect(render)
 
@@ -750,7 +1791,16 @@ function DrivingHUD.init()
 		DrivingHUD.hide()
 	end)
 
-	print("[DAC] DrivingHUD initialized (using DACMain.DrivingUI)")
+	Players.PlayerRemoving:Connect(function(p)
+		if p == player then
+			if drivingHudLayoutDisconnect then
+				drivingHudLayoutDisconnect()
+				drivingHudLayoutDisconnect = nil
+			end
+		end
+	end)
+
+	Constants.bootLog("[DAC] DrivingHUD initialized (using DACMain.DrivingUI)")
 end
 
 return DrivingHUD

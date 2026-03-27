@@ -14,6 +14,8 @@ local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local RebirthMilestoneConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthMilestoneConfig"))
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
 
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
+
 local MilestoneCeremonyService = {}
 
 -- FIFO batches of SpendMilestone payloads; flushed after PurchaseThankYouAck (per thank-you screen)
@@ -106,7 +108,8 @@ function MilestoneCeremonyService.fireRebirthTierCeremony(player: Player, rebirt
 	local tierLabel = milestoneKey
 	for _, row in RebirthMilestoneConfig.MILESTONES do
 		if row.key == milestoneKey then
-			tierLabel = row.label
+			local ct = (row :: any).ceremonyTier
+			tierLabel = if type(ct) == "string" and ct ~= "" then ct else row.label
 			break
 		end
 	end
@@ -155,6 +158,7 @@ function MilestoneCeremonyService.tryWorldMasteryForUnlock(player: Player, data:
 		return
 	end
 	wm[worldId] = true
+	AchievementService.tryUnlock(player, "world_elite")
 	local world = WorldConfig.Worlds[worldId]
 	local wname = if world and type(world.name) == "string" then world.name else worldId
 	local headline = MilestoneCeremonyCopyConfig.pickVariant(MilestoneCeremonyCopyConfig.WorldMasteryCeremonyHeadlines)

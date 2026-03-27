@@ -20,6 +20,7 @@ type WakePayload = {
   approvalId: string | null;
   approvalStatus: string | null;
   issueIds: string[];
+  runGoal: string | null;
 };
 
 type GatewayDeviceIdentity = {
@@ -298,6 +299,7 @@ function buildWakePayload(ctx: AdapterExecutionContext): WakePayload {
           (value): value is string => typeof value === "string" && value.trim().length > 0,
         )
       : [],
+    runGoal: nonEmpty(context.runGoal),
   };
 }
 
@@ -325,6 +327,7 @@ function buildPaperclipEnvForWake(ctx: AdapterExecutionContext, wakePayload: Wak
   }
   if (wakePayload.taskId) paperclipEnv.PAPERCLIP_TASK_ID = wakePayload.taskId;
   if (wakePayload.wakeReason) paperclipEnv.PAPERCLIP_WAKE_REASON = wakePayload.wakeReason;
+  if (wakePayload.runGoal) paperclipEnv.PAPERCLIP_RUN_GOAL = wakePayload.runGoal;
   if (wakePayload.wakeCommentId) paperclipEnv.PAPERCLIP_WAKE_COMMENT_ID = wakePayload.wakeCommentId;
   if (wakePayload.approvalId) paperclipEnv.PAPERCLIP_APPROVAL_ID = wakePayload.approvalId;
   if (wakePayload.approvalStatus) paperclipEnv.PAPERCLIP_APPROVAL_STATUS = wakePayload.approvalStatus;
@@ -344,6 +347,7 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
     "PAPERCLIP_API_URL",
     "PAPERCLIP_TASK_ID",
     "PAPERCLIP_WAKE_REASON",
+    "PAPERCLIP_RUN_GOAL",
     "PAPERCLIP_WAKE_COMMENT_ID",
     "PAPERCLIP_APPROVAL_ID",
     "PAPERCLIP_APPROVAL_STATUS",

@@ -10,9 +10,11 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local ClientPerformanceProfile = require(DAC:WaitForChild("ClientPerformanceProfile"))
 local QuestConfig = require(DAC:WaitForChild("Config"):WaitForChild("QuestConfig"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 
@@ -25,6 +27,9 @@ local questCompletedSeen: { [string]: boolean } = {}
 local questNudgeLineCache: { [string]: string } = {}
 local questNudgeSoundPlayed: { [string]: boolean } = {}
 local nudgePulseTween: { [Instance]: Tween } = {}
+local activePulseTween: { [Instance]: Tween } = {}
+local barFillTween: { [Instance]: Tween } = {}
+local lastBarRatio: { [string]: number } = {}
 
 local GOLD = Color3.fromRGB(255, 215, 64)
 local GOLD_DIM = Color3.fromRGB(120, 100, 40)
@@ -36,6 +41,14 @@ local function smoothstep(t: number): number return t * t * (3 - 2 * t) end
 local function stopNudgePulse(row: Instance)
 	local tw = nudgePulseTween[row]; if tw then tw:Cancel(); nudgePulseTween[row] = nil end
 	local nudge = row:FindFirstChild("Nudge"); if nudge and nudge:IsA("TextLabel") then local sc = nudge:FindFirstChildOfClass("UIScale"); if sc then sc:Destroy() end end
+end
+
+local function stopActivePulse(row: Instance)
+	local tw = activePulseTween[row]; if tw then tw:Cancel(); activePulseTween[row] = nil end
+end
+
+local function stopBarFillTween(row: Instance)
+	local tw = barFillTween[row]; if tw then tw:Cancel(); barFillTween[row] = nil end
 end
 
 local function startNudgePulse(nudge: TextLabel)
@@ -51,7 +64,10 @@ local function clearCelebration(row: Instance)
 	for _, ch in row:GetChildren() do
 		if ch.Name == "CompleteBanner" or ch.Name == "CompleteSubtitle" or ch.Name == "RewardCount" or ch.Name == "Sparkle" then ch:Destroy() end
 	end
-	local celebStroke = row:FindFirstChildOfClass("UIStroke"); if celebStroke then celebStroke:Destroy() end
+	local celebStroke = row:FindFirstChild("QuestCelebrateStroke")
+	if celebStroke and celebStroke:IsA("UIStroke") then
+		celebStroke:Destroy()
+	end
 end
 
 local function spawnSparkles(parent: Instance)
@@ -67,7 +83,7 @@ end
 
 local function playRowCelebration(row: Instance, def: any, lightAfterGlobal: boolean?)
 	clearCelebration(row)
-	local stroke = Instance.new("UIStroke"); stroke.Color=GOLD
+	local stroke = Instance.new("UIStroke"); stroke.Name = "QuestCelebrateStroke"; stroke.Color=GOLD
 	local thick0 = if lightAfterGlobal then 2 else 3; local thickPulse = if lightAfterGlobal then 3 else 4
 	stroke.Thickness=thick0; stroke.Transparency=0; stroke.Parent=row
 	TweenService:Create(stroke, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Thickness=thickPulse }):Play()
@@ -113,13 +129,115 @@ local function collectCompletedQuestIds(q: any): { [string]: boolean }
 	return out
 end
 
+local function fmtInt(n: number): string
+	n = math.floor(n)
+	local s = tostring(n)
+	local out = ""
+	while #s > 3 do
+		out = "," .. string.sub(s, -3) .. out
+		s = string.sub(s, 1, -4)
+	end
+	return s .. out
+end
+
 local function describeSlot(slot: any): (string, string)
 	local def = QuestConfig.getById(slot.defId); if not def then return "?", "?" end
-	return `{def.title}  ({slot.progress or 0}/{def.target})`, `+{def.xpReward} Season XP`
+	local p = slot.progress or 0
+	local t = def.target or 0
+	return `{def.title}  ({fmtInt(p)}/{fmtInt(t)})`, `+{def.xpReward} Season XP`
 end
 
 local function progressRatio(slot: any, def: any): number
 	if def.target <= 0 then return 0 end; return math.clamp((slot.progress or 0) / def.target, 0, 1)
+end
+
+local function pickActiveQuestKey(q: any): string?
+	if type(q) ~= "table" then
+		return nil
+	end
+	if type(q.daily) == "table" then
+		for i = 1, 3 do
+			local slot = q.daily[i]
+			if type(slot) == "table" and slot.completed ~= true and type(slot.defId) == "string" then
+				return slot.defId
+			end
+		end
+	end
+	if type(q.weekly) == "table" then
+		for i = 1, 3 do
+			local slot = q.weekly[i]
+			if type(slot) == "table" and slot.completed ~= true and type(slot.defId) == "string" then
+				return slot.defId
+			end
+		end
+	end
+	if type(q.milestone) == "table" then
+		for _, mdef in QuestConfig.Milestones do
+			local slot = q.milestone[mdef.id]
+			if type(slot) == "table" and slot.completed ~= true then
+				return mdef.id
+			end
+		end
+	end
+	return nil
+end
+
+local function setActiveRowHighlight(row: Frame, isActive: boolean)
+	local existing = row:FindFirstChild("ActiveQuestStroke")
+	if not isActive then
+		stopActivePulse(row)
+		if existing and existing:IsA("UIStroke") then
+			existing:Destroy()
+		end
+		return
+	end
+	local stroke: UIStroke
+	if existing and existing:IsA("UIStroke") then
+		stroke = existing
+	else
+		if existing then
+			existing:Destroy()
+		end
+		stroke = Instance.new("UIStroke")
+		stroke.Name = "ActiveQuestStroke"
+		stroke.Parent = row
+	end
+	stroke.Color = Color3.fromRGB(255, 210, 96)
+	stroke.Thickness = 2
+	stroke.Transparency = 0.36
+	if ClientPerformanceProfile.isReducedMotion() then
+		stopActivePulse(row)
+		stroke.Transparency = 0.45
+		return
+	end
+	stopActivePulse(row)
+	local tw = TweenService:Create(
+		stroke,
+		TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.68 }
+	)
+	activePulseTween[row] = tw
+	tw:Play()
+end
+
+local function playClaimRowPop(row: Frame)
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	local rowScale = row:FindFirstChild("ClaimPopScale") :: UIScale?
+	if not rowScale then
+		rowScale = Instance.new("UIScale")
+		rowScale.Name = "ClaimPopScale"
+		rowScale.Scale = 1
+		rowScale.Parent = row
+	end
+	rowScale.Scale = 1
+	TweenService:Create(rowScale, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.05 }):Play()
+	task.delay(0.11, function()
+		if rowScale.Parent then
+			TweenService:Create(rowScale, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		end
+	end)
 end
 
 local function buildQuestRowFrame(parent: Instance, bg: Color3, layoutOrder: number): Frame
@@ -134,7 +252,7 @@ local function buildQuestRowFrame(parent: Instance, bg: Color3, layoutOrder: num
 	return row
 end
 
-local function updateQuestRowFrame(row: Frame, slot: any, def: any, line: string, sub: string, questKey: string, newlyCompleted: boolean)
+local function updateQuestRowFrame(row: Frame, slot: any, def: any, line: string, sub: string, questKey: string, newlyCompleted: boolean, isActiveRow: boolean)
 	clearCelebration(row)
 	local title = row:FindFirstChild("TitleLabel") :: TextLabel
 	local barBack = row:FindFirstChild("ProgBack") :: Frame
@@ -142,12 +260,45 @@ local function updateQuestRowFrame(row: Frame, slot: any, def: any, line: string
 	local nudge = row:FindFirstChild("Nudge") :: TextLabel
 	stopNudgePulse(row)
 	title.Text = line .. "\n" .. sub
-	if not def then barBack.Visible = false; nudge.Visible = false; return end
-	if slot.completed then
-		barBack.Visible = false; nudge.Visible = false; questNudgeLineCache[questKey] = nil; questNudgeSoundPlayed[questKey] = nil
-		if newlyCompleted then playRowCelebration(row, def, true) end; return
+	if not def then
+		barBack.Visible = false
+		nudge.Visible = false
+		setActiveRowHighlight(row, false)
+		return
 	end
-	local ratio = progressRatio(slot, def); barBack.Visible = true; barFill.Size = UDim2.new(ratio, 0, 1, 0)
+	if slot.completed then
+		lastBarRatio[questKey] = nil
+		stopBarFillTween(row)
+		barBack.Visible = false
+		nudge.Visible = false
+		questNudgeLineCache[questKey] = nil
+		questNudgeSoundPlayed[questKey] = nil
+		setActiveRowHighlight(row, false)
+		if newlyCompleted then
+			playClaimRowPop(row)
+			playRowCelebration(row, def, true)
+		end
+		return
+	end
+	local ratio = progressRatio(slot, def)
+	barBack.Visible = true
+	stopBarFillTween(row)
+	local oldR = lastBarRatio[questKey]
+	if oldR == nil or math.abs(ratio - oldR) < 0.0005 then
+		barFill.Size = UDim2.new(ratio, 0, 1, 0)
+	elseif ClientPerformanceProfile.isReducedMotion() then
+		barFill.Size = UDim2.new(ratio, 0, 1, 0)
+	else
+		local tw = TweenService:Create(
+			barFill,
+			TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Size = UDim2.new(ratio, 0, 1, 0) }
+		)
+		barFillTween[row] = tw
+		tw:Play()
+	end
+	lastBarRatio[questKey] = ratio
+	setActiveRowHighlight(row, isActiveRow)
 	if ratio < 0.8 then questNudgeLineCache[questKey] = nil; questNudgeSoundPlayed[questKey] = nil; nudge.Visible = false; return end
 	if questNudgeLineCache[questKey] == nil then questNudgeLineCache[questKey] = pickRandom(MicrocopyConfig.QuestProgress) end
 	nudge.Text = questNudgeLineCache[questKey] or ""; nudge.Visible = true
@@ -156,7 +307,11 @@ local function updateQuestRowFrame(row: Frame, slot: any, def: any, line: string
 end
 
 local function resetEmptyQuestRow(row: Frame)
-	clearCelebration(row); stopNudgePulse(row)
+	clearCelebration(row)
+	stopNudgePulse(row)
+	stopActivePulse(row)
+	stopBarFillTween(row)
+	setActiveRowHighlight(row, false)
 	local title = row:FindFirstChild("TitleLabel") :: TextLabel; local barBack = row:FindFirstChild("ProgBack") :: Frame; local nudge = row:FindFirstChild("Nudge") :: TextLabel
 	title.Text = "\u{2014}"; barBack.Visible = false; nudge.Visible = false
 end
@@ -164,7 +319,9 @@ end
 local function milestoneLine(id: string, slot: any): (string, string)
 	local def = QuestConfig.getById(id); if not def then return "?", "?" end
 	if slot.completed then return `{def.title}  \u{2713}`, "Complete" end
-	return `{def.title}  ({slot.progress or 0}/{def.target})`, `+{def.xpReward} Season XP`
+	local p = slot.progress or 0
+	local t = def.target or 0
+	return `{def.title}  ({fmtInt(p)}/{fmtInt(t)})`, `+{def.xpReward} Season XP`
 end
 
 function QuestPanel.init()
@@ -196,25 +353,55 @@ function QuestPanel.init()
 			for id, _ in completedNow do
 				if not questCompletedSeen[id] then
 					newlyCompleted[id] = true; questCompletedSeen[id] = true
-					local def = QuestConfig.getById(id); if def then SoundFacade.playOneShot("level_up"); VFXFacade.questComplete(def.title, "season_xp", def.xpReward) end
+					local def = QuestConfig.getById(id)
+					if def then
+						SoundFacade.playOneShot("quest_claim_fanfare")
+						VFXFacade.questComplete(def.title, "season_xp", def.xpReward)
+					end
 				end
 			end
 		end
-		for i = 1, 3 do local slot = q.daily[i]; if slot then local line, sub = describeSlot(slot); local def = QuestConfig.getById(slot.defId); updateQuestRowFrame(dailyRows[i], slot, def, line, sub, slot.defId, newlyCompleted[slot.defId] == true) else resetEmptyQuestRow(dailyRows[i]) end end
-		for i = 1, 3 do local slot = q.weekly[i]; if slot then local line, sub = describeSlot(slot); local def = QuestConfig.getById(slot.defId); updateQuestRowFrame(weeklyRows[i], slot, def, line, sub, slot.defId, newlyCompleted[slot.defId] == true) else resetEmptyQuestRow(weeklyRows[i]) end end
-		for _, child in mileScroll:GetChildren() do if child:IsA("Frame") then stopNudgePulse(child); child:Destroy() end end
+		local activeKey = pickActiveQuestKey(q)
+		for i = 1, 3 do local slot = q.daily[i]; if slot then local line, sub = describeSlot(slot); local def = QuestConfig.getById(slot.defId); updateQuestRowFrame(dailyRows[i], slot, def, line, sub, slot.defId, newlyCompleted[slot.defId] == true, slot.defId == activeKey) else resetEmptyQuestRow(dailyRows[i]) end end
+		for i = 1, 3 do local slot = q.weekly[i]; if slot then local line, sub = describeSlot(slot); local def = QuestConfig.getById(slot.defId); updateQuestRowFrame(weeklyRows[i], slot, def, line, sub, slot.defId, newlyCompleted[slot.defId] == true, slot.defId == activeKey) else resetEmptyQuestRow(weeklyRows[i]) end end
+		for _, child in mileScroll:GetChildren() do
+			if child:IsA("Frame") then
+				stopNudgePulse(child)
+				stopActivePulse(child)
+				stopBarFillTween(child)
+				child:Destroy()
+			end
+		end
 		if q.milestone then
 			for _, mdef in QuestConfig.Milestones do
 				local slot = q.milestone[mdef.id]
-				if slot then local line, sub = milestoneLine(mdef.id, slot); local def = QuestConfig.getById(mdef.id); local mrow = buildQuestRowFrame(mileScroll, Color3.fromRGB(28, 28, 50), 0); mrow.Size = UDim2.new(1, 0, 0, 72); updateQuestRowFrame(mrow, slot, def, line, sub, mdef.id, newlyCompleted[mdef.id] == true) end
+				if slot then local line, sub = milestoneLine(mdef.id, slot); local def = QuestConfig.getById(mdef.id); local mrow = buildQuestRowFrame(mileScroll, Color3.fromRGB(28, 28, 50), 0); mrow.Size = UDim2.new(1, 0, 0, 72); updateQuestRowFrame(mrow, slot, def, line, sub, mdef.id, newlyCompleted[mdef.id] == true, mdef.id == activeKey) end
 			end
 		end
 	end
 
-	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(refresh)
+	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function(data)
+		RemoteFailSafe.safeNotifyOnError("DataUpdate", function()
+			refresh(data)
+		end)
+	end)
 	task.defer(function()
-		local ok, initial = pcall(function() return Remotes.getFunction("GetQuests"):InvokeServer() end)
-		if ok and initial then refresh(initial) end
+		local ok, initial = RemoteFailSafe.invokeFunction("GetQuests")
+		if ok and type(initial) == "table" then
+			refresh(initial)
+		else
+			RemoteFailSafe.notifyRemoteFailure("GetQuests")
+			for i = 1, 3 do resetEmptyQuestRow(dailyRows[i]) end
+			for i = 1, 3 do resetEmptyQuestRow(weeklyRows[i]) end
+			for _, child in mileScroll:GetChildren() do
+			if child:IsA("Frame") then
+				stopNudgePulse(child)
+				stopActivePulse(child)
+				stopBarFillTween(child)
+				child:Destroy()
+			end
+		end
+		end
 	end)
 end
 

@@ -2,6 +2,12 @@
 --[[
 	Rebirth milestone celebrations (VFX) + prestige tier for nametag aura.
 	Tiers: 5 / 10 / 25 / 50 / 100 rebirths.
+
+	Next-rebirth coin cost uses Utils.calculateRebirthCost (base × mult^rebirths) from RebirthConfig;
+	thresholds are spaced to track exponential grind. Labels are HUD/VFX flash text; ceremonyTier is
+	prose for MilestoneCeremonyCopyConfig ({TIER}) — no trailing "!" so sentences read cleanly.
+
+	50/100 names avoid collision with Robux spend tiers "Legend" (1000 R$) and "Mythic Spender".
 ]]
 
 local RebirthMilestoneConfig = {}
@@ -11,11 +17,11 @@ export type MilestoneKey = "veteran" | "elite" | "master" | "legend" | "immortal
 RebirthMilestoneConfig.THRESHOLDS = { 5, 10, 25, 50, 100 }
 
 RebirthMilestoneConfig.MILESTONES = {
-	{ threshold = 5, key = "veteran", label = "VETERAN!" },
-	{ threshold = 10, key = "elite", label = "ELITE!" },
-	{ threshold = 25, key = "master", label = "MASTER!" },
-	{ threshold = 50, key = "legend", label = "LEGEND!" },
-	{ threshold = 100, key = "immortal", label = "IMMORTAL!" },
+	{ threshold = 5, key = "veteran", label = "VETERAN!", ceremonyTier = "VETERAN" },
+	{ threshold = 10, key = "elite", label = "ELITE!", ceremonyTier = "ELITE" },
+	{ threshold = 25, key = "master", label = "MASTER!", ceremonyTier = "MASTER" },
+	{ threshold = 50, key = "legend", label = "DYNASTY!", ceremonyTier = "DYNASTY" },
+	{ threshold = 100, key = "immortal", label = "ETERNAL!", ceremonyTier = "ETERNAL" },
 }
 
 function RebirthMilestoneConfig.getPrestigeTier(rebirths: number): number

@@ -9,7 +9,7 @@ local QuestConfig = {}
 QuestConfig.DailyPool = {
 	{
 		id = "d_drive_10k",
-		title = "Morning Commute",
+		title = "Drive 10,000 studs (today)",
 		objectiveType = "distance_driven",
 		target = 10_000,
 		xpReward = 50,
@@ -17,7 +17,7 @@ QuestConfig.DailyPool = {
 	},
 	{
 		id = "d_laps_3",
-		title = "Lap It Up",
+		title = "Complete 3 laps",
 		objectiveType = "laps_completed",
 		target = 3,
 		xpReward = 50,
@@ -25,7 +25,7 @@ QuestConfig.DailyPool = {
 	},
 	{
 		id = "d_hatch_2",
-		title = "Egg Dash",
+		title = "Hatch 2 eggs",
 		objectiveType = "eggs_hatched",
 		target = 2,
 		xpReward = 50,
@@ -33,7 +33,7 @@ QuestConfig.DailyPool = {
 	},
 	{
 		id = "d_coins_25k",
-		title = "Big Earner",
+		title = "Earn 25,000 coins in one run",
 		objectiveType = "coins_single_run",
 		target = 25_000,
 		xpReward = 50,
@@ -41,7 +41,7 @@ QuestConfig.DailyPool = {
 	},
 	{
 		id = "d_worlds_2",
-		title = "Tourist",
+		title = "Visit 2 different worlds (today)",
 		objectiveType = "worlds_unique_day",
 		target = 2,
 		xpReward = 50,
@@ -109,7 +109,7 @@ QuestConfig.DailyPool = {
 QuestConfig.WeeklyPool = {
 	{
 		id = "w_drive_100k",
-		title = "Weekly Marathon",
+		title = "Drive 100,000 studs (this week)",
 		objectiveType = "distance_driven",
 		target = 100_000,
 		xpReward = 200,
@@ -117,7 +117,7 @@ QuestConfig.WeeklyPool = {
 	},
 	{
 		id = "w_hatch_15",
-		title = "Hatch Week",
+		title = "Hatch 15 eggs (this week)",
 		objectiveType = "eggs_hatched",
 		target = 15,
 		xpReward = 200,
@@ -160,7 +160,7 @@ QuestConfig.WeeklyPool = {
 QuestConfig.Milestones = {
 	{
 		id = "m_first_run",
-		title = "First Midnight Run",
+		title = "Finish 1 run this season",
 		objectiveType = "season_runs",
 		target = 1,
 		xpReward = 250,
@@ -178,7 +178,7 @@ QuestConfig.Milestones = {
 	},
 	{
 		id = "m_speed_demon",
-		title = "Speed Demon",
+		title = "Drive 50,000 studs (season total)",
 		objectiveType = "distance_driven",
 		target = 50_000,
 		xpReward = 250,
@@ -232,7 +232,7 @@ QuestConfig.Milestones = {
 	},
 	{
 		id = "m_coin_collector",
-		title = "Coin Collector",
+		title = "Earn 2,000,000 coins (season total)",
 		objectiveType = "coins_earned_season",
 		target = 2_000_000,
 		xpReward = 250,

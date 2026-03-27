@@ -147,6 +147,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     : [];
   if (wakeTaskId) env.PAPERCLIP_TASK_ID = wakeTaskId;
   if (wakeReason) env.PAPERCLIP_WAKE_REASON = wakeReason;
+  const runGoal =
+    typeof context.runGoal === "string" && context.runGoal.trim().length > 0
+      ? context.runGoal.trim()
+      : null;
+  if (runGoal) env.PAPERCLIP_RUN_GOAL = runGoal;
   if (wakeCommentId) env.PAPERCLIP_WAKE_COMMENT_ID = wakeCommentId;
   if (approvalId) env.PAPERCLIP_APPROVAL_ID = approvalId;
   if (approvalStatus) env.PAPERCLIP_APPROVAL_STATUS = approvalStatus;

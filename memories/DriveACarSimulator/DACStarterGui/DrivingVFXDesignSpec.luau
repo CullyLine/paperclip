@@ -449,6 +449,9 @@
   Triggered via VFXFacade.nearMissSpark(fromRight) when the player narrowly
   avoids an obstacle. DrivingController detects proximity and passes the
   approach direction.
+  HUD LANE (near-miss copy, separate from world-spark VFX in this section):
+  Lower-third text flash: DrivingHUD (NearMissHudFlash), fed by DrivingController.popHudNearMissFlash(),
+  copy pools in NearMissCopyConfig (ReplicatedStorage.DAC.Config.NearMissCopyConfig).
 
   Design goal: Transform a near-death moment into a REWARD moment. The player
   almost crashed — instead of fear, they should feel a rush of adrenaline and
@@ -592,7 +595,7 @@
   If the player chains near-misses within a short window, escalate the visual
   feedback. This rewards skilled aggressive driving.
 
-  Combo window        : 3.0 seconds between consecutive near-misses
+  Combo window        : 4.0 seconds between consecutive near-misses (matches Constants.NEAR_MISS_CHAIN_RESET_SEC / NearMissComboRewardDesignSpec)
   Combo counter       : 1 → 2 → 3 → 5 → ... (resets on crash or timeout)
 
   | Combo Count | Popup Text Source              | Spark Count Multiplier |
@@ -611,7 +614,7 @@
     Additional sound: "combo_ding" (ascending pitch per combo level)
 
   Implementation: maintain a nearMissComboCount and nearMissComboLastClock
-  in VFXController. Reset on run end or 3s timeout.
+  in VFXController. Reset on run end or 4s timeout (NEAR_MISS_CHAIN_RESET_SEC).
 ]]
 
 

@@ -1,0 +1,97 @@
+[
+  {
+    "file": "panel_Inventory.png",
+    "luau_return": "{\"returnValue\":\"ok Inventory\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Store.png",
+    "luau_return": "{\"returnValue\":\"ok Store\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_EggStore.png",
+    "luau_return": "{\"returnValue\":\"ok EggStore\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Rebirth.png",
+    "luau_return": "{\"returnValue\":\"ok Rebirth\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Codes.png",
+    "luau_return": "{\"returnValue\":\"ok Codes\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Settings.png",
+    "luau_return": "{\"returnValue\":\"ok Settings\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Quest.png",
+    "luau_return": "{\"returnValue\":\"ok Quest\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_BattlePass.png",
+    "luau_return": "{\"returnValue\":\"ok BattlePass\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_World.png",
+    "luau_return": "{\"returnValue\":\"ok World\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_PetIndex.png",
+    "luau_return": "{\"returnValue\":\"ok PetIndex\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_Daily.png",
+    "luau_return": "{\"returnValue\":\"ok Daily\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "panel_TrophyCase.png",
+    "luau_return": "{\"returnValue\":\"ok TrophyCase\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "hud_main.png",
+    "luau_return": "{\"returnValue\":\"ok hud_main\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "hud_driving.png",
+    "luau_return": "{\"returnValue\":\"ok driving_hud\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "overlay_Tutorial.png",
+    "luau_return": "{\"returnValue\":\"ok DACTutorialOverlay\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "overlay_EventBanner.png",
+    "luau_return": "{\"returnValue\":\"ok DACEventBanner\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "overlay_PlaytimeGem.png",
+    "luau_return": "{\"returnValue\":\"ok DACPlaytimeGem\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "overlay_Payout.png",
+    "luau_return": "{\"returnValue\":\"ok DACPayout\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "world_grasslands_viewport.png",
+    "luau_return": "{\"returnValue\":\"ok camera (re-captured after Folder:GetPivot fix)\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  }
+]

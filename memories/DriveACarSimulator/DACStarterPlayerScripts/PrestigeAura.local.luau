@@ -71,7 +71,11 @@ local function attachAura(character: Model, tier: number)
 	motes.Parent = att
 end
 
+local hookCleanups: { [number]: () -> () } = {}
+
 local function hookPlayer(target: Player)
+	local conns: { RBXScriptConnection } = {}
+
 	local function refresh()
 		local char = target.Character
 		if not char then
@@ -81,14 +85,35 @@ local function hookPlayer(target: Player)
 		attachAura(char, t)
 	end
 
-	target.CharacterAdded:Connect(function()
-		task.defer(refresh)
-	end)
-	target:GetAttributeChangedSignal("DAC_PrestigeTier"):Connect(refresh)
+	local function cleanup()
+		for _, c in conns do
+			c:Disconnect()
+		end
+		table.clear(conns)
+		if hookCleanups[target.UserId] == cleanup then
+			hookCleanups[target.UserId] = nil
+		end
+	end
+
+	table.insert(
+		conns,
+		target.CharacterAdded:Connect(function()
+			task.defer(refresh)
+		end)
+	)
+	table.insert(conns, target:GetAttributeChangedSignal("DAC_PrestigeTier"):Connect(refresh))
+	hookCleanups[target.UserId] = cleanup
 	if target.Character then
 		refresh()
 	end
 end
+
+Players.PlayerRemoving:Connect(function(player)
+	local fn = hookCleanups[player.UserId]
+	if fn then
+		fn()
+	end
+end)
 
 for _, p in Players:GetPlayers() do
 	hookPlayer(p)

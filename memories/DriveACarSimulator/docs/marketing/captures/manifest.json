@@ -1,0 +1,27 @@
+[
+  {
+    "file": "hud.png",
+    "luau_return": "{\"returnValue\":\"ok driving_hud\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "shop.png",
+    "luau_return": "{\"returnValue\":\"ok Store\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "trophy.png",
+    "luau_return": "{\"returnValue\":\"ok TrophyCase\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "payout.png",
+    "luau_return": "{\"returnValue\":\"ok DACPayout\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "friend_bonus.png",
+    "luau_return": "{\"returnValue\":\"ok social_feed_fallback\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  }
+]

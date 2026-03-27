@@ -3,10 +3,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Types = require(DAC:WaitForChild("Types"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
@@ -54,6 +56,8 @@ function CarService.buyCar(player: Player, carId: string): (boolean, string?)
 	if carCountBefore == 1 then
 		MilestoneCeremonyService.tryFirstTime(player, data, "FirstCarPurchased", nil)
 	end
+
+	AchievementService.onGarageMaybeComplete(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	return true, nil
@@ -116,8 +120,19 @@ end
 
 function CarService.init()
 	Remotes.getEvent("BuyCar").OnServerEvent:Connect(function(player, carId)
-		if type(carId) ~= "string" then return end
 		if not ValidationService.checkRemoteRate(player, "BuyCar") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		local maxId = ValidationService.MAX_REMOTE_STRING_ID_LEN
+		if not ValidationService.isBoundedStringId(carId, maxId) then
+			if type(carId) ~= "string" then
+				ValidationService.logAnomalyOncePerSession(player, "buy_car_bad_type", "")
+			else
+				ValidationService.logAnomalyOncePerSession(player, "buy_car_bad_id_len", "")
+			end
 			return
 		end
 		if not RemoteCooldown.allow(player, "BuyCar", Constants.REMOTE_COOLDOWN_DEFAULT) then
@@ -125,7 +140,7 @@ function CarService.init()
 		end
 		local success, err = CarService.buyCar(player, carId)
 		if not success then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Failed to buy car",
 			})
@@ -133,8 +148,19 @@ function CarService.init()
 	end)
 
 	Remotes.getEvent("EquipCar").OnServerEvent:Connect(function(player, carId)
-		if type(carId) ~= "string" then return end
 		if not ValidationService.checkRemoteRate(player, "EquipCar") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		local maxId = ValidationService.MAX_REMOTE_STRING_ID_LEN
+		if not ValidationService.isBoundedStringId(carId, maxId) then
+			if type(carId) ~= "string" then
+				ValidationService.logAnomalyOncePerSession(player, "equip_car_bad_type", "")
+			else
+				ValidationService.logAnomalyOncePerSession(player, "equip_car_bad_id_len", "")
+			end
 			return
 		end
 		if not RemoteCooldown.allow(player, "EquipCar", 0.2) then

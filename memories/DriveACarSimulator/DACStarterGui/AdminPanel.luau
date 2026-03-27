@@ -15,6 +15,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePassConfig"))
 
@@ -158,8 +159,9 @@ end
 -- ============= PER-PAGE WIRING =============
 
 local function wireCurrencyPage(pg: Instance)
-	for _, cur in { "Coins", "Gems", "Crystals", "Skulls" } do
-		local lower = string.lower(cur)
+	for _, pair in { {"Coins", "coins"}, {"SandGranules", "sandGranules"}, {"Icycles", "icycles"}, {"MagmaCores", "magmaCores"}, {"Infinitium", "infinitium"} } do
+		local cur = pair[1]
+		local lower = pair[2]
 		local amounts = { ["1K"] = 1000, ["10K"] = 10000, ["100K"] = 100000, ["1M"] = 1000000, ["10M"] = 10000000 }
 		for suffix, amt in amounts do
 			local capturedAmt = amt
@@ -441,6 +443,7 @@ local PAGE_WIRERS: { [string]: (Instance) -> () } = {
 
 local function wireUI()
 	gui = playerGui:WaitForChild("AdminPanel") :: ScreenGui
+	gui.DisplayOrder = UILayerStack.screenGui.adminPanel
 	local main = gui:WaitForChild("Main") :: Frame
 	contentArea = main:WaitForChild("Content") :: Frame
 	local sidebar = main:WaitForChild("SidebarClip"):WaitForChild("Sidebar") :: ScrollingFrame
@@ -502,8 +505,12 @@ function AdminPanel.init()
 	end)
 
 	task.defer(function()
-		local screenGui = playerGui:FindFirstChild("DACMain")
-		if not screenGui then return end
+		-- Cold join: DACMain may not exist on the first defer tick (StarterGui clone timing).
+		local screenGui = playerGui:WaitForChild("DACMain", 60) :: ScreenGui?
+		if not screenGui then
+			warn("[DAC] AdminPanel: DACMain not in PlayerGui after wait — admin ActionBar button skipped")
+			return
+		end
 		local actionBar = screenGui:FindFirstChild("ActionBar")
 		if not actionBar then return end
 		local adminBtn = actionBar:FindFirstChild("AdminButton") :: TextButton?

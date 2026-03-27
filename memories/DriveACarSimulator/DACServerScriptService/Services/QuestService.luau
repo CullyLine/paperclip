@@ -4,10 +4,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("BattlePassConfig"))
 local QuestConfig = require(DAC:WaitForChild("Config"):WaitForChild("QuestConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local _battlePassService: any = nil
 local function getBattlePassService()
@@ -151,8 +153,8 @@ local function completeQuest(player: Player, slot: any, def: any)
 	end
 	slot.progress = def.target
 	slot.completed = true
-	getBattlePassService().awardXp(player, def.xpReward)
-	Remotes.getEvent("Notification"):FireClient(player, {
+	getBattlePassService().awardXp(player, def.xpReward, "quest")
+	NotificationDispatchService.notify(player, {
 		type = "reward_claim",
 		title = "Quest Complete",
 		subtitle = def.title,
@@ -165,6 +167,11 @@ local function completeQuest(player: Player, slot: any, def: any)
 	local pdata = DataManager.get(player)
 	if pdata then
 		MilestoneCeremonyService.tryFirstTime(player, pdata, "FirstQuestCompleted", nil)
+		if type(pdata.stats) ~= "table" then
+			pdata.stats = {}
+		end
+		pdata.stats.questsCompletedTotal = (pdata.stats.questsCompletedTotal or 0) + 1
+		AchievementService.onQuestCompleted(player, pdata)
 	end
 end
 
@@ -258,6 +265,41 @@ local function checkMidnightLegend(player: Player)
 	end
 end
 
+--[[
+	POLA-529: Clamp quest slot progress to config, reconcile completion vs progress (tampered saves),
+	and complete any slot that reached target without going through completeQuest.
+]]
+local function sanitizeDailyWeeklySlots(player: Player, slots: { any }, scope: "daily" | "weekly")
+	for _, slot in slots do
+		local def = QuestConfig.getById(slot.defId)
+		if not def or def.scope ~= scope then
+			continue
+		end
+		if type(slot.progress) ~= "number" or slot.progress ~= slot.progress then
+			slot.progress = 0
+		end
+		slot.progress = math.clamp(slot.progress, 0, def.target)
+		if type(slot.completed) ~= "boolean" then
+			slot.completed = false
+		end
+		if slot.completed then
+			slot.progress = def.target
+		elseif slot.progress >= def.target then
+			completeQuest(player, slot, def)
+		end
+	end
+end
+
+local function sanitizeQuestState(player: Player)
+	local data = DataManager.get(player)
+	if not data or not data.quests then
+		return
+	end
+	local q = data.quests
+	sanitizeDailyWeeklySlots(player, q.daily, "daily")
+	sanitizeDailyWeeklySlots(player, q.weekly, "weekly")
+end
+
 function QuestService.ensureQuests(player: Player)
 	getBattlePassService().ensureSeason(player)
 	local data = DataManager.get(player)
@@ -313,6 +355,8 @@ function QuestService.ensureQuests(player: Player)
 	end
 
 	q.seasonPlayDays[day] = true
+
+	sanitizeQuestState(player)
 end
 
 local function applySlotRun(player: Player, slot: any, def: any, dist: number, laps: number, coins: number, worldId: string)
@@ -357,9 +401,18 @@ function QuestService.onRunEnd(player: Player, payload: { [string]: any })
 		return
 	end
 	local q = data.quests
-	local dist = payload.distance or 0
-	local laps = payload.laps or 0
-	local coins = payload.coinsEarned or 0
+	local dist = tonumber(payload.distance) or 0
+	local laps = tonumber(payload.laps) or 0
+	local coins = tonumber(payload.coinsEarned) or 0
+	if dist ~= dist or dist < 0 or dist == math.huge then
+		dist = 0
+	end
+	if laps ~= laps or laps < 0 or laps == math.huge then
+		laps = 0
+	end
+	if coins ~= coins or coins < 0 or coins == math.huge then
+		coins = 0
+	end
 	local worldId = payload.worldId or ""
 
 	q.seasonRuns += 1
@@ -388,7 +441,7 @@ function QuestService.onRunEnd(player: Player, payload: { [string]: any })
 	syncSeasonMilestones(player)
 	checkMidnightLegend(player)
 	sync(player)
-	DataManager.save(player)
+	DataManager.scheduleSave(player)
 end
 
 function QuestService.onEggHatch(player: Player)
@@ -467,7 +520,7 @@ function QuestService.onUpgrade(player: Player)
 	end
 	checkMidnightLegend(player)
 	sync(player)
-	DataManager.save(player)
+	DataManager.scheduleSave(player)
 end
 
 function QuestService.onWorldChanged(player: Player, worldId: string)

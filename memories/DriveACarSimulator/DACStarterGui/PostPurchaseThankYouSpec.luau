@@ -398,7 +398,7 @@
     | Standard     | 0+        | Gold            | Gold          | none                  |
     | Supporter    | 100R$+    | Bright gold     | Gold + white  | Item glow intensified |
     | VIP          | 500R$+    | Animated gold   | Gold + sparkle| Confetti burst at top |
-    | Whale        | 2000R$+   | Gold → platinum | Rainbow rain  | Full firework show    |
+    | Mega         | 2000R$+   | Gold → platinum | Rainbow rain  | Full firework show    |
 
   Standard (< 100R$):
     Base experience as described above.
@@ -420,7 +420,7 @@
       Lifetime: 0.5–1.0s, speed 60–140 px/s, gravity 180 px/s²
     Sound upgrade: "purchase_thankyou_reveal_vip" — richer chime with reverb tail
 
-  Whale (2000R$+):
+  Mega (2000R$+):
     Card UIStroke: animated gold → platinum → gold cycle:
       gold     = Color3.fromRGB(255, 213, 79)
       platinum = Color3.fromRGB(210, 215, 230)
@@ -433,7 +433,7 @@
       Colors: rainbow pool
       Screen flash on each burst: matching hue, peak 0.82, 0.15s
     Camera shake: 0.06, 0.1s (at each burst)
-    Sound upgrade: "purchase_thankyou_reveal_whale" — full fanfare, bass drop, ~0.8s
+    Sound upgrade: "purchase_thankyou_reveal_mega" — full fanfare, bass drop, ~0.8s
 
   Never show the tier label to the player — the escalation should feel
   natural and surprising, not transactional.
@@ -549,7 +549,7 @@
                                   Think: crystalline bell with gold shimmer tail
   purchase_thankyou_reveal_vip — richer chime with reverb (0.5s)
                                   Character: same as reveal but with orchestral swell
-  purchase_thankyou_reveal_whale — full fanfare + bass drop (0.8s)
+  purchase_thankyou_reveal_mega — full fanfare + bass drop (0.8s)
                                   Character: red carpet trumpet flourish + chest-thump bass
 
   Existing sounds reused:
@@ -571,11 +571,11 @@
     - Max 1 thank-you screen at a time (purchases can't overlap due to
       MarketplaceService queuing).
     - Gold rain: max 30 active dots. Pool and recycle.
-    - Firework bursts (Whale tier): max 36 dots total across 3 bursts.
+    - Firework bursts (Mega tier): max 36 dots total across 3 bursts.
     - All ambient effects disconnect RenderStepped on exit.
     - Currency counter animation: uses a single RenderStepped for counting,
       not per-frame TweenService calls.
-    - Total particle budget worst case (Whale): ~66 dots over 1.5s entrance +
+    - Total particle budget worst case (Mega): ~66 dots over 1.5s entrance +
       30 rain dots sustained. Well within budget.
 
   Accessibility:

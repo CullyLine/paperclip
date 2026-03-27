@@ -54,3 +54,17 @@ Then connect via the Rojo plugin in Roblox Studio.
 ## Template models (names in Studio)
 
 See **[STUDIO_TEMPLATES.md](./STUDIO_TEMPLATES.md)** for `PetModels` / `EggModels` / `CarModels` naming and how the code resolves them.
+
+## Documentation
+
+**Player FAQs:** [Onboarding (new players)](./docs/player_onboarding_faq.md) · [Mid-game systems](./docs/midgame_systems_faq.md) · [Quick reference hub](./docs/PlayerFAQ.md) (links to full Phase 4 FAQ and community rules).
+
+**Phase 4 P0 parity (config / server / UI):** [`docs/phase4-p0-spec-parity.md`](./docs/phase4-p0-spec-parity.md) — POLA-634 / POLA-667 / POLA-668 cross-track.
+
+**Phase 4 milestone + fusion parity (POLA-745):** [`docs/phase4-milestone-fusion-parity.md`](./docs/phase4-milestone-fusion-parity.md).
+
+## Promo / code redemption (server limits)
+
+- **Sliding window:** at most **12** submission attempts per **60** seconds per player (`Constants.CODE_REDEEM_*`, enforced in `DACServerScriptService/Services/CodeService.luau`).
+- **Shape:** trimmed string, length **1–32**, **letters and digits only** (validated before lookup).
+- **Extra throttles:** `ValidationService.checkRemoteRate` (remote spam) and `RemoteCooldown` on `RedeemCode` (double-click) stack with the window above.

@@ -430,7 +430,7 @@
   If ALL three surfaces are hidden (rare — player owns everything):
     The payout card renders exactly as it does today with no
     monetization elements. This avoids showing an empty "buy" section
-    to a whale who already bought everything.
+    to a top spender who already bought everything.
 ================================================================================
 ]]
 

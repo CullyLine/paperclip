@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local Constants = require(DAC:WaitForChild("Constants"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
@@ -35,6 +36,11 @@ local BOARDS = {
 }
 
 local UPDATE_INTERVAL = 60
+
+-- Shared cache: bounds OrderedDataStore reads across all players (TTL in Constants).
+-- Cleared when a stat is written so runs propagate to the in-world board quickly.
+type LeaderboardCacheEntry = { rows: { any }, expiresAt: number, updatedAtUnix: number }
+local leaderboardTopCache: { [string]: LeaderboardCacheEntry } = {}
 
 local function computeRankForUser(store, userId: number): number?
 	local success, pages = pcall(function()
@@ -102,15 +108,12 @@ local function evaluateRankAfterUpdate(player: Player)
 			continue
 		end
 
-		if newRank == 1 then
-			AchievementService.onLeaderboardRank(player, newRank)
-		end
-
 		local prevAny = snap[stat]
 		local prevRank = if type(prevAny) == "number" then prevAny else nil
 
 		if prevRank == nil then
 			snap[stat] = newRank
+			AchievementService.onLeaderboardRank(player, newRank, nil)
 			MilestoneCeremonyService.tryFirstTime(player, data, "FirstLeaderboardEntry", {
 				n = tostring(newRank),
 			})
@@ -126,6 +129,7 @@ local function evaluateRankAfterUpdate(player: Player)
 
 		if newRank < prevRank then
 			local tier = tierForRankChange(prevRank, newRank)
+			AchievementService.onLeaderboardRank(player, newRank, prevRank)
 			Remotes.getEvent("RankUpNotification"):FireClient(player, {
 				stat = stat,
 				oldRank = prevRank,
@@ -139,6 +143,9 @@ local function evaluateRankAfterUpdate(player: Player)
 end
 
 function LeaderboardService.updatePlayer(player: Player)
+	if not player.Parent then
+		return
+	end
 	local data = DataManager.get(player)
 	if not data then return end
 
@@ -148,6 +155,7 @@ function LeaderboardService.updatePlayer(player: Player)
 			pcall(function()
 				store:SetAsync(tostring(player.UserId), math.floor(value))
 			end)
+			leaderboardTopCache[stat] = nil
 		end
 	end
 
@@ -187,14 +195,68 @@ end
 
 function LeaderboardService.init()
 	Remotes.getFunction("GetLeaderboard").OnServerInvoke = function(player, stat)
+		if type(stat) ~= "string" then
+			return { ok = false, reason = "bad_args" }
+		end
+		local store = BOARDS[stat]
+		if not store then
+			return { ok = true, rows = {}, updatedAt = os.time(), fromCache = false, stale = false }
+		end
+
 		if not ValidationService.checkRemoteRate(player, "GetLeaderboard") then
-			return {}
+			local c = leaderboardTopCache[stat]
+			if c and c.rows then
+				return {
+					ok = true,
+					rows = c.rows,
+					updatedAt = c.updatedAtUnix,
+					fromCache = true,
+					stale = true,
+				}
+			end
+			return { ok = false, reason = "rate_limit" }
 		end
-		if not RemoteCooldown.allow(player, "GetLeaderboard", 1) then
-			return {}
+
+		local nowClock = os.clock()
+		local ttl = Constants.LEADERBOARD_DATASTORE_CACHE_TTL_SEC
+		local cached = leaderboardTopCache[stat]
+		if cached and nowClock < cached.expiresAt then
+			return {
+				ok = true,
+				rows = cached.rows,
+				updatedAt = cached.updatedAtUnix,
+				fromCache = true,
+				stale = false,
+			}
 		end
-		if type(stat) ~= "string" then return {} end
-		return LeaderboardService.getTop(stat, 25)
+
+		if not RemoteCooldown.allow(player, "GetLeaderboard", Constants.LEADERBOARD_REMOTE_COOLDOWN_ON_FETCH_SEC) then
+			if cached and cached.rows then
+				return {
+					ok = true,
+					rows = cached.rows,
+					updatedAt = cached.updatedAtUnix,
+					fromCache = true,
+					stale = true,
+				}
+			end
+			return { ok = false, reason = "rate_limit" }
+		end
+
+		local rows = LeaderboardService.getTop(stat, 25)
+		local unix = os.time()
+		leaderboardTopCache[stat] = {
+			rows = rows,
+			expiresAt = nowClock + ttl,
+			updatedAtUnix = unix,
+		}
+		return {
+			ok = true,
+			rows = rows,
+			updatedAt = unix,
+			fromCache = false,
+			stale = false,
+		}
 	end
 
 	-- Periodic leaderboard updates

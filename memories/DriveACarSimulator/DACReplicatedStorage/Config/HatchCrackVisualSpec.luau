@@ -104,6 +104,10 @@ export type HatchCrackEntry = {
 	cameraShakeDurationSec: number?,
 	fovPunch: number?,
 	fovReturnSec: number?,
+	-- Brief world lighting emphasis at reveal (restored by VFXController).
+	lightingBrightnessDelta: number?,
+	lightingColorShift: number?,
+	lightingRestoreSec: number?,
 	breakScaleMultiplier: number,
 	breakDurationSec: number,
 }
@@ -115,7 +119,7 @@ HatchCrackVisualSpec.Entries = {
 
 	common = {
 		wobblePhases = {
-			durationSec = 1.0,
+			durationSec = 2.5,
 			frequencyHz = 2,
 			maxAmplitudeDeg = 3,
 			rampCurve = "linear",
@@ -127,23 +131,23 @@ HatchCrackVisualSpec.Entries = {
 		glowColor = Color3.fromRGB(180, 180, 180),
 		screenEffect = {
 			flashColor = Color3.fromRGB(180, 180, 180),
-			flashDurationSec = 0.18,
+			flashDurationSec = 0.22,
 			flashPeakTransparency = 0.55,
 			distortionLines = false,
 		},
 		burstSize = { coreCount = 20, starCount = 0, wispCount = 0, boltCount = 0, confettiCount = 0, beamCount = 0 },
-		totalDurationSec = 1.5,
+		totalDurationSec = 3.5,
 		sfxTiming = {
-			{ soundId = "hatch_common", atSec = 1.0 },
+			{ soundId = "hatch_common", atSec = 2.5 },
 		},
 		eggSizeGrowth = 0,
 		breakScaleMultiplier = 1.0,
-		breakDurationSec = 0.25,
+		breakDurationSec = 0.3,
 	},
 
 	uncommon = {
 		wobblePhases = {
-			durationSec = 1.4,
+			durationSec = 3.5,
 			frequencyHz = 2.5,
 			maxAmplitudeDeg = 4,
 			rampCurve = "linear",
@@ -152,29 +156,29 @@ HatchCrackVisualSpec.Entries = {
 			lineCount = 1,
 			color = Color3.fromRGB(80, 200, 80),
 			lines = {
-				{ spawnTimeSec = 0.8, sizeScale = UDim2.new(0, 2, 0.7, 0), position = UDim2.new(0.55, 0, 0.15, 0), rotationDeg = -15, thicknessPx = 2, fadeFrom = 0.8, fadeTo = 0.2, fadeDurationSec = 0.4 },
+				{ spawnTimeSec = 2.0, sizeScale = UDim2.new(0, 2, 0.7, 0), position = UDim2.new(0.55, 0, 0.15, 0), rotationDeg = -15, thicknessPx = 2, fadeFrom = 0.8, fadeTo = 0.2, fadeDurationSec = 0.5 },
 			},
 		},
 		glowColor = Color3.fromRGB(80, 200, 80),
 		screenEffect = {
 			flashColor = Color3.fromRGB(80, 200, 80),
-			flashDurationSec = 0.18,
+			flashDurationSec = 0.22,
 			flashPeakTransparency = 0.55,
 			distortionLines = false,
 		},
 		burstSize = { coreCount = 30, starCount = 10, wispCount = 0, boltCount = 0, confettiCount = 0, beamCount = 0 },
-		totalDurationSec = 2.0,
+		totalDurationSec = 5.0,
 		sfxTiming = {
-			{ soundId = "hatch_uncommon", atSec = 1.4 },
+			{ soundId = "hatch_uncommon", atSec = 3.5 },
 		},
 		eggSizeGrowth = 0,
 		breakScaleMultiplier = 1.15,
-		breakDurationSec = 0.20,
+		breakDurationSec = 0.25,
 	},
 
 	rare = {
 		wobblePhases = {
-			durationSec = 1.8,
+			durationSec = 4.5,
 			frequencyHz = 3,
 			maxAmplitudeDeg = 5,
 			rampCurve = "quadratic",
@@ -184,32 +188,37 @@ HatchCrackVisualSpec.Entries = {
 			lineCount = 3,
 			color = Color3.fromRGB(60, 130, 255),
 			lines = {
-				{ spawnTimeSec = 0.8, sizeScale = UDim2.new(0, 2, 0.55, 0), position = UDim2.new(0.45, 0, 0.10, 0), rotationDeg = -12, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.3 },
-				{ spawnTimeSec = 1.1, sizeScale = UDim2.new(0, 2, 0.40, 0), position = UDim2.new(0.60, 0, 0.30, 0), rotationDeg = 25, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.3 },
-				{ spawnTimeSec = 1.4, sizeScale = UDim2.new(0, 2, 0.50, 0), position = UDim2.new(0.35, 0, 0.20, 0), rotationDeg = -35, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.3 },
+				{ spawnTimeSec = 2.0, sizeScale = UDim2.new(0, 2, 0.55, 0), position = UDim2.new(0.45, 0, 0.10, 0), rotationDeg = -12, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.4 },
+				{ spawnTimeSec = 2.8, sizeScale = UDim2.new(0, 2, 0.40, 0), position = UDim2.new(0.60, 0, 0.30, 0), rotationDeg = 25, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.4 },
+				{ spawnTimeSec = 3.5, sizeScale = UDim2.new(0, 2, 0.50, 0), position = UDim2.new(0.35, 0, 0.20, 0), rotationDeg = -35, thicknessPx = 2, fadeFrom = 0.7, fadeTo = 0.15, fadeDurationSec = 0.4 },
 			},
 		},
 		glowColor = Color3.fromRGB(60, 130, 255),
 		screenEffect = {
 			flashColor = Color3.fromRGB(60, 130, 255),
-			flashDurationSec = 0.18,
+			flashDurationSec = 0.22,
 			flashPeakTransparency = 0.55,
 			distortionLines = false,
 		},
 		burstSize = { coreCount = 50, starCount = 20, wispCount = 0, boltCount = 0, confettiCount = 0, beamCount = 4 },
-		totalDurationSec = 2.5,
+		totalDurationSec = 6.0,
 		sfxTiming = {
-			{ soundId = "egg_crack_small", atSec = 0.8 },
-			{ soundId = "hatch_rare", atSec = 1.8 },
+			{ soundId = "egg_crack_small", atSec = 2.0 },
+			{ soundId = "hatch_rare", atSec = 4.5 },
 		},
 		eggSizeGrowth = 0,
 		breakScaleMultiplier = 1.2,
-		breakDurationSec = 0.25,
+		breakDurationSec = 0.3,
+		fovPunch = 2,
+		fovReturnSec = 0.28,
+		lightingBrightnessDelta = 0.06,
+		lightingColorShift = 0.12,
+		lightingRestoreSec = 0.6,
 	},
 
 	epic = {
 		wobblePhases = {
-			durationSec = 2.2,
+			durationSec = 5.5,
 			frequencyHz = 3.5,
 			maxAmplitudeDeg = 6,
 			rampCurve = "cubic",
@@ -223,31 +232,36 @@ HatchCrackVisualSpec.Entries = {
 		glowColor = Color3.fromRGB(180, 60, 255),
 		screenEffect = {
 			vignetteDarkenTo = 0.78,
-			vignetteDarkenAtSec = 1.0,
-			vignetteDarkenDurationSec = 1.0,
+			vignetteDarkenAtSec = 2.5,
+			vignetteDarkenDurationSec = 2.5,
 			flashColor = Color3.fromRGB(180, 60, 255),
-			flashDurationSec = 0.18,
+			flashDurationSec = 0.22,
 			flashPeakTransparency = 0.55,
 			distortionLines = false,
 		},
 		burstSize = { coreCount = 80, starCount = 30, wispCount = 20, boltCount = 0, confettiCount = 0, beamCount = 6 },
-		totalDurationSec = 3.0,
+		totalDurationSec = 7.5,
 		sfxTiming = {
-			{ soundId = "egg_crack_small", atSec = 0.6 },
-			{ soundId = "egg_crack_medium", atSec = 1.4 },
-			{ soundId = "hatch_epic", atSec = 2.2 },
+			{ soundId = "egg_crack_small", atSec = 1.5 },
+			{ soundId = "egg_crack_medium", atSec = 3.5 },
+			{ soundId = "hatch_epic", atSec = 5.5 },
 		},
 		eggSizeGrowth = 0.10,
 		shellShards = { count = 4, sizePxMin = 20, sizePxMax = 35, hasTrail = false },
 		cameraShakeIntensity = 0.35,
-		cameraShakeDurationSec = 0.2,
+		cameraShakeDurationSec = 0.25,
+		fovPunch = 3,
+		fovReturnSec = 0.28,
+		lightingBrightnessDelta = 0.1,
+		lightingColorShift = 0.2,
+		lightingRestoreSec = 0.65,
 		breakScaleMultiplier = 1.3,
-		breakDurationSec = 0.05,
+		breakDurationSec = 0.06,
 	},
 
 	legendary = {
 		wobblePhases = {
-			durationSec = 2.8,
+			durationSec = 7.0,
 			frequencyHz = 2,
 			frequencyHzEnd = 5,
 			maxAmplitudeDeg = 3,
@@ -264,43 +278,46 @@ HatchCrackVisualSpec.Entries = {
 		screenEffect = {
 			vignetteDarkenTo = 0.75,
 			vignetteDarkenAtSec = 0,
-			vignetteDarkenDurationSec = 1.5,
+			vignetteDarkenDurationSec = 4.0,
 			flashColor = Color3.fromRGB(255, 200, 50),
-			flashDurationSec = 0.18,
+			flashDurationSec = 0.22,
 			flashPeakTransparency = 0.55,
 			distortionLines = false,
 		},
 		burstSize = { coreCount = 120, starCount = 50, wispCount = 0, boltCount = 16, confettiCount = 24, beamCount = 8 },
-		totalDurationSec = 3.8,
+		totalDurationSec = 9.5,
 		sfxTiming = {
-			{ soundId = "egg_crack_small", atSec = 0.8 },
-			{ soundId = "egg_crack_medium", atSec = 1.5 },
-			{ soundId = "egg_crack_large", atSec = 2.3 },
-			{ soundId = "hatch_legendary", atSec = 2.8 },
+			{ soundId = "egg_crack_small", atSec = 2.0 },
+			{ soundId = "egg_crack_medium", atSec = 4.0 },
+			{ soundId = "egg_crack_large", atSec = 5.8 },
+			{ soundId = "hatch_legendary", atSec = 7.0 },
 		},
 		eggSizeGrowth = 0.20,
 		shellShards = { count = 6, sizePxMin = 20, sizePxMax = 35, hasTrail = true, trailColor = Color3.fromRGB(255, 200, 50) },
-		hitstopSec = 0.25,
+		hitstopSec = 0.35,
 		lightRays = 4,
 		lightRayColor = Color3.fromRGB(255, 240, 160),
 		cameraShakeIntensity = 0.35,
-		cameraShakeDurationSec = 0.2,
+		cameraShakeDurationSec = 0.3,
 		fovPunch = 4,
-		fovReturnSec = 0.25,
+		fovReturnSec = 0.3,
+		lightingBrightnessDelta = 0.14,
+		lightingColorShift = 0.28,
+		lightingRestoreSec = 0.75,
 		breakScaleMultiplier = 1.5,
-		breakDurationSec = 0.03,
+		breakDurationSec = 0.04,
 	},
 
 	mythic = {
 		wobblePhases = {
-			durationSec = 3.5,
+			durationSec = 8.5,
 			frequencyHz = 1.5,
 			frequencyHzEnd = 7,
 			maxAmplitudeDeg = 2,
 			maxAmplitudeDegEnd = 10,
 			rampCurve = "exponential",
 			rampExponent = 2.5,
-			jitterAfterSec = 2.5,
+			jitterAfterSec = 6.0,
 			jitterPx = 1,
 		},
 		crackStyle = {
@@ -312,38 +329,41 @@ HatchCrackVisualSpec.Entries = {
 		glowColor = Color3.fromRGB(255, 50, 80),
 		screenEffect = {
 			fullDarkenTo = 0.55,
-			fullDarkenAtSec = 1.0,
+			fullDarkenAtSec = 2.5,
 			fullDarkenZIndex = 38,
 			flashColor = Color3.new(1, 1, 1),
-			flashDurationSec = 0.20,
+			flashDurationSec = 0.24,
 			flashPeakTransparency = 0.12,
 			secondFlashColor = Color3.fromRGB(255, 50, 80),
-			secondFlashDelaySec = 0.05,
-			secondFlashDuration = 0.40,
+			secondFlashDelaySec = 0.06,
+			secondFlashDuration = 0.50,
 			secondFlashPeakTransparency = 0.25,
 			distortionLines = true,
 			distortionLineCount = 5,
-			distortionSlideSpeed = 0.12,
+			distortionSlideSpeed = 0.10,
 		},
 		burstSize = { coreCount = 200, starCount = 80, wispCount = 40, boltCount = 24, confettiCount = 40, beamCount = 0 },
-		totalDurationSec = 5.0,
+		totalDurationSec = 12.0,
 		sfxTiming = {
-			{ soundId = "egg_crack_small", atSec = 0.5 },
-			{ soundId = "egg_crack_medium", atSec = 1.5 },
-			{ soundId = "egg_crack_large", atSec = 2.2 },
-			{ soundId = "egg_mythic_resonance", atSec = 2.8 },
-			{ soundId = "egg_mythic_hum", atSec = 3.0 },
-			{ soundId = "hatch_mythic", atSec = 3.5 },
+			{ soundId = "egg_crack_small", atSec = 1.2 },
+			{ soundId = "egg_crack_medium", atSec = 3.5 },
+			{ soundId = "egg_crack_large", atSec = 5.5 },
+			{ soundId = "egg_mythic_resonance", atSec = 7.0 },
+			{ soundId = "egg_mythic_hum", atSec = 7.5 },
+			{ soundId = "hatch_mythic", atSec = 8.5 },
 		},
 		eggSizeGrowth = 0.32,
 		shellShards = { count = 8, sizePxMin = 20, sizePxMax = 40, hasTrail = true, trailColor = Color3.fromRGB(255, 50, 80) },
-		hitstopSec = 0.50,
+		hitstopSec = 0.65,
 		lightRays = 7,
 		lightRayColor = Color3.fromRGB(255, 100, 200),
 		cameraShakeIntensity = 0.50,
-		cameraShakeDurationSec = 0.35,
+		cameraShakeDurationSec = 0.45,
 		fovPunch = 8,
-		fovReturnSec = 0.35,
+		fovReturnSec = 0.40,
+		lightingBrightnessDelta = 0.2,
+		lightingColorShift = 0.38,
+		lightingRestoreSec = 0.85,
 		breakScaleMultiplier = 1.0,
 		breakDurationSec = 0,
 	},
@@ -352,14 +372,14 @@ HatchCrackVisualSpec.Entries = {
 --[[
 	RARITY ESCALATION AT A GLANCE
 
-	| Rarity    | Duration | Wobble Hz   | Cracks | Glow Pulse | Hitstop | Darken | FOV  | Shards |
-	|-----------|----------|-------------|--------|------------|---------|--------|------|--------|
-	| common    | 1.5s     | 2           | 0      | —          | —       | —      | —    | 0      |
-	| uncommon  | 2.0s     | 2.5         | 1      | —          | —       | —      | —    | 0      |
-	| rare      | 2.5s     | 3           | 3      | —          | —       | —      | —    | 0      |
-	| epic      | 3.0s     | 3.5         | 5-7    | 2Hz        | —       | 0.78   | —    | 4      |
-	| legendary | 3.8s     | 2→5         | 8-10   | 3Hz        | 0.25s   | 0.75   | +4   | 6      |
-	| mythic    | 5.0s     | 1.5→7       | 10-14  | 4Hz        | 0.50s   | 0.55   | +8   | 8      |
+	| Rarity    | Duration | Wobble Hz   | Cracks | Glow Pulse | Hitstop | Darken | FOV  | Light | Shards |
+	|-----------|----------|-------------|--------|------------|---------|--------|------|-------|--------|
+	| common    | 3.5s     | 2           | 0      | —          | —       | —      | —    | —     | 0      |
+	| uncommon  | 5.0s     | 2.5         | 1      | —          | —       | —      | —    | —     | 0      |
+	| rare      | 6.0s     | 3           | 3      | —          | —       | —      | +2   | soft  | 0      |
+	| epic      | 7.5s     | 3.5         | 5-7    | 2Hz        | —       | 0.78   | +3   | med   | 4      |
+	| legendary | 9.5s     | 2→5         | 8-10   | 3Hz        | 0.35s   | 0.75   | +4   | high  | 6      |
+	| mythic    | 12.0s    | 1.5→7       | 10-14  | 4Hz        | 0.65s   | 0.55   | +8   | max   | 8      |
 
 	SOUND CUES NEEDED:
 	  egg_crack_small      — hairline snap (0.2s)

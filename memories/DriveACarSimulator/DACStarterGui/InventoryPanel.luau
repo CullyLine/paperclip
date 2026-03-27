@@ -2,11 +2,12 @@
 --[[
 	Inventory / Garage panel.
 	Shell UI pre-built in DACMain.Panels.Inventory; this script wires behavior.
-	Car cards, pet cards, and fuse-pick overlays are created dynamically.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local GuiService = game:GetService("GuiService")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
@@ -14,8 +15,11 @@ local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("Microco
 local SpeedTierCopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("SpeedTierCopyConfig"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
+local ClientRemoteDebounce = require(DAC:WaitForChild("ClientRemoteDebounce"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
+local ClientPerformanceProfile = require(DAC:WaitForChild("ClientPerformanceProfile"))
 
 local UIHelpers = require(script.Parent:WaitForChild("UIHelpers"))
 local MenuHub = require(script.Parent:WaitForChild("MenuHub"))
@@ -24,52 +28,9 @@ local InventoryPanel = {}
 
 local lastDataSnapshot: any = nil
 
-local fuseMode = false
-local fusePick: { string } = {}
-
-local function rarityIndex(r: string): number
-	local o: { [string]: number } = { common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6 }
-	return o[r] or 1
-end
-
-local function fuseCoinCostForRarity(r: string): number
-	local idx = rarityIndex(r)
-	return math.floor(PetConfig.FuseCost.coinCost * (PetConfig.FuseCost.coinCostMultiplier ^ (idx - 1)))
-end
-
-local function fuseSelectionValid(data: any): boolean
-	if #fusePick ~= PetConfig.FuseCost.petsRequired then return false end
-	if not data or type(data.pets) ~= "table" then return false end
-	local r0: string? = nil
-	for _, uid in fusePick do
-		local pet = data.pets[uid]; if not pet then return false end
-		local def = PetConfig.Pets[pet.id]; if not def then return false end
-		if not r0 then r0 = def.rarity end
-		if def.rarity ~= r0 then return false end
-	end
-	return true
-end
-
-local function fuseCanAfford(data: any): boolean
-	if not fuseSelectionValid(data) then return false end
-	local uid0 = fusePick[1]; local pet = data.pets[uid0]; if not pet then return false end
-	local def = PetConfig.Pets[pet.id]; if not def then return false end
-	local cost = fuseCoinCostForRarity(def.rarity)
-	local coins = if type(data.coins) == "number" then data.coins else 0
-	return coins >= cost
-end
-
-local function pruneFusePick(data: any)
-	if not data or type(data.pets) ~= "table" then return end
-	local i = 1
-	while i <= #fusePick do
-		local uid = fusePick[i]
-		if not data.pets[uid] then table.remove(fusePick, i) else i += 1 end
-	end
-end
-
-local redraw: () -> ()
-
+local lastEquipCarFire = { 0 }
+local lastBuyCarFire = { 0 }
+local lastEquipPetFire = { 0 }
 local function countDiscoveredSpecies(disc: any): number
 	if type(disc) ~= "table" then return 0 end
 	local n = 0; for _, v in pairs(disc) do if v == true then n += 1 end end; return n
@@ -99,8 +60,13 @@ local function ensureUIScale(gui: GuiObject): UIScale
 end
 
 local function scalePunch(gui: GuiObject)
+	local str = ClientPerformanceProfile.uiJuiceStrength()
+	if str <= 0 then
+		return
+	end
 	local s = ensureUIScale(gui); s.Scale = 1
-	TweenService:Create(s, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.1 }):Play()
+	local peak = 1 + 0.1 * str
+	TweenService:Create(s, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = peak }):Play()
 	task.delay(0.08, function() TweenService:Create(s, TweenInfo.new(0.16, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), { Scale = 1 }):Play() end)
 end
 
@@ -110,22 +76,117 @@ local RARITY_UI_GLOW: { [string]: Color3 } = {
 	legendary = Color3.fromRGB(255, 200, 80), mythic = Color3.fromRGB(255, 120, 200),
 }
 
+local RARITY_BADGE_LETTER: { [string]: string } = {
+	common = "C", uncommon = "U", rare = "R", epic = "E", legendary = "L", mythic = "M",
+}
+
+local function shouldPetInventoryJuice(data: any): boolean
+	if type(data) == "table" and type(data.settings) == "table" then
+		ClientPerformanceProfile.syncFromSettings(data.settings)
+	end
+	return ClientPerformanceProfile.uiJuiceStrength() > 0
+end
+
+local function applyPetCardRarityChrome(card: Frame, rarity: string, equipped: boolean, data: any)
+	local c = UIHelpers.rarityStroke(rarity)
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "RarityStroke"
+	stroke.Color = c
+	stroke.Thickness = equipped and 3 or 2
+	stroke.Transparency = 0.35
+	stroke.Parent = card
+
+	if shouldPetInventoryJuice(data) then
+		local g = Instance.new("UIGradient")
+		g.Name = "RarityTint"
+		g.Rotation = 90
+		local top = Color3.new(math.clamp(c.R * 0.18 + 0.82, 0, 1), math.clamp(c.G * 0.18 + 0.82, 0, 1), math.clamp(c.B * 0.18 + 0.82, 0, 1))
+		local bot = Color3.new(math.clamp(c.R * 0.08 + 0.94, 0, 1), math.clamp(c.G * 0.08 + 0.94, 0, 1), math.clamp(c.B * 0.08 + 0.94, 0, 1))
+		g.Color = ColorSequence.new(top, bot)
+		g.Parent = card
+		card.BackgroundColor3 = Color3.fromRGB(248, 248, 255)
+	else
+		card.BackgroundColor3 = Color3.fromRGB(230, 230, 250)
+	end
+
+	local badge = Instance.new("TextLabel")
+	badge.Name = "RarityBadge"
+	badge.AnchorPoint = Vector2.new(0, 0)
+	badge.Size = UDim2.fromOffset(24, 18)
+	badge.Position = UDim2.new(0, 4, 0, 4)
+	badge.BackgroundColor3 = c
+	badge.BackgroundTransparency = 0.1
+	badge.Font = Enum.Font.GothamBold
+	badge.TextSize = 11
+	badge.TextColor3 = Color3.fromRGB(24, 24, 28)
+	badge.Text = RARITY_BADGE_LETTER[rarity] or "?"
+	badge.ZIndex = 4
+	badge.Parent = card
+	local bc = Instance.new("UICorner")
+	bc.CornerRadius = UDim.new(0, 6)
+	bc.Parent = badge
+end
+
+local function wirePetSlotHoverFocus(card: Frame, stroke: UIStroke, equip: TextButton, baseThickness: number, data: any)
+	if not shouldPetInventoryJuice(data) then
+		return
+	end
+	local hover = false
+	local function syncStroke()
+		local sel = GuiService.SelectedObject
+		local focused = sel == card or sel == equip
+		local thick = baseThickness
+		if hover or focused then
+			thick += 2
+		end
+		TweenService:Create(stroke, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Thickness = math.clamp(thick, 1, 6),
+			Transparency = if hover or focused then 0.08 else 0.35,
+		}):Play()
+	end
+	card.Active = true
+	card.MouseEnter:Connect(function()
+		hover = true
+		syncStroke()
+	end)
+	card.MouseLeave:Connect(function()
+		hover = false
+		syncStroke()
+	end)
+	local conn = GuiService:GetPropertyChangedSignal("SelectedObject"):Connect(syncStroke)
+	card.Destroying:Connect(function()
+		if conn.Connected then
+			conn:Disconnect()
+		end
+	end)
+	equip.Selectable = true
+end
+
 local WORLD_TIER: { [string]: string } = {
-	grasslands = "common", desert = "rare", frozen = "rare", neon = "premium", volcano = "premium",
+	forest = "common", desert = "rare", ice = "rare", volcano = "premium", space = "premium",
 }
 
 local WORLD_THEME_COLORS: { [string]: Color3 } = {
-	grasslands = Color3.fromRGB(100, 200, 100), desert = Color3.fromRGB(255, 180, 60),
-	frozen = Color3.fromRGB(120, 200, 255), neon = Color3.fromRGB(200, 120, 255), volcano = Color3.fromRGB(255, 100, 50),
+	forest = Color3.fromRGB(100, 200, 100), desert = Color3.fromRGB(255, 180, 60),
+	ice = Color3.fromRGB(120, 200, 255), volcano = Color3.fromRGB(255, 100, 50), space = Color3.fromRGB(100, 100, 255),
 }
 
-local function rarityPulseStroke(card: Frame, rarity: string)
-	local stroke = card:FindFirstChildOfClass("UIStroke")
-	if not stroke then stroke = Instance.new("UIStroke"); stroke.Parent = card end
+local function rarityPulseStroke(card: Frame, rarity: string, endThickness: number?)
+	local stroke = card:FindFirstChild("RarityStroke") :: UIStroke?
+	if not stroke then
+		stroke = card:FindFirstChildOfClass("UIStroke")
+	end
+	if not stroke then
+		stroke = Instance.new("UIStroke")
+		stroke.Parent = card
+	end
+	local settle = if endThickness ~= nil then endThickness else 2
 	local c = RARITY_UI_GLOW[rarity] or RARITY_UI_GLOW.common
 	stroke.Color = c; stroke.Thickness = 1; stroke.Transparency = 0.4
 	TweenService:Create(stroke, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Thickness = 4, Transparency = 0 }):Play()
-	task.delay(0.25, function() TweenService:Create(stroke, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Thickness = 2, Transparency = 0.35 }):Play() end)
+	task.delay(0.25, function()
+		TweenService:Create(stroke, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Thickness = settle, Transparency = 0.35 }):Play()
+	end)
 end
 
 local function worldGlowPulse(card: Frame, worldId: string)
@@ -140,7 +201,11 @@ local function worldGlowPulse(card: Frame, worldId: string)
 	end)
 end
 
-local function unequipPetJuice(card: Frame)
+local function unequipPetJuice(card: Frame, data: any)
+	if not shouldPetInventoryJuice(data) then
+		SoundFacade.playOneShot("click")
+		return
+	end
 	SoundFacade.playOneShot("click")
 	local farewellPool = SpeedTierCopyConfig.PetUnequipFarewell
 	local farewell = if #farewellPool > 0 then farewellPool[math.random(1, #farewellPool)] else "See ya!"
@@ -186,6 +251,45 @@ local function animateEquippedBadge(badge: GuiObject)
 	TweenService:Create(badge, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Position=endPos }):Play()
 end
 
+local function cosmeticCheckmarkPop(card: Frame, data: any)
+	if not shouldPetInventoryJuice(data) then
+		return
+	end
+	local existing = card:FindFirstChild("CosmeticPickCheck")
+	if existing then
+		existing:Destroy()
+	end
+	local chk = Instance.new("TextLabel")
+	chk.Name = "CosmeticPickCheck"
+	chk.AnchorPoint = Vector2.new(1, 1)
+	chk.Size = UDim2.fromOffset(36, 36)
+	chk.Position = UDim2.new(1, -6, 1, -38)
+	chk.BackgroundTransparency = 1
+	chk.Font = Enum.Font.GothamBold
+	chk.TextSize = 28
+	chk.TextColor3 = Color3.fromRGB(46, 204, 113)
+	chk.TextStrokeTransparency = 0.35
+	chk.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	chk.Text = "\u{2713}"
+	chk.ZIndex = 6
+	chk.Parent = card
+	local s = ensureUIScale(chk)
+	s.Scale = 0
+	TweenService:Create(s, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.12 }):Play()
+	task.delay(0.45, function()
+		if not chk.Parent then
+			return
+		end
+		TweenService:Create(s, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0 }):Play()
+		TweenService:Create(chk, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.delay(0.2, function()
+			if chk.Parent then
+				chk:Destroy()
+			end
+		end)
+	end)
+end
+
 local function createEquippedBadge(parent: Frame): TextLabel
 	local existing = parent:FindFirstChild("EquippedBadge")
 	if existing and existing:IsA("TextLabel") then return existing end
@@ -203,7 +307,7 @@ local function refresh(scroll: ScrollingFrame, data: any)
 		local unlocked = data.unlockedWorlds[def.worldId]
 		local card = Instance.new("Frame"); card.Name=carId; card.BackgroundColor3=Color3.fromRGB(245,245,245); card.BorderSizePixel=0; card.Parent=scroll
 		local cc = Instance.new("UICorner"); cc.CornerRadius=UDim.new(0,8); cc.Parent=card
-		local stroke = Instance.new("UIStroke"); stroke.Color=UIHelpers.rarityStroke(def.worldId=="neon" and "legendary" or "rare"); stroke.Thickness=equipped==carId and 4 or 2; stroke.Parent=card
+		local stroke = Instance.new("UIStroke"); stroke.Color=UIHelpers.rarityStroke(def.worldId=="volcano" and "legendary" or "rare"); stroke.Thickness=equipped==carId and 4 or 2; stroke.Parent=card
 		local title = Instance.new("TextLabel"); title.Size=UDim2.new(1,-8,0,40); title.Position=UDim2.new(0,4,0,4); title.BackgroundTransparency=1; title.Font=Enum.Font.GothamBold; title.TextSize=14; title.TextColor3=Color3.fromRGB(30,30,30); title.TextWrapped=true; title.Text=def.name; title.Parent=card
 		local stats = Instance.new("TextLabel"); stats.Size=UDim2.new(1,-8,0,60); stats.Position=UDim2.new(0,4,0,44); stats.BackgroundTransparency=1; stats.Font=Enum.Font.Gotham; stats.TextSize=12; stats.TextColor3=Color3.fromRGB(60,60,60); stats.TextXAlignment=Enum.TextXAlignment.Left; stats.TextYAlignment=Enum.TextYAlignment.Top; stats.TextWrapped=true; stats.Parent=card
 		if unlocked then
@@ -213,7 +317,21 @@ local function refresh(scroll: ScrollingFrame, data: any)
 		if equipped == carId then createEquippedBadge(card) end
 		local equip = Instance.new("TextButton"); equip.Size=UDim2.new(1,-8,0,28); equip.Position=UDim2.new(0,4,1,-32); equip.BackgroundColor3=Color3.fromRGB(76,175,80); equip.Text=equipped==carId and "Equipped" or "Equip"; equip.TextColor3=Color3.new(1,1,1); equip.Font=Enum.Font.GothamBold; equip.AutoButtonColor=unlocked==true; equip.Parent=card
 		local ec = Instance.new("UICorner"); ec.CornerRadius=UDim.new(0,6); ec.Parent=equip
-		if unlocked then equip.MouseButton1Click:Connect(function() if equipped~=carId then SoundFacade.playOneShot("equip_item") else SoundFacade.playOneShot("click") end; Remotes.getEvent("EquipCar"):FireServer(carId) end) end
+		if unlocked then
+			equip.MouseButton1Click:Connect(function()
+				if not ClientRemoteDebounce.allow(lastEquipCarFire) then
+					return
+				end
+				if equipped ~= carId then
+					SoundFacade.playOneShot("cosmetic_select")
+					scalePunch(card)
+					cosmeticCheckmarkPop(card, data)
+				else
+					SoundFacade.playOneShot("click")
+				end
+				RemoteFailSafe.fireEvent("INV", "EquipCar", carId)
+			end)
+		end
 	end
 
 	for carId, def in CarConfig.Cars do
@@ -224,7 +342,16 @@ local function refresh(scroll: ScrollingFrame, data: any)
 		local t = Instance.new("TextLabel"); t.Size=UDim2.new(1,-6,0,80); t.BackgroundTransparency=1; t.TextColor3=Color3.fromRGB(200,200,200); t.Font=Enum.Font.GothamBold; t.TextSize=13; t.TextWrapped=true; t.Text=def.name.."\n???"; t.Parent=card
 		local price = Instance.new("TextLabel"); price.Size=UDim2.new(1,-6,0,40); price.Position=UDim2.new(0,0,0,80); price.BackgroundTransparency=1; price.Text=if def.price<=0 then "Free" else `{Utils.formatNumber(def.price)} {def.currency}`; price.TextColor3=Color3.fromRGB(255,213,79); price.Parent=card
 		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(1,-8,0,26); buy.Position=UDim2.new(0,4,1,-30); buy.BackgroundColor3=Color3.fromRGB(255,193,7); buy.Text="Buy"; buy.TextColor3=Color3.fromRGB(40,40,40); buy.Font=Enum.Font.GothamBold; buy.Parent=card
-		buy.MouseButton1Click:Connect(function() if unlocked then SoundFacade.playOneShot("purchase"); Remotes.getEvent("BuyCar"):FireServer(carId) end end)
+		buy.MouseButton1Click:Connect(function()
+			if not unlocked then
+				return
+			end
+			if not ClientRemoteDebounce.allow(lastBuyCarFire) then
+				return
+			end
+			SoundFacade.playOneShot("purchase")
+			RemoteFailSafe.fireEvent("INV", "BuyCar", carId)
+		end)
 	end
 
 	if data.pets then
@@ -234,23 +361,31 @@ local function refresh(scroll: ScrollingFrame, data: any)
 		local markedTutorial = false; local po = 5000
 		for _, entry in petsList do
 			po += 1; local uid = entry.uid; local pet = entry.pet; local def = PetConfig.Pets[pet.id]
+			local rarity = def and def.rarity or "common"
 			local card = Instance.new("Frame"); card.Name=uid; card.LayoutOrder=po; card.Size=UDim2.new(0,130,0,120); card.BackgroundColor3=Color3.fromRGB(230,230,250); card.Parent=scroll
 			local cc = Instance.new("UICorner"); cc.CornerRadius=UDim.new(0,8); cc.Parent=card
-			local t = Instance.new("TextLabel"); t.Size=UDim2.new(1,-6,0,56); t.Position=UDim2.new(0,3,0,4); t.BackgroundTransparency=1; t.Font=Enum.Font.GothamBold; t.TextSize=12; t.TextColor3=Color3.fromRGB(30,30,30); t.TextWrapped=true; t.Text=def and (def.name .. "\nPow " .. tostring(pet.power)) or pet.id; t.Parent=card
+			applyPetCardRarityChrome(card, rarity, pet.equipped == true, data)
+			local strokeForFocus = card:FindFirstChild("RarityStroke") :: UIStroke?
+			local baseStrokeThick = pet.equipped and 3 or 2
+			local t = Instance.new("TextLabel"); t.Size=UDim2.new(1,-8,0,56); t.Position=UDim2.new(0,30,0,4); t.BackgroundTransparency=1; t.Font=Enum.Font.GothamBold; t.TextSize=12; t.TextColor3=Color3.fromRGB(30,30,30); t.TextWrapped=true; t.Text=def and (def.name .. "\nPow " .. tostring(pet.power)) or pet.id; t.Parent=card
 			local equip = Instance.new("TextButton"); equip.Size=UDim2.new(1,-8,0,28); equip.Position=UDim2.new(0,4,1,-32); equip.BackgroundColor3=Color3.fromRGB(63,81,181); equip.Text=pet.equipped and "Equipped" or "Equip"; equip.TextColor3=Color3.new(1,1,1); equip.Font=Enum.Font.GothamBold; equip.Parent=card
 			local ec = Instance.new("UICorner"); ec.CornerRadius=UDim.new(0,6); ec.Parent=equip
 			if not pet.equipped and not markedTutorial then equip.Name="TutorialPetEquipFirst"; markedTutorial=true end
 			if pet.equipped then createEquippedBadge(card) end
-			if fuseMode and def ~= nil then
-				equip.Visible = false
-				local picked = table.find(fusePick, uid) ~= nil
-				local pickBtn = Instance.new("TextButton"); pickBtn.Name="FusePick"; pickBtn.Size=UDim2.new(0,44,0,24); pickBtn.Position=UDim2.new(0,4,0,4); pickBtn.BackgroundColor3=if picked then Color3.fromRGB(50,140,90) else Color3.fromRGB(70,70,95); pickBtn.Text=if picked then "\u{2713}" else "+"; pickBtn.TextColor3=Color3.new(1,1,1); pickBtn.Font=Enum.Font.GothamBold; pickBtn.TextSize=16; pickBtn.ZIndex=5; pickBtn.AutoButtonColor=true; pickBtn.Parent=card
-				local pc = Instance.new("UICorner"); pc.CornerRadius=UDim.new(0,6); pc.Parent=pickBtn
-				pickBtn.MouseButton1Click:Connect(function() SoundFacade.playOneShot("click"); local idx = table.find(fusePick, uid); if idx then table.remove(fusePick, idx) elseif #fusePick < PetConfig.FuseCost.petsRequired then table.insert(fusePick, uid) end; redraw() end)
-			else
-				equip.Visible = true
-				equip.MouseButton1Click:Connect(function() if pet.equipped then return end; SoundFacade.playOneShot("click"); Remotes.getEvent("EquipPet"):FireServer(uid) end)
+			equip.Visible = true
+			if strokeForFocus then
+				wirePetSlotHoverFocus(card, strokeForFocus, equip, baseStrokeThick, data)
 			end
+			equip.MouseButton1Click:Connect(function()
+				if pet.equipped then
+					return
+				end
+				if not ClientRemoteDebounce.allow(lastEquipPetFire) then
+					return
+				end
+				SoundFacade.playOneShot("click")
+				RemoteFailSafe.fireEvent("INV", "EquipPet", uid)
+			end)
 		end
 	end
 end
@@ -258,106 +393,76 @@ end
 function InventoryPanel.init()
 	local sg = MenuHub.getScreenGui()
 	local root = sg:WaitForChild("Inventory") :: Frame
+	local teardownConns: { RBXScriptConnection } = {}
 
 	local collectionSubtitle = root:WaitForChild("CollectionSubtitle") :: TextLabel
-	local fuseBar = root:WaitForChild("FusionBar") :: Frame
-	local fuseToggleBtn = fuseBar:WaitForChild("FuseToggle") :: TextButton
-	local fuseStatusLabel = fuseBar:WaitForChild("FuseStatus") :: TextLabel
-	local fuseGoBtn = fuseBar:WaitForChild("FuseGo") :: TextButton
-	local scroll = root:WaitForChild("Scroll") :: ScrollingFrame
 
-	local function applyInventoryLayout()
-		local showSub = collectionSubtitle.Visible; local showFuse = fuseMode
-		fuseBar.Visible = showFuse
-		local fuseTop = if showSub then 80 else 48; fuseBar.Position = UDim2.new(0,12,0,fuseTop)
-		local top = 52
-		if showSub then top = 84 end
-		if showFuse then top += 36 end
-		scroll.Position = UDim2.new(0,12,0,top); scroll.Size = UDim2.new(1,-24,1,-(top+12))
+	local legacyScroll = root:FindFirstChild("Scroll")
+	if legacyScroll then
+		legacyScroll:Destroy()
 	end
-	applyInventoryLayout()
-
-	local function updateFuseChrome(data: any)
-		if not fuseMode or not data then return end
-		if #fusePick < PetConfig.FuseCost.petsRequired then fuseStatusLabel.Text = `{#fusePick}/{PetConfig.FuseCost.petsRequired} — tap + on pets`; fuseGoBtn.Enabled = false; return end
-		if not fuseSelectionValid(data) then fuseStatusLabel.Text = "All 3 pets must share one rarity"; fuseGoBtn.Enabled = false; return end
-		if not fuseCanAfford(data) then
-			local pet = data.pets[fusePick[1]]; local def = pet and PetConfig.Pets[pet.id]; local r = def and def.rarity or "common"
-			local cost = fuseCoinCostForRarity(r); fuseStatusLabel.Text = `Need {Utils.formatNumber(cost)} coins`; fuseGoBtn.Enabled = false; return
-		end
-		local pet = data.pets[fusePick[1]]; local def = pet and PetConfig.Pets[pet.id]; local r = def and def.rarity or "common"
-		local cost = fuseCoinCostForRarity(r); fuseStatusLabel.Text = `Ready — {Utils.formatNumber(cost)} coins`; fuseGoBtn.Enabled = true
+	local legacyFuseBar = root:FindFirstChild("FusionBar")
+	if legacyFuseBar then
+		legacyFuseBar:Destroy()
 	end
 
 	local function applyCollectionSubtitle(data: any)
-		local text, show = collectionSubtitleForData(data); collectionSubtitle.Text = text; collectionSubtitle.Visible = show; applyInventoryLayout()
+		local text, show = collectionSubtitleForData(data); collectionSubtitle.Text = text; collectionSubtitle.Visible = show
 	end
 
 	local function applyEquipJuice(prev: any, data: any)
 		local newCar = data and data.equippedCar; local oldCar = prev and prev.equippedCar
 		local carJustEquipped = prev ~= nil and (newCar ~= oldCar) and type(newCar) == "string" and newCar ~= ""
-		local newPetUid: string? = nil; local unequipPetUid: string? = nil
+		local newPetUid: string? = nil
 		if prev and data and type(data.pets) == "table" then
 			for uid, pet in data.pets do
 				local oldPet = prev.pets and prev.pets[uid]
 				local wasEq = oldPet and oldPet.equipped; local nowEq = pet.equipped
 				if nowEq and not wasEq then newPetUid = uid end
-				if not unequipPetUid and oldPet and oldPet.equipped and not pet.equipped then unequipPetUid = uid end
 			end
 		end
 		task.defer(function()
 			if carJustEquipped then
-				local card = scroll:FindFirstChild(newCar)
-				if card and card:IsA("Frame") then
-					SoundFacade.playOneShot("equip_item"); scalePunch(card)
-					local def = CarConfig.Cars[newCar]; local tier = def and WORLD_TIER[def.worldId] or "common"
-					VFXFacade.purchaseCelebration("car", tier, newCar)
-					local icon = card:FindFirstChild("CarIconSpin")
-					if icon and icon:IsA("GuiObject") then icon.Rotation=0; TweenService:Create(icon, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Rotation=360 }):Play() end
-					if tier=="rare" and def then worldGlowPulse(card, def.worldId)
-					elseif tier=="premium" and def then worldGlowPulse(card, def.worldId); premiumShimmer(card); premiumRideBadge(card) end
-					flashEquippedText(card)
-					local badge = card:FindFirstChild("EquippedBadge")
-					if badge and badge:IsA("GuiObject") then animateEquippedBadge(badge) end
-				end
+				local def = CarConfig.Cars[newCar]; local tier = def and WORLD_TIER[def.worldId] or "common"
+				VFXFacade.purchaseCelebration("car", tier, newCar)
 			end
 			if newPetUid then
-				local card = scroll:FindFirstChild(newPetUid)
-				if card and card:IsA("Frame") then
-					SoundFacade.playOneShot("equip_item")
-					local pet = data.pets[newPetUid]; local def = pet and PetConfig.Pets[pet.id]; local r = def and def.rarity or "common"
-					VFXFacade.petEquipEntrance(newPetUid, nil, r); scalePunch(card); rarityPulseStroke(card, r)
-					local badge = card:FindFirstChild("EquippedBadge")
-					if badge and badge:IsA("GuiObject") then animateEquippedBadge(badge) end
+				local juice = shouldPetInventoryJuice(data)
+				SoundFacade.playOneShot("equip_item")
+				local pet = data.pets[newPetUid]; local def = pet and PetConfig.Pets[pet.id]; local r = def and def.rarity or "common"
+				if juice then
+					VFXFacade.petEquipEntrance(newPetUid, nil, r)
 				end
 			end
-			if unequipPetUid then local ucard = scroll:FindFirstChild(unequipPetUid); if ucard and ucard:IsA("Frame") then unequipPetJuice(ucard) end end
 		end)
 	end
 
-	redraw = function()
-		local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-		local prev = lastDataSnapshot; pruneFusePick(data); applyCollectionSubtitle(data); updateFuseChrome(data); refresh(scroll, data); lastDataSnapshot = data; applyEquipJuice(prev, data)
+	local function refresh()
+		local ok, data = RemoteFailSafe.invokeGetPlayerData()
+		if not ok or type(data) ~= "table" then
+			lastDataSnapshot = nil
+			return
+		end
+		local prev = lastDataSnapshot; applyCollectionSubtitle(data); lastDataSnapshot = data; applyEquipJuice(prev, data)
 	end
 
-	fuseToggleBtn.MouseButton1Click:Connect(function()
-		SoundFacade.playOneShot("click"); fuseMode = not fuseMode
-		if not fuseMode then table.clear(fusePick) end
-		fuseToggleBtn.Text = if fuseMode then "Fusion: On" else "Fusion: Off"; redraw()
+	table.insert(teardownConns, Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function(data)
+		RemoteFailSafe.safeNotifyOnError("DataUpdate", function()
+			local prev = lastDataSnapshot; applyCollectionSubtitle(data); lastDataSnapshot = data; applyEquipJuice(prev, data)
+		end)
+	end))
+
+	Players.PlayerRemoving:Connect(function(leavingPlayer)
+		if leavingPlayer ~= Players.LocalPlayer then return end
+		for _, c in teardownConns do
+			if c.Connected then
+				c:Disconnect()
+			end
+		end
+		table.clear(teardownConns)
 	end)
 
-	fuseGoBtn.MouseButton1Click:Connect(function()
-		SoundFacade.playOneShot("click")
-		local data = lastDataSnapshot
-		if not fuseSelectionValid(data) or not fuseCanAfford(data) then SoundFacade.playOneShot("error"); return end
-		Remotes.getEvent("FusePets"):FireServer(fusePick)
-	end)
-
-	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function(data)
-		local prev = lastDataSnapshot; pruneFusePick(data); applyCollectionSubtitle(data); updateFuseChrome(data); refresh(scroll, data); lastDataSnapshot = data; applyEquipJuice(prev, data)
-	end)
-
-	redraw()
+	refresh()
 end
 
 return InventoryPanel

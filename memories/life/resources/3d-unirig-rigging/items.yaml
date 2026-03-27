@@ -1,0 +1,41 @@
+- id: unirig-setup
+  fact: "UniRig is installed at F:\\CODE STUFF\\tools\\UniRig with a Python 3.11 venv"
+  source: setup-session
+  date: 2026-03-24
+  status: active
+
+- id: unirig-command
+  fact: "Run auto-rig via: & \"F:\\CODE STUFF\\tools\\UniRig\\rig.ps1\" -Input \"model.glb\""
+  source: setup-session
+  date: 2026-03-24
+  status: active
+
+- id: unirig-skeleton-cpu
+  fact: "Skeleton prediction runs on CPU (eager attn, 3 beams) to avoid freezing the 8GB RTX 3070"
+  source: debugging-session
+  date: 2026-03-24
+  status: active
+
+- id: unirig-skinning-gpu
+  fact: "Skinning prediction must run on GPU (spconv is CUDA-only), uses bf16-mixed, ~10s"
+  source: debugging-session
+  date: 2026-03-24
+  status: active
+
+- id: unirig-first-run-success
+  fact: "First successful rig: tabby-cat-game-340.glb -> tabby-cat-game-340_rigged.glb (919KB)"
+  source: test-run
+  date: 2026-03-24
+  status: active
+
+- id: unirig-pytorch-compat
+  fact: "PyTorch 2.6 needs torch.serialization.add_safe_globals([Box]) and triton-windows<3.3"
+  source: debugging-session
+  date: 2026-03-24
+  status: active
+
+- id: unirig-no-animation
+  fact: "UniRig generates skeleton + skinning only, not animations. Animations need a separate tool."
+  source: research
+  date: 2026-03-24
+  status: active

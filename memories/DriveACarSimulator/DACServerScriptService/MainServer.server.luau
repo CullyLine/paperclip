@@ -7,9 +7,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local Constants = require(DAC:WaitForChild("Constants"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 
 local ServerRoot = script.Parent
+local NotificationDispatchService = require(ServerRoot:WaitForChild("Services"):WaitForChild("NotificationDispatchService"))
+local EconomyLogService = require(ServerRoot:WaitForChild("Services"):WaitForChild("EconomyLogService"))
 local DataManager = require(ServerRoot:WaitForChild("DataManager"))
 
 -- Services
@@ -28,8 +31,9 @@ local PremiumService = require(Services:WaitForChild("PremiumService"))
 local DailyRewardService = require(Services:WaitForChild("DailyRewardService"))
 local CodeService = require(Services:WaitForChild("CodeService"))
 local LeaderboardService = require(Services:WaitForChild("LeaderboardService"))
-local BattlePassService = require(Services:WaitForChild("BattlePassService"))
-local QuestService = require(Services:WaitForChild("QuestService"))
+-- v1.0: BattlePass and Quests disabled
+-- local BattlePassService = require(Services:WaitForChild("BattlePassService"))
+-- local QuestService = require(Services:WaitForChild("QuestService"))
 local EventService = require(Services:WaitForChild("EventService"))
 local TutorialService = require(Services:WaitForChild("TutorialService"))
 local PlaytimeService = require(Services:WaitForChild("PlaytimeService"))
@@ -40,13 +44,19 @@ local AdminService = require(Services:WaitForChild("AdminService"))
 local VipEffectsService = require(Services:WaitForChild("VipEffectsService"))
 local EasterEggService = require(Services:WaitForChild("EasterEggService"))
 local AchievementService = require(Services:WaitForChild("AchievementService"))
+local GroupRewardService = require(Services:WaitForChild("GroupRewardService"))
+local FriendBonusService = require(Services:WaitForChild("FriendBonusService"))
+local FirstSessionOnboardingService = require(Services:WaitForChild("FirstSessionOnboardingService"))
+local WorldSpawnUtil = require(Services:WaitForChild("WorldSpawnUtil"))
 
-print("[DAC] Server initializing...")
+Constants.bootLog("[DAC] Server initializing...")
 
 -- 1. Create remote events/functions
 Remotes.init()
+NotificationDispatchService.init()
+EconomyLogService.init()
 
--- 2. Initialize data manager (auto-save, bind-to-close)
+-- 2. Initialize data manager (debounced saves, periodic dirty flush, bind-to-close)
 DataManager.init()
 
 -- 3. Initialize all services
@@ -65,8 +75,8 @@ DailyRewardService.init()
 CodeService.init()
 LeaderboardService.init()
 ValidationService.init()
-BattlePassService.init()
-QuestService.init()
+-- BattlePassService.init()
+-- QuestService.init()
 SettingsService.init()
 EventService.init()
 TutorialService.init()
@@ -76,10 +86,26 @@ AdminService.init()
 VipEffectsService.init()
 EasterEggService.init()
 AchievementService.init()
+GroupRewardService.init()
+FriendBonusService.init()
+FirstSessionOnboardingService.init()
 
 -- 4. Wire GetPlayerData so clients can request their data at any time
 Remotes.getFunction("GetPlayerData").OnServerInvoke = function(player)
+	if not ValidationService.checkRemoteRate(player, "GetPlayerData") then
+		return nil
+	end
 	local data = DataManager.get(player)
+	if not data and player.Parent then
+		for _ = 1, 10 do
+			task.wait(0.5)
+			data = DataManager.get(player)
+			if data or not player.Parent then break end
+		end
+	end
+	if data then
+		DataManager.injectClientSessionFields(data)
+	end
 	return data
 end
 
@@ -92,12 +118,18 @@ Players.PlayerAdded:Connect(function(player)
 	end
 
 	local data = DataManager.get(player)
+	if data then
+		FirstSessionOnboardingService.migrateForExistingPlayers(data)
+		DataManager.injectClientSessionFields(data)
+	end
+
+	AchievementService.noteSessionStart(player)
 
 	RebirthService.syncPrestigeAttributes(player)
 
 	GamePassService.checkAllPasses(player)
-	BattlePassService.ensureSeason(player)
-	QuestService.ensureQuests(player)
+	-- BattlePassService.ensureSeason(player)
+	-- QuestService.ensureQuests(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 
@@ -108,32 +140,73 @@ Players.PlayerAdded:Connect(function(player)
 	AchievementService.syncProgressNudges(player)
 
 	EventService.handlePlayerJoin(player)
+	GroupRewardService.onPlayerReady(player)
+	FriendBonusService.onPlayerReady(player)
 	task.defer(TutorialService.handlePlayerJoin, player)
-	QuestService.onWorldChanged(player, data.currentWorld)
+	-- QuestService.onWorldChanged(player, data.currentWorld)
 
-	print(`[DAC] {player.Name} loaded successfully`)
+	local function teleportOnSpawn(character: Model)
+		local hrp = character:WaitForChild("HumanoidRootPart", 10)
+		if hrp and player.Parent then
+			local currentData = DataManager.get(player)
+			if currentData then
+				WorldSpawnUtil.teleportPlayerToWorldLobby(player, currentData.currentWorld)
+			end
+		end
+	end
+
+	player.CharacterAdded:Connect(teleportOnSpawn)
+	if player.Character then
+		task.spawn(teleportOnSpawn, player.Character)
+	end
+
+	Constants.bootLog(`[DAC] {player.Name} loaded successfully`)
 end)
 
 -- Handle players already in game (Studio edge case)
 for _, player in Players:GetPlayers() do
 	task.spawn(function()
 		local loaded = DataManager.load(player)
-		if loaded then
-			local data = DataManager.get(player)
-			RebirthService.syncPrestigeAttributes(player)
-			GamePassService.checkAllPasses(player)
-			BattlePassService.ensureSeason(player)
-			QuestService.ensureQuests(player)
-			Remotes.getEvent("DataUpdate"):FireClient(player, data)
-			task.defer(function()
-				LeaderboardService.updatePlayer(player)
-			end)
-			AchievementService.syncProgressNudges(player)
-			EventService.handlePlayerJoin(player)
-			task.defer(TutorialService.handlePlayerJoin, player)
-			QuestService.onWorldChanged(player, data.currentWorld)
+		if not loaded then
+			player:Kick("Failed to load your data. Please rejoin.")
+			return
+		end
+		local data = DataManager.get(player)
+		AchievementService.noteSessionStart(player)
+		RebirthService.syncPrestigeAttributes(player)
+		GamePassService.checkAllPasses(player)
+		-- BattlePassService.ensureSeason(player)
+		-- QuestService.ensureQuests(player)
+		if data then
+			FirstSessionOnboardingService.migrateForExistingPlayers(data)
+			DataManager.injectClientSessionFields(data)
+		end
+		Remotes.getEvent("DataUpdate"):FireClient(player, data)
+		task.defer(function()
+			LeaderboardService.updatePlayer(player)
+		end)
+		AchievementService.syncProgressNudges(player)
+		EventService.handlePlayerJoin(player)
+		GroupRewardService.onPlayerReady(player)
+		FriendBonusService.onPlayerReady(player)
+		task.defer(TutorialService.handlePlayerJoin, player)
+		-- QuestService.onWorldChanged(player, data.currentWorld)
+
+		local function teleportOnSpawn(character: Model)
+			local hrp = character:WaitForChild("HumanoidRootPart", 10)
+			if hrp and player.Parent then
+				local currentData = DataManager.get(player)
+				if currentData then
+					WorldSpawnUtil.teleportPlayerToWorldLobby(player, currentData.currentWorld)
+				end
+			end
+		end
+
+		player.CharacterAdded:Connect(teleportOnSpawn)
+		if player.Character then
+			task.spawn(teleportOnSpawn, player.Character)
 		end
 	end)
 end
 
-print("[DAC] Server initialized!")
+Constants.bootLog("[DAC] Server initialized!")

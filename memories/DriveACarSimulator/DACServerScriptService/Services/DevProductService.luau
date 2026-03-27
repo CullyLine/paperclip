@@ -5,11 +5,15 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
+local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local DevProductConfig = require(DAC:WaitForChild("Config"):WaitForChild("DevProductConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local EconomyLogService = require(script.Parent:WaitForChild("EconomyLogService"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
@@ -26,10 +30,10 @@ end
 
 local function benefitLinesForReward(productDef: any, reward: any): { string }
 	if reward.type == "starter_pack" then
-		return { "+25,000 coins", "+500 gems", "+3 Meadow Eggs" }
+		return { "+50,000 coins", "+3 Meadow Eggs" }
 	end
 	if reward.type == "battle_pass_premium" then
-		return { "Premium battle pass track unlocked" }
+		return { "Premium track unlocked — claim the bonus column each tier" }
 	end
 	if reward.currency then
 		return { `+{reward.amount} {reward.currency}` }
@@ -81,13 +85,16 @@ local function finalizePurchase(
 		}
 	end
 
+	local pid = tonumber(receiptInfo.ProductId) or 0
+	EconomyLogService.logDevProductPurchase(player, productKey, pid, robuxSpent)
+
 	Remotes.getEvent("PurchaseComplete"):FireClient(player, payload)
 end
 
 local function findProductById(productId: number): (string?, any?)
-	for id, product in DevProductConfig.Products do
+	for productKey, product in DevProductConfig.Products do
 		if product.productId == productId then
-			return id, product
+			return productKey, product
 		end
 	end
 	return nil, nil
@@ -113,68 +120,71 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 	if not data.processedReceiptIds then
 		data.processedReceiptIds = {}
 	end
+	-- Idempotency: same receipt id replays return Granted without re-granting (duplicate ProcessReceipt / retries).
 	if data.processedReceiptIds[receiptKey] then
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
-	local productId, productDef = findProductById(receiptInfo.ProductId)
-	if not productId or not productDef then
+	local productKey, productDef = findProductById(receiptInfo.ProductId)
+	if not productKey or not productDef then
 		warn(`[DevProductService] Unknown product ID: {receiptInfo.ProductId}`)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	local reward = productDef.reward
 
+	local function syncAfterProfileRevert()
+		local d = DataManager.get(player)
+		if d then
+			Remotes.getEvent("DataUpdate"):FireClient(player, d)
+		end
+	end
+
+	-- Mark receipt processed + persist; on failure revert to snapshot so ProcessReceipt can retry safely.
+	local function saveReceiptGrantOrRevert(snap: any): boolean
+		data.processedReceiptIds[receiptKey] = true
+		if not DataManager.saveImmediate(player) then
+			DataManager.revertProfile(player, snap)
+			syncAfterProfileRevert()
+			warn(`[DevProductService] DataStore save failed for receipt {receiptKey}; reverted and will retry`)
+			return false
+		end
+		return true
+	end
+
 	if reward.type == "starter_pack" then
+		local snap = Utils.deepCopy(data)
 		if data.starterPackPurchased then
-			data.processedReceiptIds[receiptKey] = true
-			DataManager.save(player)
+			if not saveReceiptGrantOrRevert(snap) then
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 		data.starterPackPurchased = true
-		CurrencyService.add(player, "coins", 25_000, "dev_product")
-		CurrencyService.add(player, "gems", 500, "dev_product")
+		CurrencyService.add(player, "coins", 50_000, "dev_product")
 		data.eggs["basic_egg"] = (data.eggs["basic_egg"] or 0) + 3
-		data.processedReceiptIds[receiptKey] = true
-		DataManager.save(player)
+		if not saveReceiptGrantOrRevert(snap) then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
 		Remotes.getEvent("DataUpdate"):FireClient(player, data)
-		Remotes.getEvent("Notification"):FireClient(player, {
+		NotificationDispatchService.notify(player, {
 			type = "success",
-			message = "Starter Pack claimed! +25K coins, +500 gems, +3 Meadow Eggs",
+			message = "Starter Pack claimed! +50K coins, +3 Meadow Eggs",
 		})
-		finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
+		finalizePurchase(player, data, receiptInfo, productKey, productDef, reward)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
 	if reward.type == "battle_pass_premium" then
-		local BattlePassService = require(script.Parent:WaitForChild("BattlePassService"))
-		BattlePassService.ensureSeason(player)
-		if not data.battlePass then
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-		if data.battlePass.premium then
-			data.processedReceiptIds[receiptKey] = true
-			DataManager.save(player)
-			return Enum.ProductPurchaseDecision.PurchaseGranted
-		end
-		data.battlePass.premium = true
-		data.processedReceiptIds[receiptKey] = true
-		DataManager.save(player)
-		Remotes.getEvent("DataUpdate"):FireClient(player, data)
-		Remotes.getEvent("Notification"):FireClient(player, {
-			type = "success",
-			message = "Premium battle pass unlocked!",
-		})
-		finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
-		return Enum.ProductPurchaseDecision.PurchaseGranted
+		-- v1.0: BattlePass disabled — refund by not granting
+		warn("[DevProductService] battle_pass_premium purchase attempted but BattlePass is disabled in v1.0")
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
+	local snap = Utils.deepCopy(data)
+	-- Apply rewards before persisting; success toasts only after durable save.
 	if reward.currency then
 		CurrencyService.add(player, reward.currency, reward.amount, "dev_product")
-		Remotes.getEvent("Notification"):FireClient(player, {
-			type = "success",
-			message = `+{reward.amount} {reward.currency}!`,
-		})
 	elseif reward.type == "instant_rebirth" then
 		local RebirthService = require(script.Parent:WaitForChild("RebirthService"))
 		RebirthService.rebirth(player, true)
@@ -197,9 +207,16 @@ function DevProductService.processReceipt(receiptInfo: any): Enum.ProductPurchas
 		WorldService.skipWorldUnlock(player)
 	end
 
-	data.processedReceiptIds[receiptKey] = true
-	finalizePurchase(player, data, receiptInfo, productId, productDef, reward)
-	DataManager.save(player)
+	if not saveReceiptGrantOrRevert(snap) then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	if reward.currency then
+		NotificationDispatchService.notify(player, {
+			type = "success",
+			message = `+{reward.amount} {reward.currency}!`,
+		})
+	end
+	finalizePurchase(player, data, receiptInfo, productKey, productDef, reward)
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
@@ -207,6 +224,9 @@ function DevProductService.init()
 	MarketplaceService.ProcessReceipt = DevProductService.processReceipt
 
 	Remotes.getEvent("PurchaseThankYouAck").OnServerEvent:Connect(function(player: Player)
+		if not ValidationService.checkRemoteRate(player, "PurchaseThankYouAck") then
+			return
+		end
 		MilestoneCeremonyService.flushNextSpendMilestoneBatch(player)
 	end)
 
@@ -215,30 +235,44 @@ function DevProductService.init()
 	end)
 
 	Remotes.getEvent("PurchaseDevProduct").OnServerEvent:Connect(function(player, productKey)
-		if type(productKey) ~= "string" then
-			return
-		end
 		if not ValidationService.checkRemoteRate(player, "PurchaseDevProduct") then
 			return
 		end
-		if not RemoteCooldown.allow(player, "PurchaseDevProduct", 2) then
+		if not ValidationService.canAct(player) then
+			return
+		end
+		if type(productKey) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "devproduct_bad_key_type", "")
+			return
+		end
+		if productKey == "" or #productKey > ValidationService.MAX_REMOTE_STRING_ID_LEN then
+			ValidationService.logAnomalyOncePerSession(player, "devproduct_bad_key_len", "")
+			return
+		end
+		if not RemoteCooldown.allow(player, "IapMarketplacePrompt", 2) then
+			local msg = MicrocopyConfig.pickVariant(MicrocopyConfig.SoftFailCooldownActive):gsub("{ACTION}", "Robux checkout")
+			NotificationDispatchService.notify(player, {
+				type = "info",
+				message = msg,
+			})
 			return
 		end
 		local def = DevProductConfig.Products[productKey]
 		if not def then
+			ValidationService.logAnomalyOncePerSession(player, "devproduct_unknown_key", productKey)
 			return
 		end
 		if def.productId == 0 then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
-				message = "Developer product not linked in Studio yet (ID 0).",
+				message = "That offer isn’t hooked up in this build yet — check back after the next update!",
 			})
 			return
 		end
 		if def.id == "starter_pack" then
 			local pdata = DataManager.get(player)
 			if pdata and pdata.starterPackPurchased then
-				Remotes.getEvent("Notification"):FireClient(player, {
+				NotificationDispatchService.notify(player, {
 					type = "error",
 					message = "Starter Pack already purchased.",
 				})
@@ -248,9 +282,9 @@ function DevProductService.init()
 		if def.id == "battle_pass_premium" then
 			local pdata = DataManager.get(player)
 			if pdata and pdata.battlePass and pdata.battlePass.premium then
-				Remotes.getEvent("Notification"):FireClient(player, {
+				NotificationDispatchService.notify(player, {
 					type = "error",
-					message = "You already have Premium for this season.",
+					message = "You already have the Premium track for this season.",
 				})
 				return
 			end

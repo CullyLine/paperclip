@@ -12,6 +12,7 @@ local DAC = ReplicatedStorage:WaitForChild("DAC")
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 
 local UIHelpers = require(script.Parent:WaitForChild("UIHelpers"))
@@ -22,10 +23,48 @@ local PetIndexPanel = {}
 local discoveredSeeded = false
 local previouslyDiscovered: { [string]: boolean } = {}
 local milestonesShown: { [number]: boolean } = {}
+local scrollAffordanceShown = false
 local MILESTONE_THRESHOLDS = { 25, 50, 75, 100 }
 local SPARKLE_CHARS = { "\u{2605}", "\u{25CF}", "\u{25C6}" }
 
 local function pickRandom(pool: { string }): string if #pool == 0 then return "" end; return pool[math.random(1, #pool)] end
+
+-- One-shot holo sheen across a card (no loop; destroys self after tween).
+local function playDiscoverySheen(card: Frame)
+	card.ClipsDescendants = true
+	local sheen = Instance.new("Frame")
+	sheen.Name = "DiscoverySheen"
+	sheen.AnchorPoint = Vector2.new(0.5, 0.5)
+	sheen.Size = UDim2.new(0.34, 0, 1.4, 0)
+	sheen.Position = UDim2.new(-0.12, 0, 0.5, 0)
+	sheen.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	sheen.BackgroundTransparency = 0.55
+	sheen.BorderSizePixel = 0
+	sheen.ZIndex = 9
+	sheen.Rotation = 18
+	local sheenCorner = Instance.new("UICorner")
+	sheenCorner.CornerRadius = UDim.new(0, 10)
+	sheenCorner.Parent = sheen
+	local grad = Instance.new("UIGradient")
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.38, 0.4),
+		NumberSequenceKeypoint.new(0.5, 0.15),
+		NumberSequenceKeypoint.new(0.62, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	grad.Parent = sheen
+	sheen.Parent = card
+	local tw = TweenService:Create(
+		sheen,
+		TweenInfo.new(0.58, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = UDim2.new(1.12, 0, 0.5, 0), BackgroundTransparency = 1 }
+	)
+	tw:Play()
+	tw.Completed:Connect(function()
+		sheen:Destroy()
+	end)
+end
 
 local function spawnRarityBurst(parent: Instance, rarity: string)
 	local color = UIHelpers.rarityStroke(rarity)
@@ -44,7 +83,7 @@ function PetIndexPanel.init()
 
 	local titleBar = root:WaitForChild("TitleBar") :: Frame
 	titleBar:WaitForChild("Close").MouseButton1Click:Connect(function()
-		SoundFacade.playOneShot("click"); root.Visible = false
+		SoundFacade.playOneShot("panel_close"); MenuHub.closeAll()
 	end)
 
 	local scroll = root:WaitForChild("Scroll") :: ScrollingFrame
@@ -52,6 +91,45 @@ function PetIndexPanel.init()
 	local barBg = root:WaitForChild("ProgressBarBg") :: Frame
 	local barFill = barBg:WaitForChild("Fill") :: Frame
 	local milestoneBanner = root:WaitForChild("MilestoneBanner") :: TextLabel
+
+	local function tryScrollAffordance()
+		if scrollAffordanceShown or not root.Visible then
+			return
+		end
+		local viewH = scroll.AbsoluteWindowSize.Y
+		local canvasH = scroll.AbsoluteCanvasSize.Y
+		if viewH <= 1 or canvasH <= viewH + 6 then
+			return
+		end
+		scrollAffordanceShown = true
+		local startY = scroll.CanvasPosition.Y
+		local maxScroll = math.max(0, canvasH - viewH)
+		local nudge = math.clamp(math.floor(maxScroll * 0.18), 12, 36)
+		local mid = math.min(startY + nudge, maxScroll)
+		TweenService:Create(
+			scroll,
+			TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CanvasPosition = Vector2.new(0, mid) }
+		):Play()
+		task.delay(0.34, function()
+			if not scroll.Parent then
+				return
+			end
+			TweenService:Create(
+				scroll,
+				TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ CanvasPosition = Vector2.new(0, startY) }
+			):Play()
+		end)
+	end
+
+	local function scheduleScrollAffordance()
+		task.defer(function()
+			task.wait()
+			task.wait()
+			tryScrollAffordance()
+		end)
+	end
 
 	local function showMilestoneCelebration(pct: number)
 		SoundFacade.playOneShot("level_up")
@@ -70,8 +148,13 @@ function PetIndexPanel.init()
 
 	local function redraw()
 		for _, c in scroll:GetChildren() do if c:IsA("Frame") then c:Destroy() end end
-		local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-		local disc = if data and data.discoveredPets then data.discoveredPets else {}
+		local ok, data = RemoteFailSafe.invokeGetPlayerData()
+		if not ok or type(data) ~= "table" then
+			progress.Text = "—"
+			TweenService:Create(barFill, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, 0, 1, 0) }):Play()
+			return
+		end
+		local disc = if data.discoveredPets then data.discoveredPets else {}
 		local total = PetConfig.getTotalSpeciesCount(); local found = 0
 		for _, v in pairs(disc) do if v == true then found += 1 end end
 
@@ -90,6 +173,7 @@ function PetIndexPanel.init()
 		TweenService:Create(barFill, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(if total > 0 then found / total else 0, 0, 1, 0) }):Play()
 
 		if next(newlyDiscovered) then
+			SoundFacade.playOneShot("collection_discover")
 			for _, threshold in MILESTONE_THRESHOLDS do
 				if pct >= threshold and not milestonesShown[threshold] then milestonesShown[threshold] = true; task.delay(0.5, function() showMilestoneCelebration(threshold) end) end
 			end
@@ -103,14 +187,11 @@ function PetIndexPanel.init()
 			local t = Instance.new("TextLabel"); t.Size=UDim2.new(1,-6,1,-6); t.Position=UDim2.new(0,3,0,3); t.BackgroundTransparency=1; t.Font=Enum.Font.GothamBold; t.TextSize=13; t.TextColor3=Color3.fromRGB(40,40,40); t.TextWrapped=true; t.Text=known and (def.name .. "\n" .. def.rarity .. "\nPow " .. tostring(def.basePower)) or "???"; t.Parent=card
 
 			if known and newlyDiscovered[pid] then
-				local badge = Instance.new("TextLabel"); badge.Name="NewBadge"; badge.AnchorPoint=Vector2.new(1,0); badge.Position=UDim2.new(1,-4,0,4); badge.Size=UDim2.fromOffset(38,18); badge.BackgroundColor3=Color3.fromRGB(255,60,80); badge.Font=Enum.Font.GothamBold; badge.TextSize=11; badge.TextColor3=Color3.new(1,1,1); badge.Text="NEW!"; badge.ZIndex=6; badge.Parent=card
+				local badge = Instance.new("TextLabel"); badge.Name="NewBadge"; badge.AnchorPoint=Vector2.new(1,0); badge.Position=UDim2.new(1,-4,0,4); badge.Size=UDim2.fromOffset(38,18); badge.BackgroundColor3=Color3.fromRGB(255,60,80); badge.Font=Enum.Font.GothamBold; badge.TextSize=11; badge.TextColor3=Color3.new(1,1,1); badge.Text="NEW!"; badge.ZIndex=10; badge.Parent=card
 				local badgeCorner = Instance.new("UICorner"); badgeCorner.CornerRadius=UDim.new(0,6); badgeCorner.Parent=badge
-				SoundFacade.playOneShot("notification")
-				task.spawn(function()
-					while badge.Parent do
-						TweenService:Create(badge, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Size=UDim2.fromOffset(42,20), BackgroundColor3=Color3.fromRGB(255,100,120) }):Play(); task.wait(0.5)
-						if not badge.Parent then break end
-						TweenService:Create(badge, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Size=UDim2.fromOffset(38,18), BackgroundColor3=Color3.fromRGB(255,60,80) }):Play(); task.wait(0.5)
+				task.defer(function()
+					if card.Parent then
+						playDiscoverySheen(card)
 					end
 				end)
 			end
@@ -135,9 +216,17 @@ function PetIndexPanel.init()
 				end)
 			end
 		end
+		if root.Visible then
+			scheduleScrollAffordance()
+		end
 	end
 
 	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function() if root.Visible then redraw() end end)
+	root:GetPropertyChangedSignal("Visible"):Connect(function()
+		if root.Visible then
+			redraw()
+		end
+	end)
 	redraw()
 end
 

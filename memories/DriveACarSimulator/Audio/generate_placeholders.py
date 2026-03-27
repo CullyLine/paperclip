@@ -1,4 +1,4 @@
-"""Generate 40 silent OGG placeholder files for Drive a Car Simulator audio tree."""
+"""Generate 41 silent OGG placeholder files for Drive a Car Simulator audio tree."""
 import subprocess, os
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +53,7 @@ AUDIO_FILES = {
         ("coin_pickup.ogg", 0.3),
         ("distance_marker.ogg", 0.4),
         ("lap_horn.ogg", 1.2),
+        ("combo_ding.ogg", 0.12),  # POLA-668 near-miss streak ding (short one-shot)
     ],
     "fuel": [
         ("warning_25.ogg", 0.1),
@@ -82,4 +83,4 @@ for folder, files in AUDIO_FILES.items():
         else:
             print(f"FAIL  {folder}/{filename}")
 
-print(f"\nGenerated {total}/40 placeholder OGG files.")
+print(f"\nGenerated {total}/41 placeholder OGG files.")

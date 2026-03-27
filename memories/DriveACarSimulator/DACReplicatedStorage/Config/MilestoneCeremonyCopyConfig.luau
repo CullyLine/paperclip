@@ -16,7 +16,8 @@ local MilestoneCeremonyCopyConfig = {}
 --------------------------------------------------------------------------
 -- REBIRTH TIER CEREMONIES
 -- Fired when a player crosses into a new prestige tier (5/10/25/50/100).
--- {TIER} = tier label, {COUNT} = rebirth count.
+-- {TIER} = ceremonyTier from RebirthMilestoneConfig (short rank name, no "!").
+-- {COUNT} = rebirth count. Economy: next rebirth cost = base × mult^rebirths (see RebirthConfig).
 --------------------------------------------------------------------------
 
 MilestoneCeremonyCopyConfig.RebirthCeremonyHeadlines = {
@@ -29,12 +30,12 @@ MilestoneCeremonyCopyConfig.RebirthCeremonyHeadlines = {
 }
 
 MilestoneCeremonyCopyConfig.RebirthCeremonyBodies = {
-	"Rebirth {COUNT} — welcome to {TIER} tier. You've earned this!",
-	"{TIER} status achieved at rebirth {COUNT}! The aura doesn't lie.",
-	"You just entered {TIER} territory. Only the relentless make it here.",
-	"Rebirth #{COUNT} and a brand-new title. The lobby will NOTICE.",
-	"From zero to {TIER} — every reset made you MORE dangerous.",
-	"Most players never see {TIER}. You're not most players.",
+	"Rebirth {COUNT} — {TIER} status unlocked. That grind paid off!",
+	"{TIER} rank at rebirth {COUNT}! Every reset cost more coins — you kept paying.",
+	"You just crossed into {TIER}. Only drivers who reinvest hit this bar.",
+	"Rebirth #{COUNT}: new title, permanent stat stack grows. The lobby notices.",
+	"From starter to {TIER} — each rebirth asked more coins than the last. You delivered.",
+	"Most accounts never reach {TIER}. You're funding the endgame fair and square.",
 }
 
 --------------------------------------------------------------------------
@@ -101,7 +102,7 @@ MilestoneCeremonyCopyConfig.TotalRunsCeremonyBodies = {
 	"{COUNT} runs complete! Your tires should be dust by now.",
 	"Run #{COUNT} in the books. The asphalt remembers every one.",
 	"{COUNT} runs — that's not a hobby, that's a CAREER.",
-	"You've finished {COUNT} runs! Most players quit at 50.",
+	"You've finished {COUNT} runs — long-haul dedication, front and center!",
 	"{COUNT} laps around the simulator. You're basically PART of the road.",
 	"Run milestone: {COUNT}! The engine never stops for you.",
 }

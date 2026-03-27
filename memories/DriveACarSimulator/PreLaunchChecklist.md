@@ -1,8 +1,34 @@
 # Drive a Car Simulator — Pre-Launch Checklist & First-Week Content Calendar
 
-**Prepared by:** Content Strategist (POLA-27)
-**Date:** March 20, 2026
-**References:** GamePassConfig.luau, DevProductConfig.luau, CodeService.luau, CarConfig.luau, GamePageContent.md, LaunchPlaybook.md, Season1_ContentPlan.md
+**Prepared by:** Content Strategist (POLA-27) · **Last refresh:** POLA-646 (March 22, 2026)
+**Date:** March 20, 2026 (original)
+**References:** `GamePassConfig.luau`, `DevProductConfig.luau`, `CodeService.luau`, `CarConfig.luau`, `GamePageContent.md`, `LaunchPlaybook.md`, `Season1_ContentPlan.md`, `MicrocopyConfig.luau`, `LoadingTipsConfig.luau`, `SocialFeedConfig.luau`, `HudLayoutConfig.luau`, `UILayerStack.luau`, `FriendBonusConfig.luau`, `GroupRewardConfig.luau`
+
+---
+
+## Document status (read first)
+
+- **Phase (parent POLA-104):** The codebase is **feature-complete** for the current scope; active work is **Phase 4 polish** (dopamine / juice, onboarding, retention copy, HUD layering). This checklist is **launch verification + polish sign-off**, not a “finish Phase 3 systems” tracker.
+- **Monetization numeric IDs (POLA-95):** **Still blocked** on the human **Creator Dashboard** step (create passes/products) **plus** engineer wiring into `GamePassConfig.luau` / `DevProductConfig.luau`. Tables in **§1** and **§4** are **SKU ↔ config-key maps**—they do **not** mean IDs are live. **Do not** report monetization IDs as done while **POLA-95** is open.
+- **Non-ID sections** below (content, marketing, calendar, QA that does not require a purchase) remain the working source for copy and manual checks—keep names aligned with the current build.
+
+### Doc vs repo truth (POLA-547 baseline; POLA-646 refresh)
+
+| Topic | Doc / checklist claim | Repo truth (2026-03-22) | Notes |
+|--------|------------------------|---------------------------|--------|
+| World-bed / **Splice → repo** audio pipeline | N/A | **Unblocked** for the primary workspace — POLA-298 (world-bed) + POLA-553 (Splice CLI human ops) **done** | Sourcing/CLI is no longer the gate. What remains is **Roblox upload + `rbxassetid` wiring** (Board + Studio), same as other assets. |
+| Game Pass / Dev Product **numeric IDs** | Not live until Dashboard + wiring | All `gamePassId` / `productId` still **`0`** in `GamePassConfig.luau` / `DevProductConfig.luau` | **Board blocker — POLA-95** (human Creator Dashboard + engineer paste). Do not mark monetization ID rows done. |
+| Dev product **rows** | §1 table must list every config key | **`DevProductConfig.Products` has 16 keys**, including **`gems_pack_m`** (3,000 Gems @ 599R) — was missing from an older table row | §1 table below corrected. |
+| Store SKU **display names** | §1 “Product” column = Dashboard paste = in-game `name` | **`gems_pack_l` / `crystals_pack_l` / `battle_pass_premium`** labels aligned to Luau (`10,000 Gems`, `5,000 Crystals`, `Battle Pass Premium Track`) — POLA-602; matrix: `docs/marketing/Phase4_RobloxStoreCopyPackage.md` §7 |
+| Cars (config) | Previously “11 base cars” | **`CarConfig.Cars` = 12** — adds **`midnight_drifter`** (*Midnight Drifter*, Season 1 crown / free entry) | Studio must still have a model for `modelName = "midnight_drifter"`. |
+| Pets (config) | “15 pets” | **`PetConfig.Pets` = 16** — **15** hatchable/progression species **plus** **`group_member`** (*Group Pup*, group join reward) | QA: follow + hatch behavior for all non-group entries; group pet is grant-only. |
+| Eggs | 6 eggs | **`EggConfig.Eggs` = 6** | Aligned. |
+| Promo codes | 10 codes in table | **`CodeService` `CODES`** = 10 active entries (LAUNCH … UPDATE1) | Aligned with §1 code table. **POLA-664 (2026-03-22):** DRIVEFAST–UPDATE1 reward lines desk-checked vs `DACServerScriptService/Services/CodeService.luau`; log in `docs/Phase4_ChecklistSection2_SmokeNotes.md` § Promo codes. |
+| Audio / images | N/A | Many **`rbxassetid://0`** placeholders; manifest: `LaunchAssets/AssetIdChecklist.md`, `Audio/MANIFEST.md` | **Roblox upload / asset IDs** (Board + Studio) — **not** blocked on Splice login (see row above). Not a code-complete gate for copy. |
+| Trade at launch | Disabled | **`TradeService`** — stub / no-op (POLA-525); no inventory transfer | Aligned with §5 QA. |
+| Economy logging | POLA-532 | **`DACServerScriptService/Services/EconomyLogService.luau`** present | Server attribute `EconomyLogVerbose` per §1. |
+
+**Human Studio blockers (not fixable from git alone):** Creator Dashboard SKUs (POLA-95), 3D world/car/pet models, thumbnails/icon, **Roblox uploads and live asset IDs** for entries in `LaunchAssets/AssetIdChecklist.md` / `Audio/MANIFEST.md` (Splice pipeline for primary workspace: unblocked — POLA-298 + POLA-553).
 
 ---
 
@@ -10,7 +36,9 @@
 
 ### 1. Code Readiness
 
-- [ ] **Rojo sync verified** — All 62+ Luau files synced to Roblox Studio via Rojo. Run `rojo build` and confirm no missing modules in the output log.
+> **POLA-95 — IDs:** Do **not** check off game-pass or dev-product **ID** rows until products exist in Creator Dashboard **and** `gamePassId` / `productId` values are non-zero in config.
+
+- [ ] **Rojo sync verified** — All Luau modules in `default.project.json` synced to Roblox Studio via Rojo. Run `rojo build` and confirm no missing modules in the output log.
 - [ ] **Game pass IDs created on Roblox** — Create all 13 game passes in the Roblox Creator Dashboard and update `gamePassId` fields in `GamePassConfig.luau` (currently all set to `0`):
 
 | Pass | Robux Price | Config Key |
@@ -39,15 +67,16 @@
 | 1,000,000 Coins | 999 | `coins_1m` |
 | 100 Gems | 99 | `gems_100` |
 | 1,000 Gems | 399 | `gems_1k` |
+| 3,000 Gems | 599 | `gems_pack_m` |
 | 50 Crystals | 199 | `crystals_50` |
 | 500 Crystals | 799 | `crystals_500` |
 | Instant Rebirth | 299 | `instant_rebirth` |
 | Auto-Hatch 3 Eggs | 99 | `auto_hatch_3` |
 | Skip World Unlock | 499 | `skip_world` |
-| Gem Pack L (10K) | 999 | `gems_pack_l` |
-| Crystal Pack L (5K) | 1,999 | `crystals_pack_l` |
+| 10,000 Gems | 999 | `gems_pack_l` |
+| 5,000 Crystals | 1,999 | `crystals_pack_l` |
 | Starter Pack | 199 | `starter_pack` |
-| Battle Pass Premium | 749 | `battle_pass_premium` |
+| Battle Pass Premium Track | 749 | `battle_pass_premium` |
 
 - [ ] **All 10 promo codes tested** — Redeem each code on a fresh test account and verify correct rewards:
 
@@ -67,8 +96,18 @@
 - [ ] **DataStore keys finalized** — Review all DataStore key names in `DataManager.luau`. No key renames after launch or existing saves will be wiped. Confirm: player data, redeemed codes, daily reward streaks, rebirth counts, pet inventory, car ownership, settings, leaderboard entries.
 - [ ] **Anti-exploit validation tested** — Verify `RemoteCooldown` rate limits on all remotes. Test: rapid code redemption, rapid purchase attempts, speed hack detection (if implemented), coin amount validation server-side.
 - [ ] **Error handling** — Confirm all `pcall` wrappers around DataStore calls. Test: what happens when DataStore is temporarily unavailable? Player should see a retry notification, not lose data.
+- [ ] **Economy anomaly logging (server, POLA-532)** — Default logs large grants, admin currency, promo redemptions, dev products, rebirths, legendary/mythic hatches, battle pass tier claims (privacy-safe: UserId only, no player names). **Verbose:** in Studio, select `ServerScriptService` → `DAC` → Attributes → add Boolean `EconomyLogVerbose` = true to also log medium-sized currency grants. Implementation: `DACServerScriptService/Services/EconomyLogService.luau`.
 
 ### 2. Content Readiness
+
+#### Phase 4 polish (POLA-104) — verify before launch
+
+- [ ] **First-session onboarding** — `FirstSessionOnboardingService` + `TutorialOverlay` / `TutorialOverlayDesignSpec`: first run feels guided; `NewPlayerCalmWindow` / `HudLayoutConfig` avoid HUD overload for brand-new players.
+- [ ] **Retention & social copy** — `LoadingTipsConfig`, `MicrocopyConfig`, `DailyRewardPanel` strings, milestone / achievement surfacing (`AchievementPopupConfig`, `MilestoneCeremonyCopyConfig` / `MilestoneCeremonyService`), and `SocialFeedConfig` use **current** feature names (no dead Phase-2-only references).
+- [ ] **Layering, safe area, secondary HUD** — Toasts and banners respect `UILayerStack` / `HudSafeArea`; friend bonus (`DACFriendBonusHUD`, `FriendBonusConfig`), group join / group rewards (`GroupJoinBanner`, `GroupRewardConfig`), and achievement lane use `NotificationLaneBridge` patterns where applicable.
+- [ ] **Juice** — Run-end fanfare, particles, and milestone pops spot-checked against `VFXFacade` / `SoundFacade` and the `DACStarterGui/*DesignSpec.luau` notes (HUD notification toast, run fanfare, trophy case, etc.).
+
+#### Storefront & discovery (static content)
 
 - [ ] **Game page title applied** — "Drive a Car Simulator" (22 characters, fits all mobile displays)
 - [ ] **Game description applied** — Use the 997-character primary description from `GamePageContent.md` §2
@@ -84,12 +123,13 @@
   - [ ] Desert — playable (geometry + lighting + ambient)
   - [ ] Frozen Tundra — playable (geometry + lighting + ambient)
   - [ ] Neon City — playable (geometry + lighting + ambient)
-- [ ] **All 11 base cars have models** — Each car in `CarConfig.luau` has a corresponding model in Roblox Studio and is drivable:
+- [ ] **All 12 cars in `CarConfig` have models** — Each car in `CarConfig.luau` has a corresponding model in Roblox Studio and is drivable:
   - [ ] Rusty Runabout (Grasslands, free)
   - [ ] Street Cruiser (Grasslands, 5K coins)
   - [ ] Green Demon (Grasslands, 25K coins)
   - [ ] Venom GT (Grasslands, 100K coins)
   - [ ] Tank Roller (Grasslands, 50K coins)
+  - [ ] Midnight Drifter (Grasslands, free — Season 1 crown; `modelName` `midnight_drifter`)
   - [ ] Sand Scorpion (Desert, 200K coins)
   - [ ] Inferno Rod (Desert, 500K coins)
   - [ ] Frost Glider (Frozen, 5K gems)
@@ -97,13 +137,14 @@
   - [ ] Neon Pulse (Neon, 10K crystals)
   - [ ] Void Runner (Neon, 50K crystals)
 - [ ] **All 6 eggs have models and hatch animations** — Per `EggConfig.luau`
-- [ ] **All 15 pets have models and follow-player behavior** — `PetController.luau` handles follow logic
+- [ ] **All pet species have models and follow-player behavior** — `PetConfig` defines 16 pets (15 hatchable/progression + **Group Pup** for group join); `PetController.luau` handles follow logic
 - [ ] **All UI panels functional** — Test each panel opens, displays correctly, and buttons work:
-  - [ ] HUD (main)
-  - [ ] DrivingHUD
+  - [ ] HUD (`DACMain`) + **DrivingHUD** (speed / run UI)
+  - [ ] **DACFriendBonusHUD** (friend bonus chip; does not overlap core speed readout)
   - [ ] InventoryPanel
   - [ ] StorePanel
-  - [ ] EggShopPanel
+  - [ ] EggShopPanel (Egg Store shell under `DACMain`)
+  - [ ] WorldPanel
   - [ ] RebirthPanel
   - [ ] CodesPanel
   - [ ] DailyRewardPanel
@@ -111,9 +152,11 @@
   - [ ] PetIndexPanel
   - [ ] QuestPanel
   - [ ] BattlePassPanel
+  - [ ] TrophyCasePanel (Achievements / trophies)
   - [ ] PayoutPanel
-  - [ ] MenuHub
+  - [ ] MenuHub (action bar + panel routing)
   - [ ] PlaytimeGemHUD
+  - [ ] **GroupJoinBanner** (if enabled for the build)
 - [ ] **Sound effects in place** — Via `SoundController.luau`:
   - [ ] Engine loop (per car or generic)
   - [ ] UI click/hover sounds
@@ -157,6 +200,8 @@
 
 ### 4. Monetization Readiness
 
+> **POLA-95:** End-to-end **purchase testing** (below) requires **live** pass/product IDs in Roblox. Until POLA-95 completes, treat this section as **dashboard + wiring backlog**; you may still review **intended** prices and display strings in `StorePanel` against config.
+
 - [ ] **All 13 game passes priced correctly on Roblox** — Cross-reference Robux prices in `GamePassConfig.luau` against Creator Dashboard listings. Every pass must have: name, description, icon, correct Robux price.
 - [ ] **All 16 dev products created on Roblox** — Each product registered with correct Robux price in Creator Dashboard
 - [ ] **Purchase flow tested end-to-end** — For each pass and product: buy → receipt processed by `GamePassService.luau` / `DevProductService.luau` → reward delivered → DataStore updated → UI reflects change
@@ -185,11 +230,13 @@
 
 ### Morning (Before Publish)
 
+> **POLA-95:** Game-page passes and in-experience **purchase** flows only apply **after** Creator Dashboard products exist and IDs are wired. Until then, skip or downgrade the two monetization bullets below to “verify UI shows intended copy/prices from config.”
+
 - [ ] Fresh build uploaded to Roblox (final `rojo build` → publish)
 - [ ] Game set to **Public** (switch from Private/Friends Only)
 - [ ] Verify game appears in search for "Drive a Car Simulator"
-- [ ] Confirm all 13 game passes visible on the game page with correct icons and prices
-- [ ] Confirm all 16 dev products listed in the store panel
+- [ ] Confirm all 13 game passes visible on the game page with correct icons and prices **(requires POLA-95)**
+- [ ] Confirm all 16 dev products listed in the store panel **(requires POLA-95)**
 - [ ] One full play session as a real player (not Studio test) — Rusty Runabout → drive → earn coins → buy upgrade → hatch egg
 
 ### Coordinated Launch (Publish Hour)
@@ -226,7 +273,7 @@
 | 0h (game goes public) | Publish game + Stylxus video | Roblox + YouTube | Coordinated simultaneous drop |
 | 0h | Launch post #1 | Twitter/X, Discord, TikTok | Main announcement with game link + codes LAUNCH & STYLXUS90K |
 | 0h | @everyone ping | Discord #announcements | Full launch announcement with feature highlights |
-| +2h | Launch post #2 | Twitter/X | Feature showcase: "11+ cars, 14+ pets, 4 worlds" |
+| +2h | Launch post #2 | Twitter/X | Feature showcase: "12+ cars, 15+ pets, 4 worlds" (rounded from config; group pet is bonus) |
 | +4h | Launch post #3 | TikTok | 15-second hype clip: car racing + pet hatching montage |
 | +6h | Launch post #4 | Twitter/X | Aspirational: "Can you hatch the Cosmic Whale? Power: 550!" |
 | +8h | Launch post #5 | Discord, Twitter/X | Community invite: "Join the Discord for exclusive codes!" |
@@ -385,4 +432,4 @@
 
 #### Files on disk
 
-- `memories/DriveACarSimulator/PreLaunchChecklist.md` — This document (pre-launch checklist + first-week content calendar)
+- `memories/DriveACarSimulator/PreLaunchChecklist.md` — This document (pre-launch checklist + first-week content calendar; POLA-547 / POLA-646: doc↔repo truth table incl. POLA-298+POLA-553 Splice/world-bed closure vs upload-ID gaps, `gems_pack_m` dev-product row, 12-car / 16-pet config alignment, POLA-95 / Studio blockers)

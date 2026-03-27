@@ -1,6 +1,6 @@
 --!strict
 
-export type Currency = "coins" | "gems" | "crystals" | "skulls"
+export type Currency = "coins" | "sandGranules" | "icycles" | "magmaCores" | "infinitium"
 
 export type CarStats = {
 	gas: number,
@@ -100,6 +100,7 @@ export type DevProductDefinition = {
 export type PlayerSettings = {
 	autoCenter: boolean,
 	otherPets: boolean,
+	otherPetAnimations: boolean,
 	tradeRequests: boolean,
 	particles: boolean,
 	sound: boolean,
@@ -107,12 +108,17 @@ export type PlayerSettings = {
 	sfxVolume: number,
 	graphicsQuality: number,
 	steeringSensitivity: number,
+	reducedMotion: boolean,
+	particleDensity: number,
+	showFps: boolean,
 }
 
 export type DailyRewardData = {
 	lastClaim: number,
 	streak: number,
 	lastClaimLostStreak: number?,
+	-- Server: last applied DACDailyRewardAuth_v1 generation (POLA-519).
+	authClaimGen: number?,
 }
 
 export type PlayerStats = {
@@ -130,9 +136,10 @@ export type RebirthStats = {
 
 export type PlayerData = {
 	coins: number,
-	gems: number,
-	crystals: number,
-	skulls: number,
+	sandGranules: number,
+	icycles: number,
+	magmaCores: number,
+	infinitium: number,
 
 	cars: { [string]: OwnedCar },
 	equippedCar: string,
@@ -153,7 +160,7 @@ export type PlayerData = {
 	settings: PlayerSettings,
 	stats: PlayerStats,
 
-	playtimeSecondsSinceGem: number,
+	playtimeSecondsSinceBonus: number,
 	lastRunOfDayBonusYday: number,
 	starterPackPurchased: boolean,
 	discoveredPets: { [string]: boolean },

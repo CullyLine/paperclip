@@ -3,7 +3,7 @@
 	Leaderboard surface display.
 	Targets SurfaceGui on the MeshPart at
 	Workspace.Worlds["1"].Nature.Map.Leaderboard1.Leaderboard["Meshes/Leaderboard_Cube.001"].
-	Always visible, auto-refreshes every 30 seconds.
+	Always visible; auto-refreshes per Constants.LEADERBOARD_CLIENT_AUTO_REFRESH_SEC (default 30s).
 	Tab buttons and rank rows are created dynamically.
 ]]
 
@@ -12,9 +12,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local Constants = require(DAC:WaitForChild("Constants"))
+local MenuInputAccessibility = require(DAC:WaitForChild("MenuInputAccessibility"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
 local LeaderboardTextConfig = require(DAC:WaitForChild("Config"):WaitForChild("LeaderboardTextConfig"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 
 local LeaderboardPanel = {}
 
@@ -25,9 +29,50 @@ local BRONZE = Color3.fromRGB(205, 127, 70)
 local STAT_DISTANCE = "totalDistance"
 local STAT_REBIRTHS = "totalRebirths"
 
-local REFRESH_INTERVAL = 30
+local REFRESH_INTERVAL = Constants.LEADERBOARD_CLIENT_AUTO_REFRESH_SEC
 
 local previousRanks: { [string]: number? } = {}
+-- Last successful fetch (used when server returns rate_limit with no local snapshot yet).
+local lastRowsSnapshot: { any }? = nil
+local lastSnapshotStat: string? = nil
+local lastUpdatedAtUnix: number? = nil
+local lastStaleFooter: boolean = false
+
+-- Mirrors HUD: DataUpdate settings; low graphics / particles off = no motion on leaderboard.
+local cachedLbSettings: { graphicsQuality: number, particles: boolean, reducedMotion: boolean } = {
+	graphicsQuality = 1,
+	particles = true,
+	reducedMotion = false,
+}
+
+local function cacheLbSettingsFromData(data: any)
+	if type(data) ~= "table" or type(data.settings) ~= "table" then
+		return
+	end
+	local s = data.settings
+	if type(s.graphicsQuality) == "number" then
+		cachedLbSettings.graphicsQuality = s.graphicsQuality
+	end
+	if type(s.particles) == "boolean" then
+		cachedLbSettings.particles = s.particles
+	end
+	if type(s.reducedMotion) == "boolean" then
+		cachedLbSettings.reducedMotion = s.reducedMotion
+	end
+end
+
+local function shouldLeaderboardJuice(): boolean
+	if cachedLbSettings.reducedMotion then
+		return false
+	end
+	if cachedLbSettings.graphicsQuality <= 0 then
+		return false
+	end
+	if cachedLbSettings.particles == false then
+		return false
+	end
+	return true
+end
 
 function LeaderboardPanel.init()
 	local player = Players.LocalPlayer
@@ -59,10 +104,163 @@ function LeaderboardPanel.init()
 	if not surfaceGui then warn("[DAC] LeaderboardPanel: SurfaceGui not found on cube"); return end
 
 	local bg = surfaceGui:WaitForChild("Background") :: Frame
+
+	local footerLabel = bg:FindFirstChild("LeaderboardFooter") :: TextLabel?
+	if not footerLabel then
+		local fl = Instance.new("TextLabel")
+		fl.Name = "LeaderboardFooter"
+		fl.BackgroundTransparency = 1
+		fl.Size = UDim2.new(1, -112, 0, 16)
+		fl.Position = UDim2.new(0, 8, 1, -10)
+		fl.AnchorPoint = Vector2.new(0, 1)
+		fl.Font = Enum.Font.Gotham
+		fl.TextSize = 11
+		fl.TextXAlignment = Enum.TextXAlignment.Left
+		fl.TextColor3 = Color3.fromRGB(140, 150, 180)
+		fl.Text = ""
+		fl.Visible = false
+		fl.ZIndex = 3
+		fl.Parent = bg
+		footerLabel = fl
+	end
+
+	local refreshBtn = bg:FindFirstChild("LeaderboardRefreshBtn") :: TextButton?
+	if not refreshBtn then
+		local rb = Instance.new("TextButton")
+		rb.Name = "LeaderboardRefreshBtn"
+		rb.Size = UDim2.new(0, 96, 0, 32)
+		rb.Position = UDim2.new(1, -8, 0, 8)
+		rb.AnchorPoint = Vector2.new(1, 0)
+		rb.BackgroundColor3 = Color3.fromRGB(45, 55, 95)
+		rb.TextColor3 = Color3.fromRGB(230, 235, 255)
+		rb.Font = Enum.Font.GothamBold
+		rb.TextSize = 13
+		rb.Text = LeaderboardTextConfig.RefreshButtonLabel
+		rb.AutoButtonColor = true
+		rb.ZIndex = 4
+		local rc = Instance.new("UICorner")
+		rc.CornerRadius = UDim.new(0, 8)
+		rc.Parent = rb
+		rb.Parent = bg
+		refreshBtn = rb
+		MenuInputAccessibility.applyPrimaryNavDefaults(rb)
+	end
+
 	local tabRow = bg:WaitForChild("Tabs") :: Frame
 	local scroll = bg:WaitForChild("Scroll") :: ScrollingFrame
 	local statusLabel = scroll:FindFirstChild("StatusLabel") :: TextLabel?
 	local motivationLabel = bg:FindFirstChild("MotivationLabel") :: TextLabel?
+
+	local boardTweenBucket: { Tween } = {}
+	local function cancelBoardTweens()
+		for _, tw in boardTweenBucket do
+			pcall(function()
+				tw:Cancel()
+			end)
+		end
+		table.clear(boardTweenBucket)
+	end
+
+	local function playBoardRefreshPulse()
+		if not shouldLeaderboardJuice() then
+			return
+		end
+		cancelBoardTweens()
+		local us = bg:FindFirstChildOfClass("UIScale")
+		if not us then
+			us = Instance.new("UIScale")
+			us.Scale = 1
+			us.Parent = bg
+		end
+		local s = us :: UIScale
+		s.Scale = 1
+		local up = TweenService:Create(s, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.008 })
+		local down = TweenService:Create(s, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Scale = 1 })
+		table.insert(boardTweenBucket, up)
+		table.insert(boardTweenBucket, down)
+		up:Play()
+		up.Completed:Once(function()
+			down:Play()
+		end)
+	end
+
+	local rowPulseBuckets: { [Instance]: { Tween } } = {}
+	local function cancelRowPulse(row: Instance)
+		local b = rowPulseBuckets[row]
+		if not b then
+			return
+		end
+		for _, tw in b do
+			pcall(function()
+				tw:Cancel()
+			end)
+		end
+		table.clear(b)
+	end
+
+	local function playRowRankDeltaPulse(
+		row: Frame,
+		improved: boolean,
+		baseBg: Color3,
+		baseTrans: number,
+		glyphLbl: TextLabel?
+	)
+		cancelRowPulse(row)
+		local bucket = rowPulseBuckets[row]
+		if not bucket then
+			bucket = {}
+			rowPulseBuckets[row] = bucket
+		end
+		local flash = if improved then Color3.fromRGB(46, 204, 113) else Color3.fromRGB(243, 156, 18)
+		if shouldLeaderboardJuice() then
+			row.BackgroundColor3 = flash
+			row.BackgroundTransparency = math.clamp(baseTrans - 0.08, 0, 0.5)
+			local tw = TweenService:Create(
+				row,
+				TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ BackgroundColor3 = baseBg, BackgroundTransparency = baseTrans }
+			)
+			table.insert(bucket, tw)
+			tw:Play()
+		else
+			row.BackgroundColor3 = flash:Lerp(baseBg, 0.55)
+			task.delay(0.22, function()
+				if row.Parent then
+					row.BackgroundColor3 = baseBg
+					row.BackgroundTransparency = baseTrans
+				end
+			end)
+		end
+
+		if glyphLbl then
+			glyphLbl.Text = if improved then "▲" else "▼"
+			glyphLbl.TextColor3 = flash
+			glyphLbl.TextTransparency = 0
+			if shouldLeaderboardJuice() then
+				local fade = TweenService:Create(
+					glyphLbl,
+					TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1 }
+				)
+				table.insert(bucket, fade)
+				fade:Play()
+				fade.Completed:Once(function()
+					if glyphLbl.Parent then
+						glyphLbl.Text = ""
+					end
+				end)
+			else
+				task.delay(0.35, function()
+					if glyphLbl.Parent then
+						glyphLbl.TextTransparency = 1
+						glyphLbl.Text = ""
+					end
+				end)
+			end
+		end
+	end
+
+	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(cacheLbSettingsFromData)
 
 	local currentStat = STAT_DISTANCE
 	local refreshId = 0
@@ -76,8 +274,10 @@ function LeaderboardPanel.init()
 	end
 
 	local function formatScore(stat: string, value: number): string
-		if stat == STAT_DISTANCE then return `{Utils.formatNumber(value)} studs` end
-		return tostring(math.floor(value))
+		if stat == STAT_DISTANCE then
+			return `{Utils.formatIntegerWithCommas(value)} studs`
+		end
+		return Utils.formatIntegerWithCommas(value)
 	end
 
 	local function clearRows()
@@ -105,6 +305,19 @@ function LeaderboardPanel.init()
 		return lines[math.random(1, #lines)]
 	end
 
+	type EmptyPair = { title: string, body: string? }
+
+	local function pickRandomEmpty(pool: { EmptyPair }): EmptyPair
+		return pool[math.random(1, #pool)]
+	end
+
+	local function formatEmptyStatus(pair: EmptyPair): string
+		if pair.body and pair.body ~= "" then
+			return pair.title .. "\n" .. pair.body
+		end
+		return pair.title
+	end
+
 	local function applyCloseTemplate(template: string, gapStr: string, nextRankNum: number): string
 		return template:gsub("{GAP}", gapStr):gsub("{NEXT_RANK}", tostring(nextRankNum))
 	end
@@ -123,24 +336,119 @@ function LeaderboardPanel.init()
 		end
 	end
 
+	local footerAgeToken = 0
+	local function formatFooterAge(updatedAt: number?, stale: boolean): string
+		if not updatedAt then
+			return ""
+		end
+		local drift = workspace:GetServerTimeNow() - updatedAt
+		local age = math.max(0, math.floor(drift + 0.5))
+		local base = if age < 5 then "Updated just now" else `Updated {age}s ago`
+		if stale then
+			return base .. " · may be stale"
+		end
+		return base
+	end
+
+	local function scheduleFooterAgeLoop()
+		footerAgeToken += 1
+		local tok = footerAgeToken
+		task.spawn(function()
+			while tok == footerAgeToken do
+				task.wait(1)
+				if tok ~= footerAgeToken then
+					break
+				end
+				if footerLabel and lastUpdatedAtUnix then
+					footerLabel.Text = formatFooterAge(lastUpdatedAtUnix, lastStaleFooter)
+					footerLabel.Visible = true
+				end
+			end
+		end)
+	end
+
 	local function refresh()
 		refreshId += 1
 		local myRefresh = refreshId
 		clearRows(); hideStatus(); hideMotivation()
-		setStatus("Loading\u{2026}", Color3.fromRGB(160, 170, 210))
+		setStatus(LeaderboardTextConfig.LoadingStatus, Color3.fromRGB(160, 170, 210))
+		if footerLabel then
+			footerLabel.Visible = false
+		end
 
 		task.defer(function()
 			if myRefresh ~= refreshId then return end
 			local statForFetch = currentStat
-			local ok, rows = pcall(function() return Remotes.getFunction("GetLeaderboard"):InvokeServer(statForFetch) end)
+			local ok, res = RemoteFailSafe.invokeFunction("GetLeaderboard", statForFetch)
 			if myRefresh ~= refreshId then return end
 			clearRows()
-			if not ok or type(rows) ~= "table" then
-				setStatus("Couldn't load.", Color3.fromRGB(255, 130, 130)); return
+
+			local rows: { any }
+			local resolvedUpdatedAt: number? = nil
+			local staleFlag = false
+
+			if ok and type(res) == "table" then
+				if res.ok == false then
+					if res.reason == "rate_limit" and lastRowsSnapshot and lastSnapshotStat == statForFetch then
+						rows = lastRowsSnapshot :: { any }
+						resolvedUpdatedAt = lastUpdatedAtUnix
+						staleFlag = true
+						lastStaleFooter = true
+					elseif res.reason == "rate_limit" then
+						RemoteFailSafe.notifyRemoteFailure("GetLeaderboard")
+						setStatus(pickRandom(MicrocopyConfig.LeaderboardRateLimitNoCache), Color3.fromRGB(255, 130, 130))
+						return
+					else
+						RemoteFailSafe.notifyRemoteFailure("GetLeaderboard")
+						setStatus(pickRandom(MicrocopyConfig.LeaderboardLoadError), Color3.fromRGB(255, 130, 130))
+						return
+					end
+				elseif res.ok == true and type(res.rows) == "table" then
+					rows = res.rows
+					resolvedUpdatedAt = if type(res.updatedAt) == "number" then res.updatedAt else nil
+					staleFlag = res.stale == true
+					lastRowsSnapshot = rows
+					lastSnapshotStat = statForFetch
+					lastUpdatedAtUnix = resolvedUpdatedAt
+					lastStaleFooter = staleFlag
+				elseif res.ok == nil and res.rows == nil then
+					rows = res :: { any }
+					lastRowsSnapshot = rows
+					lastSnapshotStat = statForFetch
+					lastUpdatedAtUnix = nil
+					lastStaleFooter = false
+					resolvedUpdatedAt = nil
+				else
+					rows = {}
+				end
+			else
+				RemoteFailSafe.notifyRemoteFailure("GetLeaderboard")
+				setStatus(pickRandom(MicrocopyConfig.LeaderboardLoadError), Color3.fromRGB(255, 130, 130)); return
 			end
+
+			if resolvedUpdatedAt and footerLabel then
+				lastUpdatedAtUnix = resolvedUpdatedAt
+				lastStaleFooter = staleFlag
+				footerLabel.Text = formatFooterAge(resolvedUpdatedAt, staleFlag)
+				footerLabel.Visible = true
+				scheduleFooterAgeLoop()
+			elseif footerLabel and lastUpdatedAtUnix then
+				footerLabel.Text = formatFooterAge(lastUpdatedAtUnix, lastStaleFooter)
+				footerLabel.Visible = true
+				scheduleFooterAgeLoop()
+			elseif footerLabel then
+				footerLabel.Visible = false
+			end
+
 			if #rows == 0 then
-				local hint = if statForFetch == STAT_DISTANCE then "No rankings yet." else "No rebirth rankings yet."
-				setStatus(hint, Color3.fromRGB(150, 160, 190)); return
+				local pool = if statForFetch == STAT_DISTANCE
+					then LeaderboardTextConfig.EmptyDistance
+					else LeaderboardTextConfig.EmptyRebirths
+				local pair = pickRandomEmpty(pool)
+				if statusLabel then
+					statusLabel.TextWrapped = true
+				end
+				setStatus(formatEmptyStatus(pair), Color3.fromRGB(150, 160, 190)); return
 			end
 			hideStatus()
 
@@ -148,6 +456,11 @@ function LeaderboardPanel.init()
 			local myRank: number? = nil
 			local myValue: number? = nil
 			local oldRank = previousRanks[statForFetch]
+			local rankPulseRow: Frame? = nil
+			local rankPulseGlyph: TextLabel? = nil
+			local rankPulseBaseBg: Color3? = nil
+			local rankPulseBaseTrans: number? = nil
+			local rankPulseImproved: boolean? = nil
 			for i, entry in ipairs(rows) do
 				if type(entry) ~= "table" then continue end
 				local userId = tonumber(entry.userId) or 0
@@ -166,14 +479,55 @@ function LeaderboardPanel.init()
 				row.BorderSizePixel = 0; row.LayoutOrder = rank; row.Parent = scroll
 				local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 8); rc.Parent = row
 
+				if rank <= 3 then
+					local glow = Instance.new("UIStroke")
+					glow.Name = "PodiumGlow"
+					glow.Color = rankColor(rank)
+					glow.Thickness = 3.2
+					glow.Transparency = 0.52
+					glow.Parent = row
+					local ring = Instance.new("UIStroke")
+					ring.Name = "PodiumRing"
+					ring.Color = rankColor(rank)
+					ring.Thickness = 2
+					ring.Transparency = 0.18
+					ring.Parent = row
+				end
+
 				if isSelf then
-					local stroke = Instance.new("UIStroke"); stroke.Parent = row
-					if rank == 1 then
-						stroke.Color = GOLD; stroke.Thickness = 2.5; stroke.Transparency = 0
+					local stroke = Instance.new("UIStroke")
+					stroke.Name = "SelfHighlight"
+					stroke.Parent = row
+					if rank <= 3 then
+						stroke.Color = Color3.fromRGB(130, 220, 255)
+						stroke.Thickness = 1.6
+						stroke.Transparency = 0.12
 					elseif rank <= 10 then
-						stroke.Color = GOLD; stroke.Thickness = 2; stroke.Transparency = 0.2
+						stroke.Color = GOLD
+						stroke.Thickness = 2
+						stroke.Transparency = 0.2
 					else
-						stroke.Color = Color3.fromRGB(120, 200, 140); stroke.Thickness = 2; stroke.Transparency = 0.2
+						stroke.Color = Color3.fromRGB(120, 200, 140)
+						stroke.Thickness = 2
+						stroke.Transparency = 0.2
+					end
+
+					rankPulseRow = row
+					rankPulseBaseBg = row.BackgroundColor3
+					rankPulseBaseTrans = row.BackgroundTransparency
+					if oldRank ~= nil and oldRank ~= rank then
+						rankPulseImproved = oldRank > rank
+						local g = Instance.new("TextLabel")
+						g.Name = "RankDeltaGlyph"
+						g.Size = UDim2.new(0, 18, 0, 18)
+						g.Position = UDim2.new(0, 50, 0, 2)
+						g.BackgroundTransparency = 1
+						g.Font = Enum.Font.GothamBold
+						g.TextSize = 13
+						g.Text = ""
+						g.TextTransparency = 1
+						g.Parent = row
+						rankPulseGlyph = g
 					end
 				end
 
@@ -213,6 +567,22 @@ function LeaderboardPanel.init()
 
 			if myRank then previousRanks[statForFetch] = myRank end
 
+			if
+				rankPulseRow
+				and rankPulseImproved ~= nil
+				and rankPulseBaseBg ~= nil
+				and rankPulseBaseTrans ~= nil
+			then
+				playRowRankDeltaPulse(
+					rankPulseRow,
+					rankPulseImproved,
+					rankPulseBaseBg,
+					rankPulseBaseTrans,
+					rankPulseGlyph
+				)
+				playBoardRefreshPulse()
+			end
+
 			if not motivationLabel then return end
 			if myRank == nil or myValue == nil then hideMotivation()
 			elseif myRank == 1 then
@@ -241,20 +611,36 @@ function LeaderboardPanel.init()
 		end)
 	end
 
+	refreshBtn.MouseButton1Click:Connect(function()
+		refresh()
+	end)
+
+	-- Server pushes rank changes on leaderboard updates; refresh this tab so juice is not up to 30s stale.
+	Remotes.getEvent("RankUpNotification").OnClientEvent:Connect(function(data: any)
+		if type(data) ~= "table" then
+			return
+		end
+		if data.stat ~= currentStat then
+			return
+		end
+		task.defer(refresh)
+	end)
+
 	local function mkTab(id: string, label: string)
 		local b = Instance.new("TextButton")
-		b.Name = id; b.Size = UDim2.new(0, 140, 0, 28)
+		b.Name = id; b.Size = UDim2.new(0, 140, 0, 44)
 		b.BackgroundColor3 = Color3.fromRGB(45, 45, 70); b.Text = label
 		b.TextColor3 = Color3.fromRGB(180, 180, 200); b.Font = Enum.Font.GothamBold
 		b.TextSize = 14; b.AutoButtonColor = true; b.Parent = tabRow
 		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = b
+		MenuInputAccessibility.applyPrimaryNavDefaults(b)
 		tabButtons[id] = b
 		b.MouseButton1Click:Connect(function()
 			currentStat = id; setTabVisual(id); refresh()
 		end)
 	end
 
-	mkTab(STAT_DISTANCE, "Distance"); mkTab(STAT_REBIRTHS, "Rebirths")
+	mkTab(STAT_DISTANCE, LeaderboardTextConfig.TabDistanceLabel); mkTab(STAT_REBIRTHS, LeaderboardTextConfig.TabRebirthsLabel)
 	setTabVisual(STAT_DISTANCE)
 
 	refresh()

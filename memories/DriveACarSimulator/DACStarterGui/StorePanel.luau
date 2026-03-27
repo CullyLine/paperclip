@@ -18,7 +18,9 @@ local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePass
 local DevProductConfig = require(DAC:WaitForChild("Config"):WaitForChild("DevProductConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local Utils = require(DAC:WaitForChild("Utils"))
+local Constants = require(DAC:WaitForChild("Constants"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
 local FailureFeedback = require(DAC:WaitForChild("FailureFeedback"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
@@ -27,33 +29,36 @@ local localPlayer = Players.LocalPlayer
 local UIHelpers = require(script.Parent:WaitForChild("UIHelpers"))
 local MenuHub = require(script.Parent:WaitForChild("MenuHub"))
 local SocialFeedConfig = require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
+local ClientRemoteDebounce = require(DAC:WaitForChild("ClientRemoteDebounce"))
 local FomoBadgeLabelConfig = require(DAC:WaitForChild("Config"):WaitForChild("FomoBadgeLabelConfig"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
+local IapPromptGuard = require(DAC:WaitForChild("IapPromptGuard"))
 
 local StorePanel = {}
 
 type FomoKind = "hot" | "low_stock" | "best_value" | "premium" | "event_expiring"
 
-local function socialProofHotLine(): string local n = math.random(8, 55); return SocialFeedConfig.pickLine("SocialProofStore"):gsub("{n}", tostring(n)) end
-local function limitedStockLine(): string return SocialFeedConfig.pickLine("LimitedStock") end
+local function socialProofHotLine(): string return SocialFeedConfig.pickLine("SocialProofStore") end
 local function truncate(s: string, maxLen: number): string if #s <= maxLen then return s end; return string.sub(s, 1, maxLen - 1) .. "\u{2026}" end
 local function formatTimeLeft(sec: number): string
 	sec = math.max(0, math.floor(sec)); local d = math.floor(sec / 86400); local h = math.floor((sec % 86400) / 3600); local m = math.floor((sec % 3600) / 60)
 	if d > 0 then return `{d}d {h}h` elseif h > 0 then return `{h}h {m}m` else return `{math.max(1, m)}m` end
 end
-local function randomPermanentBadgeLabel(): string
-	local keys: { string } = {}; for k in FomoBadgeLabelConfig.PermanentBadges do table.insert(keys, k) end
-	if #keys == 0 then return "BEST VALUE" end; local def = FomoBadgeLabelConfig.PermanentBadges[keys[math.random(1, #keys)]]; return if def then def.label else "BEST VALUE"
+local function bestValueGemsBadgeLine(): string
+	return FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.BestValueGemsCopy)
 end
 local function randomEventBadgeLabel(): string
 	local keys: { string } = {}; for k in FomoBadgeLabelConfig.EventBadgeLabels do table.insert(keys, k) end
-	if #keys == 0 then return "VIP" end; local def = FomoBadgeLabelConfig.EventBadgeLabels[keys[math.random(1, #keys)]]; return if def then def.label else "VIP"
+	if #keys == 0 then return MicrocopyConfig.StoreFomoBadgeFallbackVip end
+	local def = FomoBadgeLabelConfig.EventBadgeLabels[keys[math.random(1, #keys)]]
+	return if def then def.label else MicrocopyConfig.StoreFomoBadgeFallbackVip
 end
-local function almostEarnedBadgeLine(): string return FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.AlmostEarned):gsub("{BADGE}", "BONUS"):gsub("{PERCENT}", tostring(math.random(82, 97))) end
+local function almostEarnedBadgeLine(): string
+	return FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.AlmostEarnedStore):gsub("{BADGE}", "BONUS")
+end
 local function socialProofBadgeLine(): string return FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.SocialProofInspect):gsub("{PLAYER}", localPlayer.DisplayName):gsub("{BADGE}", "ELITE") end
 local function bestGemsProductId(): string?
-	local bestId: string? = nil; local bestRatio = 0.0
-	for pid, def in DevProductConfig.Products do local r = def.reward; if type(r) == "table" and r.currency == "gems" and type(r.amount) == "number" and def.robuxPrice > 0 then local ratio = (r.amount :: number) / def.robuxPrice; if ratio > bestRatio then bestRatio = ratio; bestId = pid end end end
-	return bestId
+	return nil
 end
 
 local function clearFomoBadge(row: Frame) local b = row:FindFirstChild("FomoBadge"); if b then b:Destroy() end end
@@ -67,13 +72,13 @@ local function createFomoBadge(row: Frame, kind: FomoKind, copy: string)
 	local icon = Instance.new("TextLabel"); icon.BackgroundTransparency=1; icon.Size=UDim2.fromOffset(18,22); icon.Font=Enum.Font.GothamBold; icon.TextSize=12; icon.LayoutOrder=1; icon.Parent=badge
 	local label = Instance.new("TextLabel"); label.BackgroundTransparency=1; label.AutomaticSize=Enum.AutomaticSize.XY; label.Size=UDim2.fromOffset(0,0); label.Font=Enum.Font.GothamBold; label.TextSize=9; label.TextWrapped=true; label.TextXAlignment=Enum.TextXAlignment.Left; label.RichText=false; label.LayoutOrder=2; label.Parent=badge
 	local sizeC = Instance.new("UISizeConstraint"); sizeC.MaxSize=Vector2.new(132,48); sizeC.Parent=label
-	local corner = Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,6); corner.Parent=badge
+	local corner = Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,8); corner.Parent=badge
 	local stroke = Instance.new("UIStroke"); stroke.Thickness=1; stroke.Transparency=0.3; stroke.Parent=badge
 	local grad = Instance.new("UIGradient"); grad.Parent=badge
 	if kind == "hot" then badge.BackgroundColor3=Color3.fromRGB(200,40,30); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(220,50,20)),ColorSequenceKeypoint.new(0.5,Color3.fromRGB(255,100,30)),ColorSequenceKeypoint.new(1,Color3.fromRGB(220,50,20))}); stroke.Color=Color3.fromRGB(255,120,40); icon.Text="\u{1F525}"; icon.TextSize=13; label.TextColor3=Color3.new(1,1,1); label.Text=truncate(copy,48)
-	elseif kind == "low_stock" then badge.BackgroundColor3=Color3.fromRGB(180,100,20); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(200,120,30)),ColorSequenceKeypoint.new(1,Color3.fromRGB(180,90,15))}); stroke.Color=Color3.fromRGB(240,160,40); icon.Text="\u{26A0}\u{FE0F}"; label.TextColor3=Color3.fromRGB(255,240,200); label.Text=truncate(copy,36)
+	elseif kind == "low_stock" then badge.BackgroundColor3=Color3.fromRGB(180,100,20); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(200,120,30)),ColorSequenceKeypoint.new(1,Color3.fromRGB(180,90,15))}); stroke.Color=Color3.fromRGB(240,160,40); icon.Text="\u{26A0}\u{FE0F}"; label.TextColor3=Color3.new(1,1,1); label.Text=truncate(copy,36)
 	elseif kind == "best_value" then badge.BackgroundColor3=Color3.fromRGB(30,150,60); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(35,170,70)),ColorSequenceKeypoint.new(1,Color3.fromRGB(25,130,50))}); stroke.Color=Color3.fromRGB(80,220,110); icon.Text="\u{2B50}"; icon.TextSize=12; label.TextColor3=Color3.new(1,1,1); label.Text=truncate(copy,48)
-	elseif kind == "premium" then badge.BackgroundColor3=Color3.fromRGB(160,120,20); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(180,140,30)),ColorSequenceKeypoint.new(0.5,Color3.fromRGB(220,180,60)),ColorSequenceKeypoint.new(1,Color3.fromRGB(180,140,30))}); stroke.Color=Color3.fromRGB(255,220,100); icon.Text="\u{1F48E}"; label.TextColor3=Color3.fromRGB(255,240,200); label.Text=truncate(copy,40)
+	elseif kind == "premium" then badge.BackgroundColor3=Color3.fromRGB(160,120,20); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(180,140,30)),ColorSequenceKeypoint.new(0.5,Color3.fromRGB(220,180,60)),ColorSequenceKeypoint.new(1,Color3.fromRGB(180,140,30))}); stroke.Color=Color3.fromRGB(255,220,100); icon.Text="\u{1F48E}"; label.TextColor3=Color3.new(1,1,1); label.Text=truncate(copy,40)
 	elseif kind == "event_expiring" then badge.BackgroundColor3=Color3.fromRGB(210,45,25); grad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(255,85,35)),ColorSequenceKeypoint.new(0.45,Color3.fromRGB(255,170,55)),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,20))}); stroke.Color=Color3.fromRGB(255,150,70); icon.Text="\u{23F3}"; icon.TextSize=13; label.TextColor3=Color3.fromRGB(255,240,220); label.Text=truncate(copy,56) end
 	badge.Parent = row
 end
@@ -86,22 +91,66 @@ local function flashRowGreen(row: Frame)
 end
 local function showOwnedBadge(row: Frame)
 	local existing = row:FindFirstChild("OwnedBadge"); if existing then existing:Destroy() end
-	local badge = Instance.new("TextLabel"); badge.Name="OwnedBadge"; badge.AnchorPoint=Vector2.new(1,0.5); badge.Position=UDim2.new(0.68,0,0.5,0); badge.Size=UDim2.new(0,70,0,22); badge.BackgroundColor3=Color3.fromRGB(40,180,80); badge.BackgroundTransparency=0.1; badge.Font=Enum.Font.GothamBold; badge.TextSize=12; badge.TextColor3=Color3.new(1,1,1); badge.Text="OWNED!"; badge.ZIndex=5; badge.Parent=row
-	local corner = Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,6); corner.Parent=badge
+	local badge = Instance.new("TextLabel"); badge.Name="OwnedBadge"; badge.AnchorPoint=Vector2.new(1,0.5); badge.Position=UDim2.new(0.68,0,0.5,0); badge.Size=UDim2.new(0,70,0,22); badge.BackgroundColor3=Color3.fromRGB(40,180,80); badge.BackgroundTransparency=0.1; badge.Font=Enum.Font.GothamBold; badge.TextSize=12; badge.TextColor3=Color3.new(1,1,1); badge.Text=MicrocopyConfig.StoreOwnedBadge; badge.ZIndex=5; badge.Parent=row
+	local corner = Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,8); corner.Parent=badge
 	local s = Instance.new("UIScale"); s.Scale=0; s.Parent=badge; TweenService:Create(s, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale=1 }):Play()
 end
 local function transitionBuyButton(btn: TextButton)
-	btn.Text = "YOURS!"; local s = btn:FindFirstChildOfClass("UIScale"); if not s then s = Instance.new("UIScale"); s.Parent = btn end; s.Scale = 1
+	btn.Text = MicrocopyConfig.StoreBuyButtonYours; local s = btn:FindFirstChildOfClass("UIScale"); if not s then s = Instance.new("UIScale"); s.Parent = btn end; s.Scale = 1
 	TweenService:Create(s, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale=1.15 }):Play()
 	task.delay(0.1, function() if btn.Parent then TweenService:Create(s, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale=1 }):Play() end end)
-	task.delay(0.5, function() if btn.Parent then btn.Text = "Owned"; btn.AutoButtonColor = false; btn.BackgroundColor3 = Color3.fromRGB(100,100,100) end end)
+	task.delay(0.5, function() if btn.Parent then btn.Text = MicrocopyConfig.StoreBuyButtonOwnedIdle; btn.AutoButtonColor = false; btn.BackgroundColor3 = Color3.fromRGB(100,100,100) end end)
 end
 
 function StorePanel.init()
 	local sg = MenuHub.getScreenGui()
 	local root = sg:WaitForChild("Store") :: Frame
+	local teardownConns: { RBXScriptConnection } = {}
 
 	local scroll = root:WaitForChild("Scroll") :: ScrollingFrame
+
+	-- Tab switching --
+	local tabBar = root:WaitForChild("TabBar") :: Frame
+	local content = root:WaitForChild("Content") :: Frame
+	local placeholder = tabBar:FindFirstChild("__Placeholder__")
+	if placeholder then placeholder.Visible = false end
+
+	local TAB_ACTIVE_COLOR = Color3.fromRGB(255, 255, 255)
+	local TAB_INACTIVE_COLOR = Color3.fromRGB(100, 100, 110)
+
+	local gemsContent = content:FindFirstChild("Gems")
+	if gemsContent then (gemsContent :: GuiObject).Visible = false end
+	local gemsTabBtn = tabBar:FindFirstChild("Gems")
+	if gemsTabBtn then (gemsTabBtn :: GuiObject).Visible = false end
+	local tabContentMap: { [string]: GuiObject } = {
+		Cars = content:FindFirstChild("Cosmetics") :: GuiObject,
+		Exclusives = content:FindFirstChild("Exclusives") :: GuiObject,
+		Other = scroll,
+	}
+
+	local function switchTab(tabName: string)
+		for name, container in tabContentMap do
+			if container then container.Visible = (name == tabName) end
+		end
+		for _, child in tabBar:GetChildren() do
+			if child:IsA("ImageButton") and child.Visible then
+				child.ImageColor3 = if child.Name == tabName then TAB_ACTIVE_COLOR else TAB_INACTIVE_COLOR
+			end
+		end
+	end
+
+	for tabName, _ in tabContentMap do
+		local btn = tabBar:FindFirstChild(tabName)
+		if btn and btn:IsA("ImageButton") then
+			btn.MouseButton1Click:Connect(function()
+				SoundFacade.playOneShot("click")
+				switchTab(tabName)
+			end)
+		end
+	end
+
+	switchTab("Exclusives")
+	-- End tab switching --
 
 	local rowByKey: { [string]: Frame } = {}
 	local fomoAnimConn: RBXScriptConnection? = nil
@@ -130,11 +179,11 @@ function StorePanel.init()
 		local nowClock = os.time(); local bestGems = bestGemsProductId(); local assignment: { [string]: { kind: FomoKind, text: string } } = {}
 		for pid, def in DevProductConfig.Products do
 			local expAt = (def :: any).eventBadgeExpiresAt; local badgeName = (def :: any).eventBadgeLabel
-			if type(expAt) == "number" and nowClock < expAt then local k = "dev:"..pid; if rowByKey[k] then local nameStr = if type(badgeName) == "string" and badgeName ~= "" then badgeName else "EVENT"; assignment[k] = { kind = "event_expiring", text = FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.EventExpiring):gsub("{BADGE}", nameStr):gsub("{TIME}", formatTimeLeft(expAt - nowClock)) } end end
+			if type(expAt) == "number" and nowClock < expAt then local k = "dev:"..pid; if rowByKey[k] then local nameStr = if type(badgeName) == "string" and badgeName ~= "" then badgeName else MicrocopyConfig.StoreFomoBadgeFallbackEvent; assignment[k] = { kind = "event_expiring", text = FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.EventExpiring):gsub("{BADGE}", nameStr):gsub("{TIME}", formatTimeLeft(expAt - nowClock)) } end end
 		end
-		if bestGems then local k = "dev:"..bestGems; if rowByKey[k] and not assignment[k] then assignment[k] = { kind = "best_value", text = randomPermanentBadgeLabel() } end end
+		if bestGems then local k = "dev:"..bestGems; if rowByKey[k] and not assignment[k] then assignment[k] = { kind = "best_value", text = bestValueGemsBadgeLine() } end end
 		local vipKey = "pass:vip"; if rowByKey[vipKey] and not assignment[vipKey] then assignment[vipKey] = { kind = "premium", text = randomEventBadgeLabel() } end
-		for _, lk in { "dev:crystals_pack_l", "dev:battle_pass_premium" } do if rowByKey[lk] and not assignment[lk] then assignment[lk] = { kind = "low_stock", text = almostEarnedBadgeLine() } end end
+		for _, lk in { "dev:battle_pass_premium" } do if rowByKey[lk] and not assignment[lk] then assignment[lk] = { kind = "low_stock", text = almostEarnedBadgeLine() } end end
 		local pool: { string } = {}; for k in rowByKey do if not assignment[k] then table.insert(pool, k) end end
 		for i = #pool, 2, -1 do local j = math.random(1, i); pool[i], pool[j] = pool[j], pool[i] end
 		local hotCount = math.min(math.random(2, 3), #pool); for i = 1, hotCount do local k = pool[i]; if rowByKey[k] then assignment[k] = { kind = "hot", text = socialProofBadgeLine() } end end
@@ -143,16 +192,24 @@ function StorePanel.init()
 	end
 
 	local function addHeader(text: string, layoutOrder: number?)
-		local h = Instance.new("TextLabel"); h.Size=UDim2.new(1,0,0,28); h.BackgroundTransparency=1; h.Font=Enum.Font.GothamBold; h.TextSize=18; h.TextColor3=Color3.fromRGB(255,213,79); h.TextXAlignment=Enum.TextXAlignment.Left; h.Text=text; h.LayoutOrder=layoutOrder or -100; h.Parent=scroll
+		local h = Instance.new("TextLabel"); h.Size=UDim2.new(1,0,0,28); h.BackgroundTransparency=1; h.Font=Enum.Font.GothamBold; h.TextSize=18; h.TextColor3=Constants.UI_TEXT_ON_LIGHT.SectionHeader; h.TextXAlignment=Enum.TextXAlignment.Left; h.Text=text; h.LayoutOrder=layoutOrder or -100; h.Parent=scroll
 	end
 
-	addHeader("Car upgrades (equipped car)", -220)
+	addHeader(MicrocopyConfig.StoreSectionCarUpgrades, -220)
 	local upgradeLabels: { [string]: TextLabel } = {}; local upgradeBars: { [string]: Frame } = {}; local upgradeStatsTable = UpgradeConfig.Stats
+
+	local function fetchPlayerData(): any?
+		local ok, data = RemoteFailSafe.invokeGetPlayerData()
+		if not ok then
+			return nil
+		end
+		return data
+	end
 
 	local function refreshUpgrades()
 		if type(upgradeStatsTable) ~= "table" then return end
-		local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-		if type(data) ~= "table" or not data.equippedCar then return end
+		local data = fetchPlayerData()
+		if not data or not data.equippedCar then return end
 		local carId = data.equippedCar; local owned = data.cars and data.cars[carId]; if not owned then return end
 		for _, stat in { "gas", "power", "speed" } do
 			local statConfig = upgradeStatsTable[stat]; if not statConfig then continue end
@@ -162,8 +219,24 @@ function StorePanel.init()
 		end
 	end
 
+	local lastStoreIapFire = { 0 }
+	local lastUpgradeStatFire = { 0 }
 	local pendingUpgradeStat: string? = nil; local pendingLevelBefore: number? = nil; local pendingCarBuyId: string? = nil; local lastActionButton: TextButton? = nil; local lastActionAt = 0.0
 	local carBuyRows: { [string]: Frame } = {}; local carBuyButtons: { [string]: TextButton } = {}; local gamePassRows: { [string]: Frame } = {}; local devProductRows: { [string]: Frame } = {}
+	local iapBuyButtons: { TextButton } = {}
+	local function applyIapBuyButtonState()
+		local pend = IapPromptGuard.isPending()
+		for _, b in iapBuyButtons do
+			if b:GetAttribute("DAC_IapPlaceholder") == true then
+				b.Active = false
+			else
+				b.Active = not pend
+			end
+		end
+	end
+	local iapUnsub = IapPromptGuard.subscribe(function()
+		applyIapBuyButtonState()
+	end)
 
 	local upLayout = -219
 	for _, stat in { "gas", "power", "speed" } do
@@ -175,24 +248,38 @@ function StorePanel.init()
 		local barCorner = Instance.new("UICorner"); barCorner.CornerRadius=UDim.new(0.5,0); barCorner.Parent=barBg
 		local barFill = Instance.new("Frame"); barFill.Name="Fill"; barFill.Size=UDim2.new(0,0,1,0); barFill.BackgroundColor3=Color3.fromRGB(255,152,0); barFill.BorderSizePixel=0; barFill.ZIndex=3; barFill.Parent=barBg
 		local fillCorner = Instance.new("UICorner"); fillCorner.CornerRadius=UDim.new(0.5,0); fillCorner.Parent=barFill; upgradeBars[stat]=barFill
-		local btn = Instance.new("TextButton"); btn.Size=UDim2.new(0.32,0,0,34); btn.Position=UDim2.new(0.65,0,0.5,-17); btn.BackgroundColor3=Color3.fromRGB(255,152,0); btn.TextColor3=Color3.fromRGB(30,30,30); btn.Font=Enum.Font.GothamBold; btn.Text="Upgrade"; btn.Parent=row
+		local btn = Instance.new("TextButton"); btn.Size=UDim2.new(0.32,0,0,34); btn.Position=UDim2.new(0.65,0,0.5,-17); btn.BackgroundColor3=Color3.fromRGB(255,152,0); btn.TextColor3=Color3.fromRGB(30,30,30); btn.Font=Enum.Font.GothamBold; btn.Text=MicrocopyConfig.StoreUpgradeButton; btn.Parent=row
 		if stat == "speed" then btn.Name = "TutorialUpgradeSpeed" end
 		btn.MouseButton1Click:Connect(function()
-			lastActionButton = btn; lastActionAt = tick(); SoundFacade.playOneShot("click")
-			local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-			if type(data) == "table" and type(data.equippedCar) == "string" then
+			if not ClientRemoteDebounce.allow(lastUpgradeStatFire) then
+				return
+			end
+			lastActionButton = btn; lastActionAt = os.clock(); SoundFacade.playOneShot("click")
+			local data = fetchPlayerData()
+			if data and type(data.equippedCar) == "string" then
 				local cid = data.equippedCar; local ow = data.cars and data.cars[cid]; local lvlBefore = if type(ow) == "table" then (ow[stat.."Level"] :: any) or 0 else 0; if type(lvlBefore) ~= "number" then lvlBefore = 0 end
-				pendingUpgradeStat = stat; pendingLevelBefore = lvlBefore; Remotes.getEvent("UpgradeStat"):FireServer(cid, stat)
-				task.delay(3, function() if pendingUpgradeStat == stat then pulseButtonError(btn); pendingUpgradeStat = nil; pendingLevelBefore = nil end end)
+				pendingUpgradeStat = stat; pendingLevelBefore = lvlBefore
+				if not RemoteFailSafe.fireEvent("STORE", "UpgradeStat", cid, stat) then
+					pendingUpgradeStat = nil
+					pendingLevelBefore = nil
+				else
+					task.delay(3, function()
+						if pendingUpgradeStat == stat then
+							pulseButtonError(btn)
+							pendingUpgradeStat = nil
+							pendingLevelBefore = nil
+						end
+					end)
+				end
 			end
 		end)
 	end
 
 	refreshUpgrades()
-	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function()
+	table.insert(teardownConns, Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function()
 		if pendingUpgradeStat and pendingLevelBefore ~= nil then
-			local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-			if type(data) == "table" and type(data.equippedCar) == "string" then
+			local data = fetchPlayerData()
+			if data and type(data.equippedCar) == "string" then
 				local owned = data.cars and data.cars[data.equippedCar]
 				if type(owned) == "table" then
 					local lvl = (owned[pendingUpgradeStat.."Level"] :: any) or 0
@@ -208,50 +295,127 @@ function StorePanel.init()
 			end
 		end
 		if pendingCarBuyId then
-			local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
-			if type(data) == "table" and type(data.cars) == "table" and type(data.cars[pendingCarBuyId]) == "table" then
+			local data = fetchPlayerData()
+			if data and type(data.cars) == "table" and type(data.cars[pendingCarBuyId]) == "table" then
 				VFXFacade.purchaseCelebration("car", nil, pendingCarBuyId); local r = carBuyRows[pendingCarBuyId]; if r then flashRowGreen(r) end; local bb = carBuyButtons[pendingCarBuyId]; if bb and bb.Parent then transitionBuyButton(bb) end; pendingCarBuyId = nil
 			end
 		end
 		if root.Visible then refreshUpgrades() end
 		if refreshBadgeWall then refreshBadgeWall() end
-	end)
+	end))
 
-	local order = 0; addHeader("Cars (soft currency)")
+	local order = 0; addHeader(MicrocopyConfig.StoreSectionCarsSoftCurrency)
 	for carId, def in CarConfig.Cars do
 		if def.price <= 0 then continue end; order += 1
 		local row = Instance.new("Frame"); row.Size=UDim2.new(1,-12,0,52); row.BackgroundColor3=Color3.fromRGB(40,40,70); row.LayoutOrder=order; row.Parent=scroll
 		local c = Instance.new("UICorner"); c.CornerRadius=UDim.new(0,8); c.Parent=row
 		local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(0.65,0,1,0); lbl.Position=UDim2.new(0,8,0,0); lbl.BackgroundTransparency=1; lbl.Font=Enum.Font.Gotham; lbl.TextSize=14; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.TextColor3=Color3.new(1,1,1); lbl.Text=`{def.name}  \u{2022}  {Utils.formatNumber(def.price)} {def.currency}  ({def.worldId})`; lbl.Parent=row
-		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.28,0,0,36); buy.Position=UDim2.new(0.7,0,0.5,-18); buy.BackgroundColor3=Color3.fromRGB(255,193,7); buy.Text="Buy"; buy.TextColor3=Color3.fromRGB(30,30,30); buy.Font=Enum.Font.GothamBold; buy.Parent=row
+		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.28,0,0,36); buy.Position=UDim2.new(0.7,0,0.5,-18); buy.BackgroundColor3=Color3.fromRGB(255,193,7); buy.Text=MicrocopyConfig.StoreBuyButton; buy.TextColor3=Color3.fromRGB(30,30,30); buy.Font=Enum.Font.GothamBold; buy.Parent=row
 		carBuyRows[carId]=row; carBuyButtons[carId]=buy; rowByKey["car:"..carId]=row
-		buy.MouseButton1Click:Connect(function() lastActionButton=buy; lastActionAt=tick(); SoundFacade.playOneShot("click"); pendingCarBuyId=carId; Remotes.getEvent("BuyCar"):FireServer(carId); task.delay(3, function() if pendingCarBuyId==carId then pulseButtonError(buy); pendingCarBuyId=nil end end) end)
+		buy.MouseButton1Click:Connect(function()
+			lastActionButton = buy
+			lastActionAt = os.clock()
+			SoundFacade.playOneShot("click")
+			pendingCarBuyId = carId
+			if not RemoteFailSafe.fireEvent("STORE", "BuyCar", carId) then
+				pendingCarBuyId = nil
+			else
+				task.delay(3, function()
+					if pendingCarBuyId == carId then
+						pulseButtonError(buy)
+						pendingCarBuyId = nil
+					end
+				end)
+			end
+		end)
 	end
 
-	addHeader("Game Passes")
+	addHeader(MicrocopyConfig.StoreSectionGamePasses)
 	for passId, def in GamePassConfig.Passes do
 		order += 1
 		local row = Instance.new("Frame"); row.Size=UDim2.new(1,-12,0,78); row.BackgroundColor3=Color3.fromRGB(36,50,80); row.LayoutOrder=order; row.Parent=scroll
 		local c = Instance.new("UICorner"); c.CornerRadius=UDim.new(0,8); c.Parent=row
-		local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(0.7,0,0.48,0); lbl.Position=UDim2.new(0,8,0,6); lbl.BackgroundTransparency=1; lbl.Font=Enum.Font.Gotham; lbl.TextSize=13; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.TextYAlignment=Enum.TextYAlignment.Top; lbl.TextColor3=Color3.new(1,1,1); lbl.TextWrapped=true; lbl.Text=def.name .. " \u{2014} " .. tostring(def.robuxPrice) .. "R\n" .. (def.description or ""); lbl.Parent=row
+		local gpText = def.name .. " \u{2014} " .. tostring(def.robuxPrice) .. "R\n" .. (def.description or "")
+		if def.gamePassId == 0 and RunService:IsStudio() then
+			gpText = gpText .. "\n[DEV] gamePassId is 0 — link in Creator Dashboard"
+		end
+		local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(0.7,0,0.48,0); lbl.Position=UDim2.new(0,8,0,6); lbl.BackgroundTransparency=1; lbl.Font=Enum.Font.Gotham; lbl.TextSize=13; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.TextYAlignment=Enum.TextYAlignment.Top; lbl.TextColor3=Color3.new(1,1,1); lbl.TextWrapped=true; lbl.Text=gpText; lbl.Parent=row
 		local upsell = Instance.new("TextLabel"); upsell.Name="PremiumUpsell"; upsell.Size=UDim2.new(0.68,0,0.42,0); upsell.Position=UDim2.new(0,8,0.52,0); upsell.BackgroundTransparency=1; upsell.Font=Enum.Font.Gotham; upsell.TextSize=11; upsell.TextXAlignment=Enum.TextXAlignment.Left; upsell.TextYAlignment=Enum.TextYAlignment.Top; upsell.TextColor3=Color3.fromRGB(190,210,255); upsell.TextWrapped=true; upsell.TextTransparency=0.08; upsell.Text=SocialFeedConfig.pickLine("PremiumUpsell"); upsell.Parent=row
-		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.22,0,0,32); buy.Position=UDim2.new(0.76,0,0.5,-16); buy.BackgroundColor3=Color3.fromRGB(100,180,255); buy.Text="Robux"; buy.TextColor3=Color3.new(1,1,1); buy.Font=Enum.Font.GothamBold; buy.Parent=row
+		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.22,0,0,32); buy.Position=UDim2.new(0.76,0,0.5,-16); buy.BackgroundColor3=Color3.fromRGB(100,180,255); buy.Text=MicrocopyConfig.StoreBuyButton; buy.TextColor3=Color3.new(1,1,1); buy.Font=Enum.Font.GothamBold; buy.Parent=row
+		if def.gamePassId == 0 then
+			buy:SetAttribute("DAC_IapPlaceholder", true)
+			buy.Text = MicrocopyConfig.IapBuyNotLinked
+			buy.Active = false
+			buy.BackgroundColor3 = Color3.fromRGB(95, 95, 100)
+		else
+			buy:SetAttribute("DAC_IapPlaceholder", false)
+		end
 		gamePassRows[passId]=row; rowByKey["pass:"..passId]=row
-		buy.MouseButton1Click:Connect(function() SoundFacade.playOneShot("purchase"); Remotes.getEvent("PurchaseGamePass"):FireServer(passId) end)
+		table.insert(iapBuyButtons, buy)
+		local function onGamePassBuy()
+			if IapPromptGuard.isPending() then
+				return
+			end
+			if not ClientRemoteDebounce.allow(lastStoreIapFire, ClientRemoteDebounce.IAP_PROMPT_COOLDOWN_SEC) then
+				local uc = MenuHub.getUIController()
+				if uc and uc.showNotification then
+					uc.showNotification({
+						type = "info",
+						message = MicrocopyConfig.pickVariant(MicrocopyConfig.IapPurchasePromptBusy),
+					})
+				end
+				return
+			end
+			SoundFacade.playOneShot("purchase")
+			RemoteFailSafe.fireEvent("STORE", "PurchaseGamePass", passId)
+		end
+		buy.MouseButton1Click:Connect(onGamePassBuy)
+		buy.Activated:Connect(onGamePassBuy)
 	end
 
-	addHeader("Developer Products")
+	addHeader(MicrocopyConfig.StoreSectionDevProducts)
 	for pid, def in DevProductConfig.Products do
 		order += 1
 		local row = Instance.new("Frame"); row.Size=UDim2.new(1,-12,0,52); row.BackgroundColor3=Color3.fromRGB(50,36,70); row.LayoutOrder=order; row.Parent=scroll
 		local c = Instance.new("UICorner"); c.CornerRadius=UDim.new(0,8); c.Parent=row
-		local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(0.7,0,1,0); lbl.Position=UDim2.new(0,8,0,0); lbl.BackgroundTransparency=1; lbl.Font=Enum.Font.Gotham; lbl.TextSize=13; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.TextColor3=Color3.new(1,1,1); lbl.TextWrapped=true; lbl.Text=`{def.name} \u{2014} {def.robuxPrice}R`; lbl.Parent=row
-		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.22,0,0,32); buy.Position=UDim2.new(0.76,0,0.5,-16); buy.BackgroundColor3=Color3.fromRGB(180,100,255); buy.Text="Buy"; buy.TextColor3=Color3.new(1,1,1); buy.Font=Enum.Font.GothamBold; buy.Parent=row
+		local dpText = `{def.name} \u{2014} {def.robuxPrice}R`
+		if def.productId == 0 and RunService:IsStudio() then
+			dpText = dpText .. "\n[DEV] productId is 0 — link in Creator Dashboard"
+		end
+		local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(0.7,0,1,0); lbl.Position=UDim2.new(0,8,0,0); lbl.BackgroundTransparency=1; lbl.Font=Enum.Font.Gotham; lbl.TextSize=13; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.TextColor3=Color3.new(1,1,1); lbl.TextWrapped=true; lbl.Text=dpText; lbl.Parent=row
+		local buy = Instance.new("TextButton"); buy.Size=UDim2.new(0.22,0,0,32); buy.Position=UDim2.new(0.76,0,0.5,-16); buy.BackgroundColor3=Color3.fromRGB(180,100,255); buy.Text=MicrocopyConfig.StoreBuyButton; buy.TextColor3=Color3.new(1,1,1); buy.Font=Enum.Font.GothamBold; buy.Parent=row
+		if def.productId == 0 then
+			buy:SetAttribute("DAC_IapPlaceholder", true)
+			buy.Text = MicrocopyConfig.IapBuyNotLinked
+			buy.Active = false
+			buy.BackgroundColor3 = Color3.fromRGB(95, 95, 100)
+		else
+			buy:SetAttribute("DAC_IapPlaceholder", false)
+		end
 		devProductRows[pid]=row; rowByKey["dev:"..pid]=row
-		buy.MouseButton1Click:Connect(function() SoundFacade.playOneShot("purchase"); Remotes.getEvent("PurchaseDevProduct"):FireServer(pid) end)
+		table.insert(iapBuyButtons, buy)
+		local function onDevProductBuy()
+			if IapPromptGuard.isPending() then
+				return
+			end
+			if not ClientRemoteDebounce.allow(lastStoreIapFire, ClientRemoteDebounce.IAP_PROMPT_COOLDOWN_SEC) then
+				local uc = MenuHub.getUIController()
+				if uc and uc.showNotification then
+					uc.showNotification({
+						type = "info",
+						message = MicrocopyConfig.pickVariant(MicrocopyConfig.IapPurchasePromptBusy),
+					})
+				end
+				return
+			end
+			SoundFacade.playOneShot("purchase")
+			RemoteFailSafe.fireEvent("STORE", "PurchaseDevProduct", pid)
+		end
+		buy.MouseButton1Click:Connect(onDevProductBuy)
+		buy.Activated:Connect(onDevProductBuy)
 	end
 
-	order += 1; addHeader("Badge profile", order); order += 1
+	order += 1; addHeader(MicrocopyConfig.StoreSectionBadgeProfile, order); order += 1
 	local badgeWallFrame = Instance.new("Frame"); badgeWallFrame.Name="BadgeProfileWall"; badgeWallFrame.Size=UDim2.new(1,-12,0,108); badgeWallFrame.BackgroundColor3=Color3.fromRGB(28,32,62); badgeWallFrame.LayoutOrder=order; badgeWallFrame.Parent=scroll
 	local bwc = Instance.new("UICorner"); bwc.CornerRadius=UDim.new(0,10); bwc.Parent=badgeWallFrame
 	local badgeSlotLabels: { TextLabel } = {}
@@ -264,11 +428,11 @@ function StorePanel.init()
 		table.insert(badgeSlotLabels, slot)
 	end
 	order += 1
-	local fullCollectionBadge = Instance.new("TextLabel"); fullCollectionBadge.Name="FullBadgeCollection"; fullCollectionBadge.Size=UDim2.new(1,-12,0,44); fullCollectionBadge.BackgroundTransparency=1; fullCollectionBadge.Font=Enum.Font.GothamBold; fullCollectionBadge.TextSize=13; fullCollectionBadge.TextColor3=Color3.fromRGB(255,220,120); fullCollectionBadge.TextWrapped=true; fullCollectionBadge.Visible=false; fullCollectionBadge.LayoutOrder=order; fullCollectionBadge.Parent=scroll
+	local fullCollectionBadge = Instance.new("TextLabel"); fullCollectionBadge.Name="FullBadgeCollection"; fullCollectionBadge.Size=UDim2.new(1,-12,0,44); fullCollectionBadge.BackgroundTransparency=1; fullCollectionBadge.Font=Enum.Font.GothamBold; fullCollectionBadge.TextSize=13; fullCollectionBadge.TextColor3=Constants.UI_TEXT_ON_LIGHT.SectionHeader; fullCollectionBadge.TextWrapped=true; fullCollectionBadge.Visible=false; fullCollectionBadge.LayoutOrder=order; fullCollectionBadge.Parent=scroll
 
 	refreshBadgeWall = function()
-		local ok, data = pcall(function() return Remotes.getFunction("GetPlayerData"):InvokeServer() end)
-		if not ok or type(data) ~= "table" then return end
+		local data = fetchPlayerData()
+		if not data then return end
 		local totalSpecies = PetConfig.getTotalSpeciesCount(); local found = 0
 		if type(data.discoveredPets) == "table" then for _, v in pairs(data.discoveredPets) do if v == true then found += 1 end end end
 		local indexComplete = totalSpecies > 0 and found >= totalSpecies
@@ -277,27 +441,47 @@ function StorePanel.init()
 		else for _, slot in badgeSlotLabels do slot.Text = FomoBadgeLabelConfig.pickVariant(FomoBadgeLabelConfig.EmptySlotCopy) end end
 	end
 
-	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(plr, gamePassId, wasPurchased)
+	table.insert(teardownConns, MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(plr, gamePassId, wasPurchased)
 		if plr ~= localPlayer or not wasPurchased then return end
 		for passId, def in GamePassConfig.Passes do if def.gamePassId == gamePassId then local tier: string? = if passId == "vip" then "vip" else nil; VFXFacade.purchaseCelebration("gamepass", tier); local gpRow = gamePassRows[passId]; if gpRow then flashRowGreen(gpRow); showOwnedBadge(gpRow) end; return end end
-	end)
+	end))
 
-	Remotes.getEvent("Notification").OnClientEvent:Connect(function(n: any)
+	table.insert(teardownConns, Remotes.getEvent("Notification").OnClientEvent:Connect(function(n: any)
 		if type(n) ~= "table" or n.type ~= "error" or not root.Visible then return end
-		if tick() - lastActionAt > 2.5 then return end
+		if os.clock() - lastActionAt > 2.5 then return end
 		if lastActionButton and lastActionButton.Parent then pulseButtonError(lastActionButton) end
 		pendingUpgradeStat = nil; pendingLevelBefore = nil; pendingCarBuyId = nil
-	end)
+	end))
 
-	MarketplaceService.PromptProductPurchaseFinished:Connect(function(plr, productId, isPurchased)
+	table.insert(teardownConns, MarketplaceService.PromptProductPurchaseFinished:Connect(function(plr, productId, isPurchased)
 		if plr ~= localPlayer or not isPurchased then return end
 		for productKey, def in DevProductConfig.Products do if def.productId == productId then local tier: string? = if productKey == "battle_pass_premium" then "vip" else nil; VFXFacade.purchaseCelebration("devproduct", tier); local dpRow = devProductRows[productKey]; if dpRow then flashRowGreen(dpRow); showOwnedBadge(dpRow) end; return end end
-	end)
+	end))
 
 	assignFomoBadges()
+	applyIapBuyButtonState()
 	if refreshBadgeWall then refreshBadgeWall() end
-	root:GetPropertyChangedSignal("Visible"):Connect(function() if root.Visible then connectFomoAnim() else disconnectFomoAnim() end end)
-	task.spawn(function() while root.Parent do task.wait(300); assignFomoBadges() end end)
+	table.insert(teardownConns, root:GetPropertyChangedSignal("Visible"):Connect(function()
+		if root.Visible then connectFomoAnim() else disconnectFomoAnim() end
+	end))
+	task.spawn(function()
+		while root.Parent do
+			task.wait(300)
+			assignFomoBadges()
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(leavingPlayer)
+		if leavingPlayer ~= localPlayer then return end
+		iapUnsub()
+		disconnectFomoAnim()
+		for _, c in teardownConns do
+			if c.Connected then
+				c:Disconnect()
+			end
+		end
+		table.clear(teardownConns)
+	end)
 end
 
 return StorePanel

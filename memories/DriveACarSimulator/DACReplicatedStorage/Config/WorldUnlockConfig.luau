@@ -19,67 +19,79 @@ WorldUnlockConfig.UnlockHeadlines = {
 	"THE GATES HAVE OPENED!",
 }
 
-WorldUnlockConfig.RebirthThresholdsByWorldId = {
-	desert = 2,
-	frozen = 3,
-	neon = 4,
-}
+-- Worlds unlock via currency in WorldConfig + WorldService (not rebirth count).
+WorldUnlockConfig.RebirthThresholdsByWorldId = {}
 
 WorldUnlockConfig.WorldFlavor = {
-	grasslands = {
-		headline = "THE GRASSLANDS",
+	forest = {
+		headline = "THE FOREST",
 		arrival_headline = "Welcome Home, Driver!",
-		arrival_subtext = "Green fields, open roads, and your very first lap.",
-		fun_fact = "The Grasslands have more hidden ramps than any other world!",
-		flavor = "Where every journey begins. Green fields and open road.",
+		arrival_subtext = "Winding roads through the trees and your very first lap.",
+		fun_fact = "The Forest has more hidden ramps than any other world!",
+		flavor = "Where every journey begins. Canopy roads and open sky.",
 	},
 	desert = {
-		headline = "SCORCHING DESERT",
-		arrival_headline = "Welcome to the Scorching Sands!",
+		headline = "THE DESERT",
+		arrival_headline = "Welcome to the Desert!",
 		arrival_subtext = "Heat waves and long straights — built for speed demons.",
-		fun_fact = "Desert runs pay 1.5x coins because the heat tax is REAL!",
+		fun_fact = "Desert runs earn Sand Granules at 2x rate — the heat makes every meter count!",
 		flavor = "Hot sand, long straights, and bigger payouts. The heat is ON.",
 	},
-	frozen = {
-		headline = "FROZEN TUNDRA",
-		arrival_headline = "Welcome to the Frozen Wastes!",
-		arrival_subtext = "Ice beneath your tires and cold, hard cash ahead.",
-		fun_fact = "The Frozen Tundra has the longest unbroken straight in the game!",
-		flavor = "Icy highways and chilling profits. Don't lose your grip.",
+	ice = {
+		headline = "THE ICE WORLD",
+		arrival_headline = "Welcome to the Ice World!",
+		arrival_subtext = "Ice beneath your tires and cold, hard Icycles ahead.",
+		fun_fact = "The Ice World has the longest unbroken straight in the game!",
+		flavor = "Frozen highways and chilling profits. Don't lose your grip.",
 	},
-	neon = {
-		headline = "NEON CITY",
-		arrival_headline = "Welcome to the Neon District!",
-		arrival_subtext = "Neon lights, midnight drives, and the fastest lanes alive.",
-		fun_fact = "Neon City never has a day cycle — it's ALWAYS night here!",
-		flavor = "The city that never sleeps. The future is bright — and FAST.",
+	volcano = {
+		headline = "THE VOLCANO",
+		arrival_headline = "Welcome to the Volcano!",
+		arrival_subtext = "Molten rock, lava flows, and roads that glow red-hot.",
+		fun_fact = "Volcano runs earn Magma Cores at 10x rate — risk meets reward!",
+		flavor = "Blazing roads over molten earth. Drive fast or melt.",
+	},
+	space = {
+		headline = "OUTER SPACE",
+		arrival_headline = "Welcome to Space!",
+		arrival_subtext = "Zero gravity, infinite roads, and the stars are yours.",
+		fun_fact = "Space runs earn Infinitium at 20x rate — the final frontier pays BIG!",
+		flavor = "The cosmos is your highway. No limits. No atmosphere.",
 	},
 }
 
 WorldUnlockConfig.TravelTeaser = {
 	desert = {
 		"The desert heat calls to the bold...",
-		"Scorching Sands: where the REAL payouts live!",
-		"Beyond the Grasslands lies something hotter...",
+		"The Desert: where the REAL payouts live!",
+		"Beyond the Forest lies something hotter...",
 		"Think you're fast? The desert will test that.",
 		"The sand dunes are waiting for tire tracks.",
-		"Rebirth again and the desert gates open!",
+		"Save up 500,000 Coins — then the Desert opens!",
 	},
-	frozen = {
-		"The Frozen Wastes await the fearless...",
+	ice = {
+		"The Ice World awaits the fearless...",
 		"Ice, speed, and zero forgiveness. Ready?",
 		"Somewhere beyond the snow line, legends drive.",
 		"Can you handle the ice? Only one way to find out.",
-		"The Tundra doesn't care how fast you WERE.",
-		"Rebirth further and the ice roads are yours!",
+		"The Ice World doesn't care how fast you WERE.",
+		"Unlock Desert first — then 50,000 Sand Granules opens the Ice World!",
 	},
-	neon = {
-		"The Neon District awaits...",
-		"Neon lights and midnight records. Soon.",
-		"The city that never sleeps... and neither will you.",
-		"The fastest lanes in the game are behind that gate.",
-		"Neon City: where legends become GODS.",
-		"One more rebirth and the city is yours!",
+	volcano = {
+		"The Volcano awaits...",
+		"Molten roads and blazing speed. Soon.",
+		"Lava flows and roads that never cool... are you ready?",
+		"The hottest lanes in the game are behind that gate.",
+		"Volcano: where legends become GODS.",
+		"Ice cleared? Save 100,000 Icycles — the Volcano is next!",
+	},
+	space = {
+		"Space awaits the ultimate drivers...",
+		"Zero gravity. Infinite speed. No atmosphere.",
+		"Beyond the volcano, the stars are calling.",
+		"The final frontier has roads you can't imagine.",
+		"Space: the last world. The biggest payouts.",
+		"Volcano conquered? Save 500,000 Magma Cores — Space is the endgame!",
 	},
 }
 

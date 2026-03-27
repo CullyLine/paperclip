@@ -151,7 +151,7 @@ SpeedMilestoneConfig.FlavorText = {
 	},
 	[400] = {
 		"Air molecules are apologizing.",
-		"Your speedometer just rage-quit.",
+		"Your speedometer just threw in the towel.",
 		"Even light is taking notes.",
 		"The map can barely render you.",
 		"Other cars think you're a glitch.",
@@ -192,7 +192,7 @@ SpeedMilestoneConfig.FlexText = {
 	[300]  = "Less than 5% of drivers see 300. Flex HARD!",
 	[400]  = "Top 2% territory. Most players only dream of this!",
 	[500]  = "Under 1% of ALL players reach 500. You're a myth!",
-	[750]  = "0.1% club. You're rarer than a Mythical pet!",
+	[750]  = "0.1% club. You're rarer than a Mythic pet!",
 	[1000] = "THE rarest achievement in the game. Absolute legend!",
 }
 

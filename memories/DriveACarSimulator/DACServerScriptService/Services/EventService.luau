@@ -1,7 +1,7 @@
 --!strict
 --[[
 	Launch window: Founder's Bonus (2x coins), Early Driver title for joiners in window.
-	Set FOUNDER_WINDOW_* Unix timestamps (UTC) before going live. Same window is used for both.
+	Edit FOUNDER_WINDOW_* in Config/EventWindowConfig.luau (UTC Unix seconds) before go-live.
 ]]
 
 local Players = game:GetService("Players")
@@ -9,13 +9,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local EventWindowConfig = require(DAC:WaitForChild("Config"):WaitForChild("EventWindowConfig"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Constants = require(DAC:WaitForChild("Constants"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 
--- UTC Unix seconds: first 48h after publish (edit before launch)
-local FOUNDER_WINDOW_START_UTC = 1773878400 -- 2026-03-19T00:00:00Z
-local FOUNDER_WINDOW_END_UTC = 1774051200 -- 2026-03-21T00:00:00Z (48h)
+local FOUNDER_WINDOW_START_UTC = EventWindowConfig.FOUNDER_WINDOW_START_UTC
+local FOUNDER_WINDOW_END_UTC = EventWindowConfig.FOUNDER_WINDOW_END_UTC
 
 local EventService = {}
 
@@ -84,9 +86,9 @@ function EventService.handlePlayerJoin(player: Player)
 
 	if EventService.isLaunchWindowActive() and not data.founderBonusNotified then
 		data.founderBonusNotified = true
-		Remotes.getEvent("Notification"):FireClient(player, {
+		NotificationDispatchService.notify(player, {
 			type = "info",
-			message = "Founder's Bonus: 2x coins for the launch window!",
+			message = MicrocopyConfig.FounderBonusJoinNotification,
 		})
 	end
 

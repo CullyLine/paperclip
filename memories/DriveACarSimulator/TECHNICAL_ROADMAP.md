@@ -2,6 +2,8 @@
 
 This document is the engineer review of `memories/DriveACarSimulator/` against the **POLA-1** product brief (auto-runner driving, four currencies, pets/eggs/rebirth/worlds, P2W monetization). It inventories what is implemented, calls out gaps and risks, and lists prioritized work to ship 1.0.
 
+**As of 2026-03-23** — truth-sync pass vs `CarConfig` / `PetConfig` / `EggConfig`, `DACStarterGui/GuiBootstrap.local.luau`, `GamePassService`, `BattlePassService`, and `RunService`. Older bullets below that conflict with source files should be treated as **historical** unless this date header is refreshed.
+
 ---
 
 ## 1. Architecture snapshot
@@ -36,7 +38,8 @@ This document is the engineer review of `memories/DriveACarSimulator/` against t
 
 - **DrivingController** + **DrivingHUD:** steering (keyboard + touch), run HUD (gas bar, distance, laps, speed readout).
 - **HUD:** four-currency strip with `Utils.formatNumber`.
-- **UIController:** caches server `DataUpdate` / `CurrencyUpdate`; notifications and run/hatch results currently **print to output** (no real UI frames).
+- **UIController** + **MenuHub:** server data bridge, toast/overlay wiring, panel registration.
+- **Pre-built feature panels** (initialized from `GuiBootstrap.local.luau`, shells under `StarterGui`): **DailyReward**, **World**, **BattlePass**, **Quest**, **PetIndex**, **Inventory**, **Store**, **EggShop**, **Rebirth**, **Settings**, **Codes**, **Payout** (post-run), **PlaytimeGem**, **Event** / **GroupJoin** banners, **FriendBonus** HUD, **Tutorial** overlay, **Leaderboard**, **TrophyCase** (mounted after deferred init), **Admin** (gated). This replaces the earlier snapshot where only HUD + DrivingHUD existed.
 
 ### 2.3 Fixes applied during this review
 
@@ -50,17 +53,17 @@ This document is the engineer review of `memories/DriveACarSimulator/` against t
 
 | Item | Notes |
 |------|--------|
-| **Full-screen UI modules** | Only `HUD` + `DrivingHUD`. Need: **InventoryUI** (cars), **StoreUI**, **EggShopUI**, **RebirthUI**, **SettingsUI**, **CodesUI**, **DailyRewardUI**, plus **post-run summary** (design calls for payout screen). `UIController` is ready as a data bridge; no screens consume it yet. |
-| **Monetization prompts** | `Remotes` includes `PurchaseGamePass` and `PurchaseDevProduct`, but **no server `OnServerEvent` handlers** call `MarketplaceService:PromptGamePassPurchase` / `PromptProductPurchase`. Store UI must trigger prompts safely (client can prompt; validate ownership server-side — already pattern in `GamePassService`). |
-| **Roblox asset IDs** | `GamePassConfig` / `DevProductConfig` use **`gamePassId = 0` / `productId = 0`**. Live game requires creating assets in Roblox and pasting real IDs. Pass checks skip ID 0 (no false positives, but **no pass works** until IDs are set). |
-| **3D & audio** | No `Workspace` content in Rojo tree: cars/pets/worlds are config-only. Sound is placeholder (`SoundController`). Needed for 1.0 feel: lobby, highways, models, SFX, music (see `ConceptArt/` and CEO reference pack). |
+| **Full-screen UI modules** | ~~Only HUD + DrivingHUD.~~ **As of 2026-03:** Major panels are **implemented and bootstrapped** (inventory, store, eggs, rebirth, settings, codes, payout, daily, worlds, BP, quests, pets index, leaderboards, trophy case, etc.). Remaining risk is **polish / UX depth** (edge flows, loading states), not absence of screens. |
+| **Monetization prompts** | ~~No server handlers.~~ **As of 2026-03:** `GamePassService` handles `PurchaseGamePass` (`OnServerEvent`); `DevProductService` handles `PurchaseDevProduct`; client uses `MarketplaceService` prompts (`Bootstrap` / `StorePanel` patterns). **Live purchase still requires real asset IDs in config** (see row below). |
+| **Roblox asset IDs** | `GamePassConfig` / `DevProductConfig` still use **`gamePassId = 0` / `productId = 0`** until Creator Dashboard IDs are applied (**POLA-95**). Pass logic skips ID 0 so dev does not false-own; **production** needs non-zero IDs. |
+| **3D & audio** | No `Workspace` content in Rojo tree: cars/pets/worlds are largely data-driven from config. Audio pipeline exists (`SoundFacade` / assets under `Audio/`); **production** still needs final mix and world geometry per art direction (`ConceptArt/`). |
 
 ### P1 — Gameplay / economy correctness
 
 | Item | Notes |
 |------|--------|
 | **Power stat in runs** | ~~Previously thought unused.~~ **Resolved (POLA-55 audit):** `RunService.endRun` applies `powerMultiplier = 1 + effectivePower * 0.01` to coin payout. Power is a meaningful earnings multiplier. |
-| **Auto-Collect pass** | **Partially implemented** but double-gated: requires both `auto_collect` AND `infinite_gas` passes plus lap threshold. Fix tracked in POLA-60. |
+| **Auto-Collect pass** | ~~Double-gated with `infinite_gas` (POLA-60).~~ **As of 2026-03:** `RunService` ends the run on lap rollover when the player has **`auto_collect`** and **`laps >= AUTO_COLLECT_LAPS_BEFORE_BANK`** (`Constants`, default 3). `infinite_gas` is handled separately in `CarService` (gas drain), not as an AND gate for auto-collect. |
 | **VIP pass perks** | `VipEffectsService` and `VipNametag` implement chat prefix + glow. Exclusive car skin config exposed but **not wired on client**. |
 | **Receipt idempotency** | ~~Previously thought missing.~~ **Resolved (POLA-55 audit):** `DevProductService.processReceipt` tracks `processedReceiptIds` in player data. Dedup is implemented. |
 
@@ -82,13 +85,13 @@ This document is the engineer review of `memories/DriveACarSimulator/` against t
 
 ## 4. Suggested sub-task breakdown (for ticketing)
 
-1. **UI — Inventory & store** — Grids for cars/pets, equip flows, bind to `BuyCar` / `EquipCar` / pet remotes.
-2. **UI — Economy surfaces** — Egg shop + hatch reveal UX; rebirth panel with live cost from `Utils.calculateRebirthCost`.
-3. **UI — Meta** — Daily reward calendar; code entry; settings bound to `UpdateSettings`.
-4. **Monetization** — Create Roblox passes/products; fill config IDs; wire `PurchaseGamePass` / `PurchaseDevProduct` handlers + client prompts.
-5. **Gameplay** — Auto-Collect double-gate fix (POLA-60); VIP exclusive skin client wiring.
+1. ~~**UI — Inventory & store**~~ — **Largely shipped** (panels + remotes); iterate on UX.
+2. ~~**UI — Economy surfaces**~~ — Egg shop, rebirth, payout panels exist; iterate on juice.
+3. ~~**UI — Meta**~~ — Daily, codes, settings in tree; iterate on onboarding.
+4. **Monetization** — Paste **live** `gamePassId` / `productId` values (**POLA-95**); smoke-test each prompt path in a published place.
+5. **Gameplay** — VIP exclusive skin client wiring; tuning (auto-collect lap count, economy) as design requests.
 6. **Trading** — Replace stub with secure flow or keep disabled until post-1.0.
-7. **Content** — World geometry, car/pet meshes, VFX, audio per `ConceptArt/` direction.
+7. **Content** — World geometry, car/pet meshes, VFX, final audio per `ConceptArt/` direction.
 8. **Hardening** — Remote throttles, optional anti-tamper on run state. (Receipt dedupe already done.)
 
 ---
@@ -112,11 +115,12 @@ memories/DriveACarSimulator/
 
 ## 6. Verdict
 
-The codebase is a **coherent vertical slice**: server rules, progression, and monetization hooks align with POLA-1’s simulator loop. **1.0 is blocked primarily on UI surface area, Roblox marketplace IDs, 3D/audio content, and a few incomplete pass behaviors (auto-collect, VIP cosmetics, power meaning).** The items above are ordered so design and engineering can parallelize without rewriting core systems.
+The codebase is a **coherent vertical slice**: server rules, progression, and monetization hooks align with POLA-1’s simulator loop. **As of 2026-03, the primary beta blockers are live Roblox marketplace asset IDs, production 3D/audio/content pass quality, and polish on VIP / edge flows** — not missing menu panels. Power is applied in payouts; auto-collect is lap-threshold based with the Auto-Collect pass. Keep `TECHNICAL_ROADMAP.md` updated when major UI or economy behavior changes.
 
 ---
 
 #### Files on disk
 
-- `memories/DriveACarSimulator/TECHNICAL_ROADMAP.md` — this roadmap (full review + backlog).
+- `memories/DriveACarSimulator/TECHNICAL_ROADMAP.md` — this roadmap (full review + backlog); **2026-03-23** truth sync (POLA-760).
+- `memories/DriveACarSimulator/DACStarterGui/GuiBootstrap.local.luau` — panel init order (reference for what ships in client UI).
 - `memories/DriveACarSimulator/DACServerScriptService/MainServer.server.luau` — `TradeService` wired so trade placeholder remotes work.

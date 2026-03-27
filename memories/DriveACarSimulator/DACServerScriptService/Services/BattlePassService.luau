@@ -1,9 +1,11 @@
 --!strict
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("BattlePassConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
@@ -17,7 +19,23 @@ local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 
+export type BattlePassXpSource = "run_distance" | "quest"
+
 local BattlePassService = {}
+
+-- In-memory per-session XP from each authoritative source (not persisted; POLA-527).
+local sessionBpXpBySource: { [number]: { [string]: number } } = {}
+
+local function sessionCapForSource(source: BattlePassXpSource): number
+	if source == "run_distance" then
+		return Constants.BATTLE_PASS_MAX_SESSION_XP_RUN_DISTANCE
+	end
+	return Constants.BATTLE_PASS_MAX_SESSION_XP_QUEST
+end
+
+local function clearSessionXp(userId: number)
+	sessionBpXpBySource[userId] = nil
+end
 
 local function syncData(player: Player)
 	local data = DataManager.get(player)
@@ -49,6 +67,7 @@ function BattlePassService.ensureSeason(player: Player)
 		bp.premium = false
 		bp.claimedFree = {}
 		bp.claimedPremium = {}
+		bp.claimRevision = 0
 	end
 	if not bp.claimedFree then
 		bp.claimedFree = {}
@@ -65,11 +84,21 @@ function BattlePassService.ensureSeason(player: Player)
 	if not data.consumables then
 		data.consumables = { speedBoosts = 0, luckBoosts = 0 }
 	end
+	if type(bp.claimRevision) ~= "number" then
+		bp.claimRevision = 0
+	end
 end
 
--- Season XP from any source (quests, distance, etc.)
-function BattlePassService.awardXp(player: Player, amount: number)
+--[[
+	Authoritative season XP — only call from server services (Run, Quest).
+	`source` must match a known origin; unknown sources are ignored (anti-forge).
+	Session totals are clamped per source (see Constants).
+]]
+function BattlePassService.awardXp(player: Player, amount: number, source: BattlePassXpSource)
 	if amount <= 0 then
+		return
+	end
+	if source ~= "run_distance" and source ~= "quest" then
 		return
 	end
 	BattlePassService.ensureSeason(player)
@@ -77,7 +106,21 @@ function BattlePassService.awardXp(player: Player, amount: number)
 	if not data or not data.battlePass then
 		return
 	end
-	data.battlePass.xp += amount
+	local cap = sessionCapForSource(source)
+	local uid = player.UserId
+	local track = sessionBpXpBySource[uid]
+	if not track then
+		track = {}
+		sessionBpXpBySource[uid] = track
+	end
+	local soFar = track[source] or 0
+	local room = math.max(0, cap - soFar)
+	local apply = math.min(amount, room)
+	if apply <= 0 then
+		return
+	end
+	track[source] = soFar + apply
+	data.battlePass.xp += apply
 	syncData(player)
 end
 
@@ -88,7 +131,7 @@ function BattlePassService.addXP(player: Player, distance: number)
 		return
 	end
 	local add = math.max(0, math.floor(distance / 100))
-	BattlePassService.awardXp(player, add)
+	BattlePassService.awardXp(player, add, "run_distance")
 end
 
 local function grantReward(player: Player, reward: any): (boolean, string?)
@@ -115,12 +158,12 @@ local function grantReward(player: Player, reward: any): (boolean, string?)
 		end
 		return true, nil
 	end
-	if t == "coins" or t == "gems" or t == "crystals" or t == "skulls" then
+	if t == "coins" then
 		local amt = reward.amount or 0
 		if amt <= 0 then
 			return false, "Bad amount"
 		end
-		CurrencyService.add(player, t, amt, "battle_pass")
+		CurrencyService.add(player, "coins", amt, "battle_pass")
 	elseif t == "pet_egg" then
 		local eggId = reward.eggId
 		if type(eggId) ~= "string" then
@@ -206,10 +249,9 @@ local function appendRewardItems(reward: any, out: { any })
 		end
 		return
 	end
-	if t == "coins" or t == "gems" or t == "crystals" or t == "skulls" then
+	if t == "coins" then
 		local amt = reward.amount or 0
-		local name = t:sub(1, 1):upper() .. t:sub(2)
-		table.insert(out, { label = name, amount = amt, kind = t })
+		table.insert(out, { label = "Coins", amount = amt, kind = "coins" })
 		return
 	end
 	if t == "pet_egg" then
@@ -269,7 +311,7 @@ local function canClaimTier(playerXp: number, tier: number): boolean
 	return playerXp >= BattlePassConfig.tierStartXp(tier)
 end
 
-function BattlePassService.claimTier(player: Player, tier: number, track: string): (boolean, string?)
+function BattlePassService.claimTier(player: Player, tier: number, track: string, clientRevision: number?): (boolean, string?)
 	if type(tier) ~= "number" or tier ~= math.floor(tier) then
 		return false, "Bad tier"
 	end
@@ -283,6 +325,7 @@ function BattlePassService.claimTier(player: Player, tier: number, track: string
 	end
 	local bp = data.battlePass
 	local xp = bp.xp
+	local serverRev = if type(bp.claimRevision) == "number" then bp.claimRevision else 0
 
 	if not canClaimTier(xp, tier) then
 		return false, "Tier not unlocked"
@@ -295,34 +338,49 @@ function BattlePassService.claimTier(player: Player, tier: number, track: string
 
 	if track == "free" then
 		if bp.claimedFree[tier] then
-			return false, "Already claimed"
+			-- Idempotent: duplicate claim after success must not error or re-grant.
+			return true, nil
 		end
-		local ok, err = grantReward(player, row.freeReward)
-		if not ok then
-			return false, err
+		-- POLA-529: reject stale/out-of-order claim packets (replay with old revision after another claim).
+		if type(clientRevision) ~= "number" or clientRevision ~= serverRev then
+			return false, "Stale claim revision"
 		end
 		bp.claimedFree[tier] = true
+		local ok, err = grantReward(player, row.freeReward)
+		if not ok then
+			bp.claimedFree[tier] = false
+			return false, err
+		end
 	else
 		if not bp.premium then
 			return false, "Premium not owned"
 		end
 		if bp.claimedPremium[tier] then
-			return false, "Already claimed"
+			return true, nil
 		end
-		local ok, err = grantReward(player, row.premiumReward)
-		if not ok then
-			return false, err
+		if type(clientRevision) ~= "number" or clientRevision ~= serverRev then
+			return false, "Stale claim revision"
 		end
 		bp.claimedPremium[tier] = true
+		local ok, err = grantReward(player, row.premiumReward)
+		if not ok then
+			bp.claimedPremium[tier] = false
+			return false, err
+		end
 	end
 
-	DataManager.save(player)
+	bp.claimRevision = (bp.claimRevision or 0) + 1
+
+	local EconomyLogService = require(script.Parent:WaitForChild("EconomyLogService"))
+	EconomyLogService.logBattlePassClaim(player, tier, track)
+
+	DataManager.saveImmediate(player)
 	syncData(player)
 	EventService.syncPlayerTitleAttribute(player)
 
 	local rewardRow = if track == "free" then row.freeReward else row.premiumReward
 	local items = rewardToItems(rewardRow)
-	Remotes.getEvent("Notification"):FireClient(player, {
+	NotificationDispatchService.notify(player, {
 		type = "reward_claim",
 		title = "Battle Pass",
 		subtitle = `Tier {tier} ({track})`,
@@ -334,25 +392,61 @@ function BattlePassService.claimTier(player: Player, tier: number, track: string
 end
 
 function BattlePassService.init()
-	Remotes.getEvent("ClaimBattlePassTier").OnServerEvent:Connect(function(player, tier, track)
+	Players.PlayerRemoving:Connect(function(player)
+		clearSessionXp(player.UserId)
+	end)
+
+	Remotes.getEvent("ClaimBattlePassTier").OnServerEvent:Connect(function(player, tier, track, clientRevision)
+		local ack = Remotes.getEvent("BattlePassClaimResult")
+		local function ackFail()
+			ack:FireClient(player, false)
+		end
 		if not ValidationService.checkRemoteRate(player, "ClaimBattlePassTier") then
+			ackFail()
+			return
+		end
+		if not ValidationService.canAct(player) then
+			ackFail()
 			return
 		end
 		if not RemoteCooldown.allow(player, "ClaimBattlePassTier", Constants.REMOTE_COOLDOWN_DEFAULT) then
+			ackFail()
 			return
 		end
-		if type(tier) ~= "number" then
+		if type(tier) ~= "number" or tier ~= math.floor(tier) then
+			ValidationService.logAnomalyOncePerSession(player, "bp_bad_tier_type", "")
+			ackFail()
+			return
+		end
+		if tier < 1 or tier > BattlePassConfig.TIER_COUNT then
+			ValidationService.logAnomalyOncePerSession(player, "bp_tier_out_of_range", tostring(tier))
+			ackFail()
 			return
 		end
 		if type(track) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "bp_bad_track_type", "")
+			ackFail()
 			return
 		end
-		local ok, err = BattlePassService.claimTier(player, tier, track)
+		if track ~= "free" and track ~= "premium" then
+			ValidationService.logAnomalyOncePerSession(player, "bp_bad_track_value", track)
+			ackFail()
+			return
+		end
+		if clientRevision ~= nil and type(clientRevision) ~= "number" then
+			ValidationService.logAnomalyOncePerSession(player, "bp_bad_revision_type", "")
+			ackFail()
+			return
+		end
+		local ok, err = BattlePassService.claimTier(player, tier, track, clientRevision)
 		if not ok then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Cannot claim",
 			})
+			ack:FireClient(player, false)
+		else
+			ack:FireClient(player, true)
 		end
 	end)
 end

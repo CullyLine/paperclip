@@ -498,7 +498,7 @@ Drop your first impressions below! What's the rarest pet you've hatched? 🐾
 | Code | Rewards | Purpose | Expiry Strategy |
 |------|---------|---------|-----------------|
 | DRIVEFAST | 3,000 Coins + 50 Gems | Social media code for week 1 posts | Expire after 2 weeks |
-| PETPOWER | 5,000 Coins + 1 Meadow Egg (via special reward) | YouTube video code — pet-themed | Expire after 1 month |
+| PETPOWER | 5,000 Coins | YouTube video code — pet-themed | Expire after 1 month |
 | REBIRTH1 | 10,000 Coins | Rebirth encouragement — players approaching first rebirth | Permanent |
 | NEONHYPE | 200 Crystals | Neon City teaser code for TikTok | Expire after 1 week (urgency) |
 | DESERT2X | 5,000 Coins + 100 Gems | Desert world promo code | Expire after 3 weeks |

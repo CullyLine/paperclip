@@ -4,7 +4,7 @@
 	fuel panic vignette + HUD-adjacent sounds, hatch timeline, pet orbit glow,
 	ambient world particles, lap flash, world transitions, mobile LOD,
 	run distance milestones, career milestone popups, near-miss lane feedback,
-	purchase / car unlock celebrations, stat level-up cascade,
+	heavy collision red vignette (driving), purchase / car unlock celebrations, stat level-up cascade,
 	quest completion fireworks, battle pass tier-up fanfare.
 ]]
 
@@ -16,26 +16,41 @@ local Lighting = game:GetService("Lighting")
 local UserInputService = game:GetService("UserInputService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local ClientUiLifecycle = require(DAC:WaitForChild("ClientUiLifecycle"))
+local NotificationLaneBridge = require(DAC:WaitForChild("NotificationLaneBridge"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local Constants = require(DAC:WaitForChild("Constants"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
-local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
-local UpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
-local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
-local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
-local RebirthMilestoneConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthMilestoneConfig"))
-local RebirthConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthConfig"))
-local WorldUnlockConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldUnlockConfig"))
-local SocialFeedConfig = require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
-local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
-local SpeedMilestoneConfig = require(DAC:WaitForChild("Config"):WaitForChild("SpeedMilestoneConfig"))
-local NearMissCopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("NearMissCopyConfig"))
+local CfgFolder = DAC:WaitForChild("Config")
+local Cfg = {
+	World = require(CfgFolder:WaitForChild("WorldConfig")),
+	Upgrade = require(CfgFolder:WaitForChild("UpgradeConfig")),
+	Car = require(CfgFolder:WaitForChild("CarConfig")),
+	Pet = require(CfgFolder:WaitForChild("PetConfig")),
+	RebirthMilestone = require(CfgFolder:WaitForChild("RebirthMilestoneConfig")),
+	Rebirth = require(CfgFolder:WaitForChild("RebirthConfig")),
+	WorldUnlock = require(CfgFolder:WaitForChild("WorldUnlockConfig")),
+	WorldAmbientVFX = require(CfgFolder:WaitForChild("WorldAmbientVFXConfig")),
+	SocialFeed = require(CfgFolder:WaitForChild("SocialFeedConfig")),
+	Microcopy = require(CfgFolder:WaitForChild("MicrocopyConfig")),
+	SpeedMilestone = require(CfgFolder:WaitForChild("SpeedMilestoneConfig")),
+	NearMissCopy = require(CfgFolder:WaitForChild("NearMissCopyConfig")),
+	HatchCrackVisual = require(CfgFolder:WaitForChild("HatchCrackVisualSpec")),
+	HudLayout = require(CfgFolder:WaitForChild("HudLayoutConfig")),
+	UILayer = require(CfgFolder:WaitForChild("UILayerStack")),
+}
 local FailureFeedback = require(DAC:WaitForChild("FailureFeedback"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
-local HatchCrackVisualSpec = require(DAC:WaitForChild("Config"):WaitForChild("HatchCrackVisualSpec"))
+local HudSafeArea = require(DAC:WaitForChild("HudSafeArea"))
+local NewPlayerCalmWindow = require(DAC:WaitForChild("NewPlayerCalmWindow"))
+local ClientPerformanceProfile = require(DAC:WaitForChild("ClientPerformanceProfile"))
+local SceneTransitionGate = require(DAC:WaitForChild("SceneTransitionGate"))
 
 local VFXController = {}
+
+-- Idempotent init: hot reload must not stack Heartbeat / CharacterAdded / duplicate DACVFX ScreenGui.
+local vfxClientInitDone = false
 
 local player = Players.LocalPlayer
 local playerGui: PlayerGui = player:WaitForChild("PlayerGui") :: PlayerGui
@@ -43,29 +58,66 @@ local playerGui: PlayerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 local TRAIL_BUDGET = 100 -- both wheels + boost star streak
 
 local WORLD_TRAIL_NEON = {
-	grasslands = Color3.fromRGB(130, 255, 150),
+	forest = Color3.fromRGB(130, 255, 150),
 	desert = Color3.fromRGB(255, 170, 70),
-	frozen = Color3.fromRGB(130, 220, 255),
-	neon = Color3.fromRGB(255, 55, 200),
+	ice = Color3.fromRGB(130, 220, 255),
+	volcano = Color3.fromRGB(255, 95, 45),
+	space = Color3.fromRGB(100, 100, 255),
 }
 
+-- Run-end fanfare omni + shower tints (RunEndFanfareDesignSpec §C); keyed like `activeWorldId`.
+local RUN_END_FANFARE_BURST = {
+	forest = Color3.fromRGB(130, 255, 150),
+	desert = Color3.fromRGB(255, 190, 90),
+	ice = Color3.fromRGB(160, 230, 255),
+	volcano = Color3.fromRGB(255, 95, 45),
+	space = Color3.fromRGB(120, 120, 255),
+}
+local RUN_END_FANFARE_SHOWER = {
+	forest = Color3.fromRGB(200, 255, 210),
+	desert = Color3.fromRGB(255, 230, 140),
+	ice = Color3.fromRGB(220, 245, 255),
+	volcano = Color3.fromRGB(255, 200, 80),
+	space = Color3.fromRGB(200, 200, 255),
+}
+local ROTD_FANFARE_BURST = Color3.fromRGB(255, 205, 75)
+local ROTD_FANFARE_SHOWER = Color3.fromRGB(255, 175, 45)
+
 local runActive = false
-local activeWorldId = "grasslands"
-local trailPart: BasePart? = nil
-local trailEmitterL: ParticleEmitter? = nil
-local trailEmitterR: ParticleEmitter? = nil
-local boostEmitter: ParticleEmitter? = nil
-local trailAttachmentL: Attachment? = nil
-local trailAttachmentR: Attachment? = nil
-local boostAttachment: Attachment? = nil
+local activeWorldId = "forest"
+-- Driving VFX tier (CarConfig vfxTier 1–5): scales trails, rush, boost stars, underglow.
+local runVehicleVfxTier = 2
+local trail = {
+	part = nil :: BasePart?,
+	emitterL = nil :: ParticleEmitter?,
+	emitterR = nil :: ParticleEmitter?,
+	boostEmitter = nil :: ParticleEmitter?,
+	underglowEmitter = nil :: ParticleEmitter?,
+	idleSparkEmitter = nil :: ParticleEmitter?,
+	attachL = nil :: Attachment?,
+	attachR = nil :: Attachment?,
+	boostAttach = nil :: Attachment?,
+}
 
 local screenGui: ScreenGui? = nil
 local flashLayer: Frame? = nil
 local lapFlashLayer: Frame? = nil
+local lastLapFanfareClock = 0
+local LAP_FANFARE_DEBOUNCE_SEC = 0.42
 local vignetteLayer: Frame? = nil
 local popupPool: { TextLabel } = {}
 local popupIndex = 0
 local shakeToken = 0
+local lodAdaptiveHeartbeatConn: RBXScriptConnection? = nil
+local characterAmbientRefreshConn: RBXScriptConnection? = nil
+
+local function safeCamera(): Camera?
+	local c = workspace.CurrentCamera
+	if c and c.Parent then
+		return c
+	end
+	return nil
+end
 
 -- During runs, DrivingController applies this offset after computing the chase camera (see getRunCameraShakeOffset).
 local runShakeSeq = 0
@@ -77,17 +129,26 @@ local lastCarStatLevels: { [string]: { gas: number, power: number, speed: number
 local lastOwnedCarIds: { [string]: boolean } = {}
 local carsOwnershipSeeded = false
 
-local baseCameraFov = 70
-local boostFovTween: Tween? = nil
-local boostActive = false
-local dofEffect: DepthOfField? = nil
+local camState = {
+	baseFov = 70,
+	boostFovDesired = 0,
+	boostFovAdd = 0,
+	speedFovAdd = 0,
+	boostActive = false,
+	dofEffect = nil :: DepthOfField?,
+}
 
 -- LOD: 1 low, 2 mid, 3 high
-local lodTier = 3
-local fpsFrameAccum = 0
-local fpsSecondClock = 0
-local lowFpsStreakSeconds = 0
-local lastWorldForTransition: string? = nil
+local lod = {
+	tier = 3,
+	fpsAccum = 0,
+	fpsClock = 0,
+	lowStreak = 0,
+	lastWorld = nil :: string?,
+	pendingTravel = nil :: { from: string, to: string }?,
+	travelToken = 0,
+	ambientSig = "",
+}
 
 -- Distance milestones (per run; reset in onRunStarted)
 local lastDistK1 = 0
@@ -119,41 +180,139 @@ local celebratedCarIds: { [string]: boolean } = {}
 local lastAlmostNudgeAt: { [string]: number } = {}
 local ALMOST_NUDGE_COOLDOWN_SEC = 60
 
--- Server-wide rare+ hatch banner (queue + throttle)
-type ServerDropQueued = { playerName: string, petName: string, rarity: string, userId: number }
-local serverDropQueue: { ServerDropQueued } = {}
-local serverDropShowing = false
-local serverDropLastStartClock = 0.0
-local serverDropPendingDrain: thread? = nil
-local SERVER_DROP_THROTTLE_SEC = 5
-local SERVER_DROP_MAX_QUEUE = 3
-local SERVER_DROP_TOP_PX = 56
+-- Server-wide rare+ hatch banner (queue + throttle); also friend-play bonus lines
+type ServerDropQueued = {
+	kind: string?,
+	playerName: string?,
+	petName: string?,
+	rarity: string?,
+	userId: number?,
+	line: string?,
+	oddsText: string?,
+}
+local drop = {
+	queue = {} :: { ServerDropQueued },
+	showing = false,
+	lastClock = 0.0,
+	pendingDrain = nil :: thread?,
+	THROTTLE_SEC = 5,
+	MAX_QUEUE = 3,
+}
 
 -- Speed rush screen overlay (chromatic-style edge tint)
-local speedRushEdgeFrame: Frame? = nil
-local speedRushChromaFrame: Frame? = nil
-local speedRushSmoothed = 0
-local speedRushChromaSmoothed = 0
-local speedMilestoneRushBoostUntil = 0.0
+local sr = {
+	edgeFrame = nil :: Frame?,
+	chromaFrame = nil :: Frame?,
+	smoothed = 0,
+	chromaSmoothed = 0,
+	milestoneBoostUntil = 0.0,
+	lineSpawnAccum = 0.0,
+	linesLayer = nil :: Frame?,
+	tier3Micro = false,
+	microShakeAmt = 0,
+	overlayLastClock = nil :: number?,
+}
+
+-- Milestone ceremony queue (first-time + spend; streak stays immediate toast channel)
+type CeremonyQueued = { kind: "first" | "spend", payload: any }
+local cer = {
+	queue = {} :: { CeremonyQueued },
+	queueDuringRun = {} :: { CeremonyQueued },
+	showing = false,
+}
+
+local nearMissEdgeFlashStrip: Frame? = nil
 
 -- Fuel panic: vignette + sounds + micro-shake
-local fuelPanicVignette: Frame? = nil
-local fuelPanicPrevGas = 1
+local fuel = {
+	vignette = nil :: Frame?,
+	prevGas = 1,
+}
 
-local ambientFolder: Folder? = nil
-local ambientEmitters: { ParticleEmitter } = {}
-local ambientRunning = false
+local ambient = {
+	nearAttach = nil :: Attachment?,
+	farAttach = nil :: Attachment?,
+	emitters = {} :: { ParticleEmitter },
+	running = false,
+	MAX_EMITTERS = 6,
+}
+
+--[[
+	Ambient juice limits (POLA-242 / POLA-315):
+	- Max simultaneous ParticleEmitter instances for idle ambient (near + optional far-field on camera).
+	- Colors keyed by world: `Config/WorldAmbientVFXConfig.luau` (aligned with WorldAtmosphereJuiceBible.md).
+	- SavedQualityLevel <= 5 → lod.tier 1 → no ambient (see ambientStart).
+	- Adaptive FPS: sustained <30 FPS for 2s forces lod.tier 1; Heartbeat stops ambient immediately when tier drops.
+]]
+
+local idleHudBreathScale: UIScale? = nil
+local uiControllerModuleCache: any = nil
+
+local function getUIControllerModule(): any?
+	if uiControllerModuleCache then
+		return uiControllerModuleCache
+	end
+	local sps = player:FindFirstChild("PlayerScripts")
+	if not sps then
+		return nil
+	end
+	local dac = sps:FindFirstChild("DAC")
+	if not dac then
+		return nil
+	end
+	local ctrls = dac:FindFirstChild("Controllers")
+	if not ctrls then
+		return nil
+	end
+	local uc = ctrls:FindFirstChild("UIController")
+	if not uc or not uc:IsA("ModuleScript") then
+		return nil
+	end
+	local ok, mod = pcall(require, uc)
+	if ok and mod then
+		uiControllerModuleCache = mod
+		return mod
+	end
+	return nil
+end
+
+local function ensureIdleHudBreathScale(): UIScale?
+	if idleHudBreathScale and idleHudBreathScale.Parent then
+		return idleHudBreathScale
+	end
+	local dacMain = playerGui:FindFirstChild("DACMain") :: ScreenGui?
+	if not dacMain then
+		return nil
+	end
+	local pInfo = dacMain:FindFirstChild("PlayerInfo") :: Frame?
+	if not pInfo then
+		return nil
+	end
+	local us = pInfo:FindFirstChild("DACIdleBreath") :: UIScale?
+	if not us then
+		us = Instance.new("UIScale")
+		us.Name = "DACIdleBreath"
+		us.Scale = 1
+		us.Parent = pInfo
+	end
+	idleHudBreathScale = us
+	return us
+end
 
 -- Run coin combo (visual only; driven by client distance vs payout formula)
-local runPowerForCombo = 0
-local cachedPetModifier = 1
-local lastVirtualCoinFloor = 0
-local coinComboStreak = 0
-local lastCoinPickupClock = 0.0
-local lastCoinPickupSfxClock = 0.0
-local comboResetToken = 0
-local comboLabel: TextLabel? = nil
-local comboUIScale: UIScale? = nil
+local combo = {
+	runPower = 0,
+	petModifier = 1,
+	lastVirtualFloor = 0,
+	streak = 0,
+	lastPickupClock = 0.0,
+	lastPickupSfxClock = 0.0,
+	lastMagnetClock = 0.0,
+	MAGNET_MIN_INTERVAL = 0.08,
+	resetToken = 0,
+	label = nil :: TextLabel?,
+	uiScale = nil :: UIScale?,
+}
 
 local petGlowByUid: {
 	[ string ]: {
@@ -183,28 +342,42 @@ local function qualityLodSeed(): number
 	return 3
 end
 
+-- Adaptive `lod.tier` × saved particle cap (POLA-334).
+local function effLod(): number
+	return math.min(lod.tier, ClientPerformanceProfile.userMaxVfxLod())
+end
+
 local function lodTrailRateMul(): number
-	if lodTier <= 1 then
+	if effLod() <= 1 then
 		return 0.5
-	elseif lodTier == 2 then
+	elseif effLod() == 2 then
 		return 0.75
 	end
 	return 1
 end
 
 local function lodBurstMul(): number
-	if lodTier <= 1 then
+	if effLod() <= 1 then
 		return 0.5
-	elseif lodTier == 2 then
+	elseif effLod() == 2 then
 		return 0.75
 	end
 	return 1
 end
 
+-- 1 → ~0.64 … 5 → ~1.28 — keeps budget cars visibly softer than flagship / paid tiers.
+local function vehicleVfxPowerMul(): number
+	return 0.64 + (runVehicleVfxTier - 1) * 0.16
+end
+
+local function vehicleSpeedRushIntensityMul(): number
+	return 0.82 + (runVehicleVfxTier - 1) * 0.05
+end
+
 local function lodPetMotesMax(base: number): number
-	if lodTier <= 1 then
+	if effLod() <= 1 then
 		return math.min(8, base)
-	elseif lodTier == 2 then
+	elseif effLod() == 2 then
 		return math.min(12, base)
 	end
 	return base
@@ -254,6 +427,50 @@ local function getFlashLayer(): Frame
 	return f
 end
 
+-- POLA-447: quick checkmark pop when a driving run begins (vehicle "enter" confirmation).
+function VFXController.vehicleEnterCheckmarkPop()
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	local layer = getFlashLayer()
+	local mark = Instance.new("TextLabel")
+	mark.Name = "VehicleEnterCheck"
+	mark.AnchorPoint = Vector2.new(0.5, 1)
+	mark.Size = UDim2.fromOffset(72, 72)
+	mark.Position = UDim2.new(0.5, 0, 1, -96)
+	mark.BackgroundTransparency = 1
+	mark.Font = Enum.Font.GothamBlack
+	mark.Text = "\u{2713}"
+	mark.TextSize = 44
+	mark.TextColor3 = Color3.fromRGB(46, 204, 113)
+	mark.TextStrokeColor3 = Color3.fromRGB(20, 20, 40)
+	mark.TextStrokeTransparency = 0.35
+	mark.TextTransparency = 0
+	mark.ZIndex = 1100
+	mark.Parent = layer
+
+	local sc = Instance.new("UIScale")
+	sc.Scale = 0.2
+	sc.Parent = mark
+
+	TweenService:Create(sc, TweenInfo.new(0.14, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.12 }):Play()
+	task.delay(0.32, function()
+		if not mark.Parent then
+			return
+		end
+		TweenService:Create(
+			mark,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ TextTransparency = 1, TextStrokeTransparency = 1 }
+		):Play()
+	end)
+	task.delay(0.75, function()
+		if mark.Parent then
+			mark:Destroy()
+		end
+	end)
+end
+
 local function getLapFlashFrame(): Frame
 	if lapFlashLayer and lapFlashLayer.Parent then
 		return lapFlashLayer
@@ -299,8 +516,8 @@ local function getVignetteFrame(): Frame
 end
 
 local function getSpeedRushEdgeFrame(): Frame
-	if speedRushEdgeFrame and speedRushEdgeFrame.Parent then
-		return speedRushEdgeFrame
+	if sr.edgeFrame and sr.edgeFrame.Parent then
+		return sr.edgeFrame
 	end
 	local sg = screenGui
 	assert(sg, "VFXController.init not called")
@@ -330,13 +547,13 @@ local function getSpeedRushEdgeFrame(): Frame
 		NumberSequenceKeypoint.new(1, 0.15),
 	})
 	grad.Parent = f
-	speedRushEdgeFrame = f
+	sr.edgeFrame = f
 	return f
 end
 
 local function getSpeedRushChromaFrame(): Frame
-	if speedRushChromaFrame and speedRushChromaFrame.Parent then
-		return speedRushChromaFrame
+	if sr.chromaFrame and sr.chromaFrame.Parent then
+		return sr.chromaFrame
 	end
 	local sg = screenGui
 	assert(sg, "VFXController.init not called")
@@ -363,13 +580,73 @@ local function getSpeedRushChromaFrame(): Frame
 		NumberSequenceKeypoint.new(1, 0.35),
 	})
 	grad.Parent = f
-	speedRushChromaFrame = f
+	sr.chromaFrame = f
 	return f
 end
 
+local function getSpeedRushLinesFolder(): Frame
+	if sr.linesLayer and sr.linesLayer.Parent then
+		return sr.linesLayer
+	end
+	local sg = screenGui
+	assert(sg, "VFXController.init not called")
+	local f = Instance.new("Frame")
+	f.Name = "SpeedRushLines"
+	f.BackgroundTransparency = 1
+	f.BorderSizePixel = 0
+	f.Size = UDim2.fromScale(1, 1)
+	f.ZIndex = 993
+	f.Active = false
+	f.Parent = sg
+	sr.linesLayer = f
+	return f
+end
+
+local function spawnSpeedRushLineFrame()
+	if effLod() <= 1 then
+		return
+	end
+	local parent = getSpeedRushLinesFolder()
+	local line = Instance.new("Frame")
+	line.Name = "SpeedLine"
+	line.BorderSizePixel = 0
+	line.BackgroundColor3 = Color3.new(1, 1, 1)
+	line.BackgroundTransparency = 0.4
+	local w = math.random(60, 140)
+	line.Size = UDim2.new(0, w, 0, 2)
+	line.AnchorPoint = Vector2.new(0.5, 0.5)
+	line.ZIndex = 1
+	local edge = math.random(1, 4)
+	local sx, sy
+	if edge == 1 then
+		sx, sy = -0.02, math.random(10, 90) / 100
+	elseif edge == 2 then
+		sx, sy = 1.02, math.random(10, 90) / 100
+	elseif edge == 3 then
+		sx, sy = math.random(10, 90) / 100, -0.02
+	else
+		sx, sy = math.random(10, 90) / 100, 1.02
+	end
+	line.Position = UDim2.new(sx, 0, sy, 0)
+	line.Parent = parent
+	local cx, cy = 0.5 - sx, 0.5 - sy
+	local ang = math.deg(math.atan2(cy, cx)) + 90
+	line.Rotation = ang
+	local life = 0.15 + math.random() * 0.1
+	local tx = 0.5 + (sx - 0.5) * 0.35
+	local ty = 0.5 + (sy - 0.5) * 0.35
+	TweenService:Create(line, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = UDim2.new(tx, 0, ty, 0),
+		BackgroundTransparency = 1,
+	}):Play()
+	task.delay(life + 0.05, function()
+		line:Destroy()
+	end)
+end
+
 local function getFuelPanicVignette(): Frame
-	if fuelPanicVignette and fuelPanicVignette.Parent then
-		return fuelPanicVignette
+	if fuel.vignette and fuel.vignette.Parent then
+		return fuel.vignette
 	end
 	local sg = screenGui
 	assert(sg, "VFXController.init not called")
@@ -390,7 +667,7 @@ local function getFuelPanicVignette(): Frame
 		NumberSequenceKeypoint.new(1, 0.2),
 	})
 	grad.Parent = f
-	fuelPanicVignette = f
+	fuel.vignette = f
 	return f
 end
 
@@ -398,69 +675,172 @@ local function stopFuelPanicShake()
 	fuelPanicDeepShake = false
 end
 
-function VFXController.speedRushOverlay(speed: number)
-	if not runActive then
-		speedRushSmoothed = 0
-		speedRushChromaSmoothed = 0
-		local e = speedRushEdgeFrame
+-- speedNorm: 0 = off; active band is ~0.70–1.0 (fraction of car max speed). See DrivingVFXDesignSpec.
+function VFXController.speedRushOverlay(speedNorm: number)
+	sr.tier3Micro = false
+	sr.microShakeAmt = 0
+	if not runActive or speedNorm <= 0 then
+		sr.overlayLastClock = nil
+		sr.smoothed = 0
+		sr.chromaSmoothed = 0
+		sr.lineSpawnAccum = 0
+		local e = sr.edgeFrame
 		if e then
 			e.BackgroundTransparency = 1
 		end
-		local c = speedRushChromaFrame
+		local c = sr.chromaFrame
 		if c then
 			c.BackgroundTransparency = 1
+		end
+		local sl = sr.linesLayer
+		if sl then
+			for _, ch in sl:GetChildren() do
+				ch:Destroy()
+			end
 		end
 		return
 	end
 
-	local targetEdge = 0
-	local targetChroma = 0
-	if speed > 80 then
-		targetEdge = math.clamp(0.35 + (speed - 80) / 120, 0, 0.95)
-		targetChroma = math.clamp((speed - 80) / 60, 0, 1)
-	elseif speed > 60 then
-		targetEdge = math.clamp((speed - 60) / 20, 0, 1) * 0.55
+	local t = math.clamp(speedNorm, 0.7, 1)
+	local nowSp = os.clock()
+	local dtFrame = if sr.overlayLastClock then math.min(nowSp - sr.overlayLastClock, 0.05) else 1 / 60
+	sr.overlayLastClock = nowSp
+
+	local tier2 = t >= 0.85 and t < 0.95
+	local tier3 = t >= 0.95
+
+	local edgeOpacityTarget: number
+	local chromaOpacityTarget: number
+	if t < 0.85 then
+		local u = (t - 0.7) / 0.14
+		edgeOpacityTarget = 0.08 + u * (0.25 - 0.08)
+		chromaOpacityTarget = 0
+	elseif tier2 then
+		local u = (t - 0.85) / 0.09
+		edgeOpacityTarget = 0.25 + u * (0.42 - 0.25)
+		chromaOpacityTarget = 0.05 + u * (0.22 - 0.05)
+	else
+		local u = (t - 0.95) / 0.05
+		edgeOpacityTarget = 0.42 + u * (0.55 - 0.42)
+		chromaOpacityTarget = 0.22 + u * (0.42 - 0.22)
+		if effLod() >= 2 then
+			sr.tier3Micro = true
+			local lodMul = if effLod() >= 3 then 1 else 0.6
+			sr.microShakeAmt = math.clamp(u, 0, 1) * 0.04 * lodMul
+		end
 	end
+
+	local rushTierMul = vehicleSpeedRushIntensityMul()
+	edgeOpacityTarget *= rushTierMul
+	chromaOpacityTarget *= rushTierMul
 
 	local nowClock = os.clock()
-	if nowClock < speedMilestoneRushBoostUntil then
-		local boost = (speedMilestoneRushBoostUntil - nowClock) / 0.35
-		targetEdge = math.min(1, targetEdge + 0.42 * boost)
-		targetChroma = math.min(1, targetChroma + 0.25 * boost)
+	if nowClock < sr.milestoneBoostUntil then
+		local boost = (sr.milestoneBoostUntil - nowClock) / 0.35
+		edgeOpacityTarget = math.min(0.58, edgeOpacityTarget + 0.18 * boost)
+		chromaOpacityTarget = math.min(0.5, chromaOpacityTarget + 0.12 * boost)
 	end
 
-	speedRushSmoothed += (targetEdge - speedRushSmoothed) * 0.15
-	speedRushChromaSmoothed += (targetChroma - speedRushChromaSmoothed) * 0.12
+	sr.smoothed += (edgeOpacityTarget - sr.smoothed) * 0.15
+	sr.chromaSmoothed += (chromaOpacityTarget - sr.chromaSmoothed) * 0.12
 
-	local pulse = 0.88 + 0.12 * math.sin(os.clock() * (2.8 + speed * 0.035))
-	local edgeVis = speedRushSmoothed * pulse
-	local chromaPulse = 0.82 + 0.18 * math.sin(os.clock() * (5.5 + speed * 0.05))
-	local chromaVis = speedRushChromaSmoothed * chromaPulse
+	local pulseFreq = if tier3 then 6.0 elseif tier2 then 4.0 else 2.8
+	local pulseAmp = if tier3 then 0.18 elseif tier2 then 0.15 else 0.12
+	local pulse = 1 - pulseAmp + pulseAmp * math.sin(os.clock() * (pulseFreq + t * 0.5))
+	local edgeVis = math.clamp(sr.smoothed * pulse, 0, 1)
+	local chromaPulse = 0.82 + 0.18 * math.sin(os.clock() * (5.5 + t * 3))
+	local chromaVis = math.clamp(sr.chromaSmoothed * chromaPulse, 0, 1)
+
+	local warmOrange = Color3.fromRGB(255, 140, 50)
+	local midWarm = Color3.fromRGB(255, 160, 70)
+	local hotRed = Color3.fromRGB(255, 80, 30)
+	local midHot = Color3.fromRGB(255, 120, 50)
+	local whiteHot = Color3.fromRGB(255, 200, 180)
+	local edgeL, midL, edgeR: Color3
+	if t < 0.85 then
+		local k = (t - 0.7) / 0.14
+		edgeL = warmOrange:Lerp(hotRed, k * 0.35)
+		midL = midWarm:Lerp(midHot, k * 0.35)
+		edgeR = warmOrange:Lerp(hotRed, k * 0.35)
+	elseif tier2 then
+		local k = (t - 0.85) / 0.1
+		edgeL = warmOrange:Lerp(hotRed, 0.35 + k * 0.65)
+		midL = midWarm:Lerp(midHot, 0.35 + k * 0.65)
+		edgeR = warmOrange:Lerp(hotRed, 0.35 + k * 0.65)
+	else
+		local k = (t - 0.95) / 0.05
+		edgeL = hotRed:Lerp(whiteHot, k)
+		midL = midHot:Lerp(Color3.new(1, 1, 1), k * 0.85)
+		edgeR = hotRed:Lerp(whiteHot, k)
+	end
 
 	local edge = getSpeedRushEdgeFrame()
-	edge.BackgroundTransparency = 1 - edgeVis * 0.55
+	local grad = edge:FindFirstChildOfClass("UIGradient")
+	if grad then
+		grad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, edgeL),
+			ColorSequenceKeypoint.new(0.45, midL),
+			ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.55, midL),
+			ColorSequenceKeypoint.new(1, edgeR),
+		})
+	end
+	edge.BackgroundTransparency = 1 - edgeVis
 
 	local chroma = getSpeedRushChromaFrame()
 	if chromaVis > 0.02 then
 		chroma.BackgroundTransparency = 1 - chromaVis * 0.42
+		local cg = chroma:FindFirstChildOfClass("UIGradient")
+		if cg and tier3 then
+			local top = Color3.fromRGB(80, 200, 255):Lerp(Color3.fromRGB(120, 255, 255), (t - 0.95) / 0.05)
+			local bot = Color3.fromRGB(255, 80, 160):Lerp(Color3.fromRGB(255, 40, 120), (t - 0.95) / 0.05)
+			cg.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, top),
+				ColorSequenceKeypoint.new(0.35, Color3.new(1, 1, 1)),
+				ColorSequenceKeypoint.new(0.65, Color3.new(1, 1, 1)),
+				ColorSequenceKeypoint.new(1, bot),
+			})
+		elseif cg then
+			cg.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 200, 255)),
+				ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 255, 255)),
+				ColorSequenceKeypoint.new(0.65, Color3.fromRGB(255, 255, 255)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 160)),
+			})
+		end
 	else
 		chroma.BackgroundTransparency = 1
+	end
+
+	if effLod() >= 2 and (tier2 or tier3) then
+		local rate = if tier3 then 12 else 4
+		if effLod() == 2 then
+			rate *= 0.5
+		end
+		rate *= vehicleSpeedRushIntensityMul()
+		sr.lineSpawnAccum += rate * dtFrame
+		while sr.lineSpawnAccum >= 1 do
+			sr.lineSpawnAccum -= 1
+			spawnSpeedRushLineFrame()
+		end
+	else
+		sr.lineSpawnAccum = 0
 	end
 end
 
 function VFXController.fuelPanic(gasPercent: number)
 	if not runActive then
 		stopFuelPanicShake()
-		local fv = fuelPanicVignette
+		local fv = fuel.vignette
 		if fv then
 			fv.BackgroundTransparency = 1
 		end
-		fuelPanicPrevGas = 1
+		fuel.prevGas = 1
 		return
 	end
 
 	local g = math.clamp(gasPercent, 0, 1)
-	local prev = fuelPanicPrevGas
+	local prev = fuel.prevGas
 	if prev > 0.25 and g <= 0.25 then
 		SoundFacade.playOneShot("fuel_warning_25")
 	end
@@ -471,7 +851,7 @@ function VFXController.fuelPanic(gasPercent: number)
 		SoundFacade.playOneShot("fuel_empty")
 		FailureFeedback.fire("fuel_empty", { skipSound = true })
 	end
-	fuelPanicPrevGas = g
+	fuel.prevGas = g
 
 	local fv = getFuelPanicVignette()
 	if g >= 0.25 then
@@ -590,7 +970,7 @@ local function cameraShake(intensity: number, duration: number)
 
 	shakeToken += 1
 	local token = shakeToken
-	local cam = workspace.CurrentCamera
+	local cam = safeCamera()
 	if not cam then
 		return
 	end
@@ -598,16 +978,100 @@ local function cameraShake(intensity: number, duration: number)
 	local t0 = os.clock()
 	while os.clock() - t0 < duration and token == shakeToken do
 		local w = (1 - (os.clock() - t0) / duration) * intensity
-		cam.CFrame = start * CFrame.new((math.random() - 0.5) * w * 0.4, (math.random() - 0.5) * w * 0.4, 0)
+		local cNow = safeCamera()
+		if not cNow or cNow ~= cam then
+			break
+		end
+		cNow.CFrame = start * CFrame.new((math.random() - 0.5) * w * 0.4, (math.random() - 0.5) * w * 0.4, 0)
 		task.wait()
 	end
-	if token == shakeToken and cam then
+	local cEnd = safeCamera()
+	if token == shakeToken and cEnd and cEnd == cam then
 		cam.CFrame = start
 	end
 end
 
+local hatchLightingToken = 0
+
+local function applyHatchLightingReveal(hcEntry: any, hatchColor: Color3)
+	local brightDelta = hcEntry.lightingBrightnessDelta
+	local shiftStr = hcEntry.lightingColorShift
+	local restoreSec = if type(hcEntry.lightingRestoreSec) == "number" then hcEntry.lightingRestoreSec :: number else 0.55
+	if (not brightDelta or brightDelta < 0.001) and (not shiftStr or shiftStr < 0.001) then
+		return
+	end
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	hatchLightingToken += 1
+	local token = hatchLightingToken
+	local L = Lighting
+	local b0 = L.Brightness
+	local ct0 = L.ColorShift_Top
+	local cb0 = L.ColorShift_Bottom
+	local targetB = math.clamp(b0 + (brightDelta or 0), 0, 6)
+	local targetCT = if shiftStr and shiftStr > 0.001 then ct0:Lerp(hatchColor, shiftStr) else ct0
+	local targetCB = if shiftStr and shiftStr > 0.001 then cb0:Lerp(hatchColor, shiftStr * 0.4) else cb0
+	TweenService:Create(L, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+		Brightness = targetB,
+		ColorShift_Top = targetCT,
+		ColorShift_Bottom = targetCB,
+	}):Play()
+	task.delay(restoreSec, function()
+		if token ~= hatchLightingToken then
+			return
+		end
+		if not L.Parent then
+			return
+		end
+		TweenService:Create(L, TweenInfo.new(0.45, Enum.EasingStyle.Quad), {
+			Brightness = b0,
+			ColorShift_Top = ct0,
+			ColorShift_Bottom = cb0,
+		}):Play()
+	end)
+end
+
 function VFXController.cameraShake(intensity: number, duration: number)
 	cameraShake(intensity, duration)
+end
+
+--[[
+	Brief red edge vignette on heavy barrier impact (POLA-414). Keeps center readable;
+	skipped when reduced motion. Camera shake is triggered by DrivingController separately.
+]]
+function VFXController.heavyCollisionImpact()
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	local sg = screenGui
+	if not sg or not sg.Parent then
+		return
+	end
+	local f = Instance.new("Frame")
+	f.Name = "HeavyCollisionVignette"
+	f.BackgroundColor3 = Color3.fromRGB(255, 42, 32)
+	f.BorderSizePixel = 0
+	f.Size = UDim2.fromScale(1, 1)
+	f.ZIndex = 996
+	f.BackgroundTransparency = 0.92
+	f.Active = false
+	f.Parent = sg
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(0.42, 1),
+		NumberSequenceKeypoint.new(0.58, 1),
+		NumberSequenceKeypoint.new(1, 0.2),
+	})
+	grad.Parent = f
+	TweenService:Create(f, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
+	task.delay(0.35, function()
+		if f.Parent then
+			f:Destroy()
+		end
+	end)
 end
 
 function VFXController.getRunCameraShakeOffset(): Vector3
@@ -622,6 +1086,10 @@ function VFXController.getRunCameraShakeOffset(): Vector3
 	if runActive and fuelPanicDeepShake then
 		local w = 0.05
 		off += Vector3.new((math.random() - 0.5) * w, (math.random() - 0.5) * w, 0)
+	end
+	if runActive and sr.tier3Micro and sr.microShakeAmt > 0 then
+		local w = sr.microShakeAmt
+		off += Vector3.new((math.random() - 0.5) * w * 2, (math.random() - 0.5) * w * 1.5, 0)
 	end
 	return off
 end
@@ -681,13 +1149,66 @@ local function spawnPurchaseConfetti()
 	end)
 end
 
+-- Daily streak claim: confetti tier only (DailyRewardPanel owns full-screen celebration UI).
+local function spawnDailyStreakConfetti(intensity: number)
+	if ClientPerformanceProfile.isReducedMotion() or ClientPerformanceProfile.isLowGraphicsTier() then
+		return
+	end
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local att = Instance.new("Attachment")
+	att.Parent = cam
+	att.Position = Vector3.new(0, 3, -10)
+	local mul = lodBurstMul() * math.clamp(intensity, 0.35, 2.5)
+	local conf = Instance.new("ParticleEmitter")
+	conf.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	conf.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 230, 120)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 60)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 240, 180)),
+	})
+	conf.Lifetime = NumberRange.new(0.9, 1.6)
+	conf.Speed = NumberRange.new(10, 32)
+	conf.SpreadAngle = Vector2.new(180, 180)
+	conf.Acceleration = Vector3.new(0, -38, 0)
+	conf.Drag = 0.5
+	conf.Rate = 0
+	conf.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(0.4, 0.45),
+		NumberSequenceKeypoint.new(1, 0.1),
+	})
+	conf.LightEmission = 0.75
+	conf.Parent = att
+	conf:Emit(math.floor(36 * mul))
+	task.delay(2.8, function()
+		att:Destroy()
+	end)
+end
+
 function VFXController.purchaseCelebration(productType: string, tier: string?, carIdForCar: string?)
 	if string.lower(productType) == "car" then
 		if type(carIdForCar) == "string" and carIdForCar ~= "" then
-			local def = CarConfig.Cars[carIdForCar]
+			local def = Cfg.Car.Cars[carIdForCar]
 			local nm = if def and type(def.name) == "string" then def.name else carIdForCar
 			VFXFacade.carUnlockCelebration(carIdForCar, nm)
 		end
+		return
+	end
+
+	if string.lower(productType) == "daily" then
+		local intensity = 1
+		if type(tier) == "string" then
+			local tl = string.lower(tier)
+			if tl == "mega" or tl == "jackpot" then
+				intensity = 2.1
+			elseif tl == "medium" or tl == "milestone" then
+				intensity = 1.45
+			end
+		end
+		spawnDailyStreakConfetti(intensity)
 		return
 	end
 
@@ -809,16 +1330,7 @@ local function questRewardLine(rewardType: string, rewardAmount: number): (strin
 		return `+{Utils.formatNumber(rewardAmount)} Season XP`, Color3.fromRGB(52, 211, 153)
 	end
 	local row = Constants.CURRENCY_DISPLAY[t]
-	local label = t
-	if t == "coins" then
-		label = "Coins"
-	elseif t == "gems" then
-		label = "Gems"
-	elseif t == "crystals" then
-		label = "Crystals"
-	elseif t == "skulls" then
-		label = "Skulls"
-	end
+	local label = if row and row.name then row.name else t
 	local col = if row then row.color else Color3.fromRGB(52, 211, 153)
 	return `+{Utils.formatNumber(rewardAmount)} {label}`, col
 end
@@ -830,12 +1342,9 @@ function VFXController.questComplete(questTitle: string, rewardType: string, rew
 	end
 	local emerald = Color3.fromRGB(16, 185, 129)
 	screenFlash(Color3.fromRGB(74, 222, 128), 0.2, 0.38)
-	SoundFacade.playOneShot("notification")
-	task.delay(0.3, function()
-		SoundFacade.playOneShot("currency")
-	end)
+	-- SFX: QuestPanel `quest_claim_fanfare` + HUD/chest for `reward_claim` (avoid duplicate notification here).
 
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Position = Vector3.new(0, 0, 0)
@@ -1077,7 +1586,7 @@ function VFXController.battlePassTierUp(newTier: number, isPremium: boolean, rew
 		end)
 	end
 	spawnTierConfetti(isPremium)
-	SoundFacade.playOneShot("level_up")
+	SoundFacade.playOneShot("bp_tier_claim")
 
 	TweenService:Create(banner, TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 		Position = UDim2.new(0.5, 0, 0, 18),
@@ -1111,7 +1620,7 @@ function VFXController.carUnlockCelebration(carId: string, carDisplayName: strin
 	if not sg then
 		return
 	end
-	local theme = WORLD_TRAIL_NEON[activeWorldId] or WORLD_TRAIL_NEON.grasslands
+	local theme = WORLD_TRAIL_NEON[activeWorldId] or WORLD_TRAIL_NEON.forest
 	screenFlash(Color3.new(1, 1, 1), 0.12, 0.35)
 	task.delay(0.1, function()
 		screenFlash(theme, 0.45, 0.38)
@@ -1173,7 +1682,7 @@ local function statDisplayName(stat: string): string
 end
 
 local function statMaxFor(stat: string): number
-	local row = UpgradeConfig.Stats[stat]
+	local row = Cfg.Upgrade.Stats[stat]
 	return if row and type(row.maxLevel) == "number" then row.maxLevel else 100
 end
 
@@ -1188,7 +1697,8 @@ function VFXController.statLevelUp(statName: string, oldLevel: number, newLevel:
 	local statKey = string.lower(statName)
 	local maxLv = statMaxFor(statKey)
 
-	local car = player.Character and player.Character:FindFirstChild("Car")
+	local char = Utils.getLocalCharacter()
+	local car = char and char:FindFirstChild("Car")
 	local primary = car and car:IsA("Model") and (car :: Model).PrimaryPart
 	if primary then
 		local att = Instance.new("Attachment")
@@ -1296,8 +1806,8 @@ function VFXController.statLevelUp(statName: string, oldLevel: number, newLevel:
 end
 
 local function ensureDepthOfField(): DepthOfField
-	if dofEffect and dofEffect.Parent then
-		return dofEffect
+	if camState.dofEffect and camState.dofEffect.Parent then
+		return camState.dofEffect
 	end
 	local d = Instance.new("DepthOfFieldEffect")
 	d.Name = "DACVFX_BoostDOF"
@@ -1307,42 +1817,49 @@ local function ensureDepthOfField(): DepthOfField
 	d.FocusDistance = 20
 	d.InFocusRadius = 12
 	d.Parent = Lighting
-	dofEffect = d
+	camState.dofEffect = d
 	return d
 end
 
-local function configureTrailEmitter(em: ParticleEmitter, speed: number, color: Color3, worldAccent: Color3)
+local function configureTrailEmitter(em: ParticleEmitter, speed: number, color: Color3, worldAccent: Color3, powerMul: number?)
+	local p = if type(powerMul) == "number" and powerMul > 0 then powerMul else 1
 	local t = math.clamp(speed / 100, 0, 1)
 	local mul = lodTrailRateMul()
 	local rateLo = (15 + t * 10) * mul
 	local rateHi = (25 + t * 35) * mul
-	em.Color = ColorSequence.new(color:Lerp(worldAccent, 0.15))
-	em.Lifetime = NumberRange.new(0.45 + t * 0.5, 0.55 + t * 1.1)
+	local accentMix = math.clamp(0.11 + 0.06 * (p - 1), 0.08, 0.28)
+	em.Color = ColorSequence.new(color:Lerp(worldAccent, accentMix))
+	local lifeBoost = 0.88 + 0.12 * p
+	em.Lifetime = NumberRange.new((0.45 + t * 0.5) * lifeBoost, (0.55 + t * 1.1) * lifeBoost)
 	em.Rate = math.clamp((rateLo + rateHi) * 0.5, 0, 60)
-	em.Speed = NumberRange.new(2 + t * 6, 5 + t * 9)
+	local spdBoost = 0.94 + 0.06 * p
+	em.Speed = NumberRange.new((2 + t * 6) * spdBoost, (5 + t * 9) * spdBoost)
 	em.SpreadAngle = Vector2.new(8 + t * 7, 8 + t * 4)
+	local sz = 0.35 + t * 0.2
+	local szBoost = 0.92 + 0.08 * p
 	em.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.35 + t * 0.2),
-		NumberSequenceKeypoint.new(0.2, 0.55 + t * 0.15),
-		NumberSequenceKeypoint.new(1, 0.1 + t * 0.05),
+		NumberSequenceKeypoint.new(0, (sz * 0.95) * szBoost),
+		NumberSequenceKeypoint.new(0.2, (0.55 + t * 0.15) * szBoost),
+		NumberSequenceKeypoint.new(1, (0.1 + t * 0.05) * szBoost),
 	})
 	local midA = 0.55 - t * 0.25
+	local opaq = math.clamp(0.5 - (p - 1) * 0.04, 0.38, 0.55)
 	em.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(0, opaq),
 		NumberSequenceKeypoint.new(0.45, midA),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	em.LightEmission = 0.35 + t * 0.3
+	em.LightEmission = math.clamp(0.35 + t * 0.3 + (p - 1) * 0.14, 0, 1)
 	em.Drag = 2 - t * 0.8
 	em.Acceleration = Vector3.new(0, 0.5 + t * 0.5, 0)
 	em.RotSpeed = NumberRange.new(-30 - t * 30, 30 + t * 30)
 end
 
 local function ensureTrailOnCar()
-	if trailEmitterL and trailEmitterL.Parent then
+	if trail.emitterL and trail.emitterL.Parent then
 		return
 	end
-	local char = player.Character
+	local char = Utils.getLocalCharacter()
 	if not char then
 		return
 	end
@@ -1352,7 +1869,7 @@ local function ensureTrailOnCar()
 	if not primary then
 		return
 	end
-	trailPart = primary
+	trail.part = primary
 
 	local function att(name: string, pos: Vector3): Attachment
 		local a = primary:FindFirstChild(name) :: Attachment?
@@ -1365,9 +1882,9 @@ local function ensureTrailOnCar()
 		return a
 	end
 
-	trailAttachmentL = att("DACVFX_TrailL", Vector3.new(-1.6, 0, 2.8))
-	trailAttachmentR = att("DACVFX_TrailR", Vector3.new(1.6, 0, 2.8))
-	boostAttachment = att("DACVFX_BoostCenter", Vector3.new(0, 0.2, 3.2))
+	trail.attachL = att("DACVFX_TrailL", Vector3.new(-1.6, 0, 2.8))
+	trail.attachR = att("DACVFX_TrailR", Vector3.new(1.6, 0, 2.8))
+	trail.boostAttach = att("DACVFX_BoostCenter", Vector3.new(0, 0.2, 3.2))
 
 	local function ensureEmitter(parent: Attachment, nm: string): ParticleEmitter
 		local em = parent:FindFirstChild(nm) :: ParticleEmitter?
@@ -1381,70 +1898,118 @@ local function ensureTrailOnCar()
 		return em
 	end
 
-	trailEmitterL = ensureEmitter(trailAttachmentL, "DACVFX_TrailL")
-	trailEmitterR = ensureEmitter(trailAttachmentR, "DACVFX_TrailR")
-	boostEmitter = ensureEmitter(boostAttachment, "DACVFX_BoostStars")
-	boostEmitter.Rate = 0
-	boostEmitter.Lifetime = NumberRange.new(0.3, 0.55)
-	boostEmitter.Speed = NumberRange.new(6, 18)
-	boostEmitter.SpreadAngle = Vector2.new(25, 25)
-	boostEmitter.Size = NumberSequence.new(0.2, 0.9)
-	boostEmitter.Transparency = NumberSequence.new(0.2, 1)
-	boostEmitter.Color = mythicRainbowSequence()
-	boostEmitter.LightEmission = 0.85
+	trail.emitterL = ensureEmitter(trail.attachL, "DACVFX_TrailL")
+	trail.emitterR = ensureEmitter(trail.attachR, "DACVFX_TrailR")
+	trail.boostEmitter = ensureEmitter(trail.boostAttach, "DACVFX_BoostStars")
+	trail.boostEmitter.Rate = 0
+	trail.boostEmitter.Lifetime = NumberRange.new(0.3, 0.55)
+	trail.boostEmitter.Speed = NumberRange.new(6, 18)
+	trail.boostEmitter.SpreadAngle = Vector2.new(25, 25)
+	trail.boostEmitter.Size = NumberSequence.new(0.2, 0.9)
+	trail.boostEmitter.Transparency = NumberSequence.new(0.2, 1)
+	trail.boostEmitter.Color = mythicRainbowSequence()
+	trail.boostEmitter.LightEmission = 0.85
+
+	-- Tier 4+: ground underglow (reads as "paid power" without extra geometry).
+	if runVehicleVfxTier >= 4 and (not trail.underglowEmitter or not trail.underglowEmitter.Parent) then
+		local attUg = att("DACVFX_Underglow", Vector3.new(0, -1.0, 0.6))
+		local ug = attUg:FindFirstChild("DACVFX_UnderglowPE") :: ParticleEmitter?
+		if not ug then
+			ug = Instance.new("ParticleEmitter")
+			ug.Name = "DACVFX_UnderglowPE"
+			ug.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			ug.EmissionDirection = Enum.NormalId.Bottom
+			ug.SpreadAngle = Vector2.new(58, 58)
+			ug.Speed = NumberRange.new(0.4, 2.8)
+			ug.Lifetime = NumberRange.new(0.32, 0.72)
+			ug.Size = NumberSequence.new(0.12, 0.52)
+			ug.Transparency = NumberSequence.new(0.38, 1)
+			ug.LightEmission = 0.62
+			ug.Rate = 0
+			ug.LockedToPart = true
+			ug.Parent = attUg
+		end
+		trail.underglowEmitter = ug
+	end
+
+	-- Tier 3+: idle spark at low speed (park / crawl) so premium cars never look "dead".
+	if runVehicleVfxTier >= 3 and (not trail.idleSparkEmitter or not trail.idleSparkEmitter.Parent) then
+		local attId = att("DACVFX_IdleSpark", Vector3.new(0, 0.4, 2.2))
+		local idle = attId:FindFirstChild("DACVFX_IdleSparkPE") :: ParticleEmitter?
+		if not idle then
+			idle = Instance.new("ParticleEmitter")
+			idle.Name = "DACVFX_IdleSparkPE"
+			idle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			idle.EmissionDirection = Enum.NormalId.Top
+			idle.SpreadAngle = Vector2.new(22, 38)
+			idle.Speed = NumberRange.new(0.4, 3.2)
+			idle.Lifetime = NumberRange.new(0.4, 1.05)
+			idle.Size = NumberSequence.new(0.07, 0.32)
+			idle.Transparency = NumberSequence.new(0.25, 1)
+			idle.LightEmission = 0.72
+			idle.Rate = 0
+			idle.LockedToPart = true
+			idle.Parent = attId
+		end
+		trail.idleSparkEmitter = idle
+	end
 end
 
 local function destroyTrail()
-	if trailEmitterL then
-		trailEmitterL.Enabled = false
+	if trail.emitterL then
+		trail.emitterL.Enabled = false
 	end
-	if trailEmitterR then
-		trailEmitterR.Enabled = false
+	if trail.emitterR then
+		trail.emitterR.Enabled = false
 	end
-	if boostEmitter then
-		boostEmitter.Enabled = false
+	if trail.boostEmitter then
+		trail.boostEmitter.Enabled = false
 	end
-	trailEmitterL = nil
-	trailEmitterR = nil
-	boostEmitter = nil
-	trailAttachmentL = nil
-	trailAttachmentR = nil
-	boostAttachment = nil
-	trailPart = nil
-	if boostFovTween then
-		boostFovTween:Cancel()
-		boostFovTween = nil
+	trail.emitterL = nil
+	trail.emitterR = nil
+	trail.boostEmitter = nil
+	trail.attachL = nil
+	trail.attachR = nil
+	trail.boostAttach = nil
+	trail.part = nil
+	if trail.underglowEmitter then
+		trail.underglowEmitter.Enabled = false
+		trail.underglowEmitter.Rate = 0
+		local ap = trail.underglowEmitter.Parent
+		if ap and ap.Name == "DACVFX_Underglow" then
+			ap:Destroy()
+		end
+		trail.underglowEmitter = nil
 	end
-	boostActive = false
+	if trail.idleSparkEmitter then
+		trail.idleSparkEmitter.Enabled = false
+		trail.idleSparkEmitter.Rate = 0
+		local ap2 = trail.idleSparkEmitter.Parent
+		if ap2 and ap2.Name == "DACVFX_IdleSpark" then
+			ap2:Destroy()
+		end
+		trail.idleSparkEmitter = nil
+	end
+	camState.boostActive = false
+	camState.boostFovDesired = 0
+	camState.boostFovAdd = 0
+	camState.speedFovAdd = 0
 	local cam = workspace.CurrentCamera
 	if cam then
-		cam.FieldOfView = baseCameraFov
+		cam.FieldOfView = camState.baseFov
 	end
-	local dof = dofEffect
+	local dof = camState.dofEffect
 	if dof then
 		dof.Enabled = false
 	end
 end
 
 local function setBoostFov(active: boolean)
-	local cam = workspace.CurrentCamera
-	if not cam then
-		return
-	end
-	if boostFovTween then
-		boostFovTween:Cancel()
-		boostFovTween = nil
-	end
-	local target = if active then math.min(cam.FieldOfView + 10, 75) else baseCameraFov
-	boostFovTween = TweenService:Create(
-		cam,
-		TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ FieldOfView = target }
-	)
-	boostFovTween:Play()
+	camState.boostFovDesired = if active then 10 else 0
+	-- FOV application is composed in applyRunSpeedFov (DrivingController each frame).
 
 	local dof = ensureDepthOfField()
-	if lodTier >= 3 and not UserInputService.TouchEnabled and active then
+	if effLod() >= 3 and not UserInputService.TouchEnabled and active and not ClientPerformanceProfile.isReducedMotion() then
 		dof.Enabled = true
 		dof.FarIntensity = 0.2
 	else
@@ -1453,97 +2018,218 @@ local function setBoostFov(active: boolean)
 	end
 end
 
-function VFXController.boostOverlay(isActive: boolean)
-	if boostActive == isActive then
+local function maxSpeedFovDelta(): number
+	if ClientPerformanceProfile.isReducedMotion() or ClientPerformanceProfile.isLowGraphicsTier() then
+		return 0
+	end
+	local gq = ClientPerformanceProfile.getGraphicsQuality()
+	if gq == 1 then
+		return 3.5
+	end
+	return 6
+end
+
+--[[
+	Normalized speed (0..1) → subtle FOV stretch, combined with double-speed FOV.
+	Call after chase camera CFrame each frame while driving. `effectsBlocked` mirrors
+	steering suppression (modals, payout, tutorial, ceremony).
+]]
+function VFXController.applyRunSpeedFov(speedNorm: number, dt: number, effectsBlocked: boolean?)
+	if not runActive then
 		return
 	end
-	boostActive = isActive
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local blocked = effectsBlocked == true
+	local boostTarget = 0
+	if not blocked then
+		boostTarget = camState.boostFovDesired
+	end
+	local speedTarget = 0
+	if not blocked then
+		local m = maxSpeedFovDelta()
+		local n = math.clamp(speedNorm, 0, 1)
+		speedTarget = m * (n * n)
+	end
+	local kSpeed = math.min(1, 14 * dt)
+	local kBoost = math.min(1, 18 * dt)
+	camState.speedFovAdd += (speedTarget - camState.speedFovAdd) * kSpeed
+	camState.boostFovAdd += (boostTarget - camState.boostFovAdd) * kBoost
+	cam.FieldOfView = math.min(camState.baseFov + camState.speedFovAdd + camState.boostFovAdd, 95)
+end
+
+function VFXController.boostOverlay(isActive: boolean)
+	if camState.boostActive == isActive then
+		return
+	end
+	camState.boostActive = isActive
 	setBoostFov(isActive)
 	if not runActive then
 		return
 	end
 	ensureTrailOnCar()
-	if boostEmitter then
+	if trail.boostEmitter then
 		local mul = lodTrailRateMul()
-		boostEmitter.Rate = if isActive then (28 * mul) else 0
+		local pow = vehicleVfxPowerMul()
+		trail.boostEmitter.Rate = if isActive then (28 * mul * pow) else 0
 	end
 end
 
 function VFXController.init()
-	lodTier = qualityLodSeed()
+	if vfxClientInitDone then
+		return
+	end
+	vfxClientInitDone = true
 
-	local sg = Instance.new("ScreenGui")
-	sg.Name = "DACVFX"
-	sg.ResetOnSpawn = false
-	sg.DisplayOrder = 80
-	sg.IgnoreGuiInset = true
-	sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	sg.Parent = playerGui
+	lod.tier = qualityLodSeed()
+
+	local existing = playerGui:FindFirstChild("DACVFX")
+	local sg: ScreenGui
+	if existing and existing:IsA("ScreenGui") then
+		sg = existing
+		for _, ch in playerGui:GetChildren() do
+			if ch ~= sg and ch.Name == "DACVFX" and ch:IsA("ScreenGui") then
+				ch:Destroy()
+			end
+		end
+	else
+		sg = Instance.new("ScreenGui")
+		sg.Name = "DACVFX"
+		sg.ResetOnSpawn = false
+		sg.DisplayOrder = Cfg.UILayer.screenGui.vfxCelebration
+		sg.IgnoreGuiInset = true
+		sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		sg.Parent = playerGui
+	end
 	screenGui = sg
 
-	for i = 1, 18 do
-		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Popup_" .. i
-		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
-		lbl.Size = UDim2.fromOffset(280, 48)
-		lbl.BackgroundTransparency = 1
-		lbl.TextSize = 26
-		lbl.Font = Enum.Font.GothamBold
-		lbl.TextColor3 = Color3.new(1, 1, 1)
-		lbl.TextStrokeTransparency = 0.5
-		lbl.Visible = false
-		lbl.Parent = sg
-		table.insert(popupPool, lbl)
+	table.clear(popupPool)
+	for _, ch in sg:GetChildren() do
+		if ch:IsA("TextLabel") and string.sub(ch.Name, 1, 6) == "Popup_" then
+			table.insert(popupPool, ch)
+		end
+	end
+	-- Studio hot reload / duplicate init: repopulate the pool if empty.
+	if #popupPool == 0 then
+		for i = 1, 18 do
+			local lbl = Instance.new("TextLabel")
+			lbl.Name = "Popup_" .. i
+			lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+			lbl.Size = UDim2.fromOffset(280, 48)
+			lbl.BackgroundTransparency = 1
+			lbl.TextSize = 26
+			lbl.Font = Enum.Font.GothamBold
+			lbl.TextColor3 = Color3.new(1, 1, 1)
+			lbl.TextStrokeTransparency = 0.5
+			lbl.Visible = false
+			lbl.Parent = sg
+			table.insert(popupPool, lbl)
+		end
 	end
 
 	task.defer(function()
 		local cam = workspace.CurrentCamera
 		if cam then
-			baseCameraFov = cam.FieldOfView
+			camState.baseFov = cam.FieldOfView
 		end
 	end)
 
-	fpsSecondClock = os.clock()
-	RunService.Heartbeat:Connect(function()
-		fpsFrameAccum += 1
+	lod.fpsClock = os.clock()
+	if lodAdaptiveHeartbeatConn then
+		lodAdaptiveHeartbeatConn:Disconnect()
+		lodAdaptiveHeartbeatConn = nil
+	end
+	lodAdaptiveHeartbeatConn = RunService.Heartbeat:Connect(function()
+		lod.fpsAccum += 1
 		local now = os.clock()
-		if now - fpsSecondClock >= 1 then
-			local fps = fpsFrameAccum
-			fpsFrameAccum = 0
-			fpsSecondClock = now
+		if now - lod.fpsClock >= 1 then
+			local fps = lod.fpsAccum
+			lod.fpsAccum = 0
+			lod.fpsClock = now
 			if fps < 30 then
-				lowFpsStreakSeconds += 1
+				lod.lowStreak += 1
 			else
-				lowFpsStreakSeconds = 0
+				lod.lowStreak = 0
 			end
-			if lowFpsStreakSeconds >= 2 then
-				lodTier = math.min(lodTier, 1)
+			if lod.lowStreak >= 2 then
+				lod.tier = math.min(lod.tier, 1)
 			elseif fps >= 45 then
-				lodTier = math.max(lodTier, qualityLodSeed())
+				lod.tier = math.max(lod.tier, qualityLodSeed())
 			end
+			-- Idle ambient must follow adaptive LOD (stop when tier forced to 1, restart when recovered)
+			if effLod() <= 1 then
+				if ambient.running then
+					VFXController.ambientStop()
+				end
+			elseif not runActive and not ambient.running then
+				VFXController.ambientStart()
+			end
+		end
+
+		local us = ensureIdleHudBreathScale()
+		if us then
+			local payout = playerGui:FindFirstChild("DACPayout") :: ScreenGui?
+			local payoutOpen = payout ~= nil and payout.Enabled
+			local uc = getUIControllerModule()
+			local menuOpen = if uc and type(uc.isMenuOpen) == "function" then uc.isMenuOpen() else false
+			if runActive or payoutOpen or menuOpen or effLod() <= 1 or ClientPerformanceProfile.isReducedMotion() then
+				us.Scale = 1
+			else
+				us.Scale = 1 + 0.004 * math.sin(now * 0.65)
+			end
+		end
+	end)
+
+	if characterAmbientRefreshConn then
+		characterAmbientRefreshConn:Disconnect()
+		characterAmbientRefreshConn = nil
+	end
+	characterAmbientRefreshConn = player.CharacterAdded:Connect(function()
+		task.defer(function()
+			if not runActive then
+				destroyTrail()
+				VFXController.ambientStop()
+				VFXController.ambientStart()
+			end
+		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(p)
+		if p ~= player then
+			return
+		end
+		if lodAdaptiveHeartbeatConn then
+			lodAdaptiveHeartbeatConn:Disconnect()
+			lodAdaptiveHeartbeatConn = nil
+		end
+		if characterAmbientRefreshConn then
+			characterAmbientRefreshConn:Disconnect()
+			characterAmbientRefreshConn = nil
 		end
 	end)
 end
 
 local function virtualCoinFloorFromDistance(dist: number): number
-	local world = WorldConfig.Worlds[activeWorldId]
+	local world = Cfg.World.Worlds[activeWorldId]
 	local wm = if world then world.coinMultiplier else 1
-	local petMod = math.max(cachedPetModifier, 0.01)
-	local power = runPowerForCombo
+	local petMod = math.max(combo.petModifier, 0.01)
+	local power = combo.runPower
 	return math.floor(dist * Constants.DISTANCE_TO_COINS_RATE * wm * petMod * (1 + power * 0.01))
 end
 
 local function hideComboLabel()
-	if comboLabel and comboLabel.Parent then
-		comboLabel.Visible = false
+	if combo.label and combo.label.Parent then
+		combo.label.Visible = false
 	end
 end
 
 local function ensureComboLabel(): TextLabel
 	local sg = screenGui
 	assert(sg, "VFXController.init not called")
-	if comboLabel and comboLabel.Parent then
-		return comboLabel :: TextLabel
+	if combo.label and combo.label.Parent then
+		return combo.label :: TextLabel
 	end
 	local lbl = Instance.new("TextLabel")
 	lbl.Name = "CoinCombo"
@@ -1559,8 +2245,8 @@ local function ensureComboLabel(): TextLabel
 	local sc = Instance.new("UIScale")
 	sc.Scale = 1
 	sc.Parent = lbl
-	comboLabel = lbl
-	comboUIScale = sc
+	combo.label = lbl
+	combo.uiScale = sc
 	return lbl
 end
 
@@ -1580,47 +2266,176 @@ local function comboTextSizeForStreak(streak: number): number
 end
 
 local function scheduleComboReset()
-	comboResetToken += 1
-	local t = comboResetToken
+	combo.resetToken += 1
+	local t = combo.resetToken
 	task.delay(2.05, function()
-		if t ~= comboResetToken then
+		if t ~= combo.resetToken then
 			return
 		end
-		if os.clock() - lastCoinPickupClock >= 2 then
-			coinComboStreak = 0
+		if os.clock() - combo.lastPickupClock >= 2 then
+			combo.streak = 0
 			hideComboLabel()
+		end
+	end)
+end
+
+local function getCurrencyPickupWorldOrigin(): Vector3?
+	local char = Utils.getLocalCharacter()
+	if not char then
+		return nil
+	end
+	local car = char:FindFirstChild("Car")
+	if car and car:IsA("Model") then
+		local pp = car.PrimaryPart
+		if pp then
+			return pp.Position
+		end
+	end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp.Position
+	end
+	return nil
+end
+
+local function findHudCurrencyTextLabelForMagnet(currencyKey: string): TextLabel?
+	local dacMain = playerGui:FindFirstChild("DACMain") :: ScreenGui?
+	if not dacMain or not dacMain.Enabled then
+		return nil
+	end
+	local pInfo = dacMain:FindFirstChild("PlayerInfo") :: Frame?
+	if not pInfo then
+		return nil
+	end
+	local curFrame = pInfo:FindFirstChild("Currency") :: Frame?
+	if not curFrame then
+		return nil
+	end
+	local rowName = "Coins"
+	local row = curFrame:FindFirstChild(rowName)
+	if not row then
+		return nil
+	end
+	local tf = row:FindFirstChild("TextFrame")
+	if not tf then
+		return nil
+	end
+	local lbl = tf:FindFirstChild("TextLabel")
+	if lbl and lbl:IsA("TextLabel") then
+		return lbl
+	end
+	return nil
+end
+
+-- Screen-space streak: world pickup anchor → HUD currency label (distance-based coins / POLA-417).
+local function playCurrencyMagnetStreak(worldPos: Vector3, currencyKey: string)
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	if effLod() <= 1 or not ClientPerformanceProfile.particlesEnabled() then
+		return
+	end
+	local cam = safeCamera()
+	if not cam then
+		return
+	end
+	local screen, _onScreen = cam:WorldToViewportPoint(worldPos)
+	if screen.Z < 0.05 then
+		return
+	end
+	local start = Vector2.new(screen.X, screen.Y)
+	local lbl = findHudCurrencyTextLabelForMagnet(currencyKey)
+	if not lbl then
+		return
+	end
+	local ap = lbl.AbsolutePosition
+	local asz = lbl.AbsoluteSize
+	local endPos = Vector2.new(ap.X + asz.X * 0.5, ap.Y + asz.Y * 0.5)
+	local delta = endPos - start
+	local len = delta.Magnitude
+	if len < 28 then
+		return
+	end
+	local sg = screenGui
+	if not sg then
+		return
+	end
+	local mid = (start + endPos) * 0.5
+	local wpx = math.max(2, math.floor(2 + lodBurstMul() * 2.2))
+	local line = Instance.new("Frame")
+	line.Name = "DAC_MagnetStreak"
+	line.AnchorPoint = Vector2.new(0.5, 0.5)
+	local curDisp = Constants.CURRENCY_DISPLAY[currencyKey]
+	line.BackgroundColor3 = if curDisp then curDisp.color else Color3.fromRGB(255, 224, 96)
+	line.BackgroundTransparency = 0.15
+	line.BorderSizePixel = 0
+	line.Size = UDim2.fromOffset(wpx, len)
+	line.Position = UDim2.fromOffset(mid.X, mid.Y)
+	line.Rotation = math.deg(math.atan2(delta.X, -delta.Y))
+	line.ZIndex = 2500
+	line.Parent = sg
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 200)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 200, 60)),
+	})
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(0.55, 0.45),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	grad.Rotation = 90
+	grad.Parent = line
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 2)
+	corner.Parent = line
+	TweenService:Create(line, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(math.max(1, wpx - 1), len * 0.35),
+	}):Play()
+	task.delay(0.3, function()
+		if line.Parent then
+			line:Destroy()
 		end
 	end)
 end
 
 local function comboCoinPickup()
 	local now = os.clock()
-	if now - lastCoinPickupSfxClock >= 0.06 then
-		lastCoinPickupSfxClock = now
-		SoundFacade.playOneShot("coin_pickup")
+	if now - combo.lastPickupSfxClock >= 0.06 then
+		combo.lastPickupSfxClock = now
+		SoundFacade.playOneShot("coin_magnet_pickup")
 	end
-	local gap = now - lastCoinPickupClock
-	lastCoinPickupClock = now
-	if gap > 2 or coinComboStreak < 1 then
-		coinComboStreak = 1
+	local origin = getCurrencyPickupWorldOrigin()
+	if
+		origin
+		and (now - combo.lastMagnetClock >= combo.MAGNET_MIN_INTERVAL)
+	then
+		combo.lastMagnetClock = now
+		playCurrencyMagnetStreak(origin, "coins")
+	end
+	local gap = now - combo.lastPickupClock
+	combo.lastPickupClock = now
+	if gap > 2 or combo.streak < 1 then
+		combo.streak = 1
 	else
-		coinComboStreak += 1
+		combo.streak += 1
 	end
 
 	scheduleComboReset()
 
-	if coinComboStreak < 2 then
+	if combo.streak < 2 then
 		return
 	end
 
 	local lbl = ensureComboLabel()
-	lbl.Text = "x" .. tostring(coinComboStreak)
-	lbl.TextColor3 = comboColorForStreak(coinComboStreak)
-	lbl.TextSize = comboTextSizeForStreak(coinComboStreak)
+	lbl.Text = "x" .. tostring(combo.streak)
+	lbl.TextColor3 = comboColorForStreak(combo.streak)
+	lbl.TextSize = comboTextSizeForStreak(combo.streak)
 	lbl.TextTransparency = 0
 	lbl.Visible = true
 
-	local sc = comboUIScale
+	local sc = combo.uiScale
 	if sc then
 		sc.Scale = 1
 		TweenService:Create(sc, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.22 }):Play()
@@ -1631,7 +2446,7 @@ local function comboCoinPickup()
 		end)
 	end
 
-	if coinComboStreak == 10 then
+	if combo.streak == 10 then
 		screenFlash(Color3.new(1, 1, 1), 0.2, 0.25)
 		SoundFacade.playOneShot("level_up")
 	end
@@ -1666,15 +2481,15 @@ function VFXController.onRunDistanceTick(totalDistance: number)
 	end
 	milestoneDistanceCelebration(totalDistance)
 	local newFloor = virtualCoinFloorFromDistance(totalDistance)
-	if newFloor <= lastVirtualCoinFloor then
+	if newFloor <= combo.lastVirtualFloor then
 		return
 	end
-	local n = newFloor - lastVirtualCoinFloor
+	local n = newFloor - combo.lastVirtualFloor
 	local maxBurst = 24
 	for _ = 1, math.min(n, maxBurst) do
 		comboCoinPickup()
 	end
-	lastVirtualCoinFloor = newFloor
+	combo.lastVirtualFloor = newFloor
 end
 
 function VFXController.isFirstRunOfDay(): boolean
@@ -1819,55 +2634,91 @@ function VFXController.onRunStarted(runInfo: any)
 	runActive = true
 	fuelPanicDeepShake = false
 	runShakeState = nil
-	activeWorldId = if type(runInfo) == "table" and type(runInfo.worldId) == "string" then runInfo.worldId else "grasslands"
+	activeWorldId = if type(runInfo) == "table" and type(runInfo.worldId) == "string" then runInfo.worldId else "forest"
 	lastDistK1 = 0
 	lastDistK5 = 0
 	lastDistK10 = 0
 	nearMissPendingRecover = false
 	local cam = workspace.CurrentCamera
 	if cam then
-		baseCameraFov = cam.FieldOfView
+		camState.baseFov = cam.FieldOfView
 	end
-	lastVirtualCoinFloor = 0
-	coinComboStreak = 0
-	lastCoinPickupClock = 0
-	comboResetToken += 1
+	camState.speedFovAdd = 0
+	camState.boostFovAdd = 0
+	combo.lastVirtualFloor = 0
+	combo.streak = 0
+	combo.lastPickupClock = 0
+	combo.resetToken += 1
 	hideComboLabel()
 	local st = if type(runInfo) == "table" then runInfo.stats else nil
-	runPowerForCombo = if type(st) == "table" and type((st :: any).power) == "number" then (st :: any).power else 0
+	combo.runPower = if type(st) == "table" and type((st :: any).power) == "number" then (st :: any).power else 0
+	local cid = if type(runInfo) == "table" and type(runInfo.carId) == "string" then runInfo.carId else ""
+	runVehicleVfxTier = if cid ~= "" then Cfg.Car.getVehicleVfxTier(cid) else 2
 	ensureTrailOnCar()
-	fuelPanicPrevGas = 1
-	speedRushSmoothed = 0
-	speedRushChromaSmoothed = 0
+	fuel.prevGas = 1
+	sr.smoothed = 0
+	sr.chromaSmoothed = 0
 
 	isFirstRunOfDayActive = type(runInfo) == "table" and runInfo.isFirstRunOfDay == true
 end
 
 function VFXController.onRunEnded()
 	runActive = false
+	runVehicleVfxTier = 2
 	isFirstRunOfDayActive = false
 	runShakeState = nil
 	stopFuelPanicShake()
-	if fuelPanicVignette then
-		fuelPanicVignette.BackgroundTransparency = 1
+	if fuel.vignette then
+		fuel.vignette.BackgroundTransparency = 1
 	end
-	fuelPanicPrevGas = 1
-	speedRushSmoothed = 0
-	speedRushChromaSmoothed = 0
-	if speedRushEdgeFrame then
-		speedRushEdgeFrame.BackgroundTransparency = 1
+	fuel.prevGas = 1
+	sr.smoothed = 0
+	sr.chromaSmoothed = 0
+	sr.overlayLastClock = nil
+	sr.lineSpawnAccum = 0
+	sr.tier3Micro = false
+	sr.microShakeAmt = 0
+	if sr.edgeFrame then
+		sr.edgeFrame.BackgroundTransparency = 1
 	end
-	if speedRushChromaFrame then
-		speedRushChromaFrame.BackgroundTransparency = 1
+	if sr.chromaFrame then
+		sr.chromaFrame.BackgroundTransparency = 1
+	end
+	if sr.linesLayer then
+		for _, ch in sr.linesLayer:GetChildren() do
+			ch:Destroy()
+		end
 	end
 	destroyTrail()
-	lastVirtualCoinFloor = 0
-	coinComboStreak = 0
-	comboResetToken += 1
+	combo.lastVirtualFloor = 0
+	combo.streak = 0
+	combo.resetToken += 1
 	hideComboLabel()
+	VFXController.flushCeremonyDeferredAfterRun()
 end
 
-function VFXController.runEndFanfare(isRecord: boolean)
+local function recordHottenFanfare(c: Color3): Color3
+	-- Design spec: +8% on R/G toward white at PB; leave B stable.
+	return Color3.new(math.clamp(c.R * 1.08, 0, 1), math.clamp(c.G * 1.08, 0, 1), c.B)
+end
+
+local function runEndFanfareBurstShowerColors(isRecord: boolean, rot: boolean): (Color3, Color3)
+	local burst = RUN_END_FANFARE_BURST[activeWorldId] or RUN_END_FANFARE_BURST.forest
+	local shower = RUN_END_FANFARE_SHOWER[activeWorldId] or RUN_END_FANFARE_SHOWER.forest
+	if isRecord then
+		burst = recordHottenFanfare(burst)
+		shower = recordHottenFanfare(shower)
+	end
+	if rot and not isRecord then
+		burst = burst:Lerp(ROTD_FANFARE_BURST, 0.38)
+		shower = shower:Lerp(ROTD_FANFARE_SHOWER, 0.38)
+	end
+	return burst, shower
+end
+
+function VFXController.runEndFanfare(isRecord: boolean, isRunOfDay: boolean?)
+	local rot = isRunOfDay == true
+	local highParticle = isRecord or rot
 	local cam = workspace.CurrentCamera
 	if cam then
 		local startFov = cam.FieldOfView
@@ -1885,18 +2736,22 @@ function VFXController.runEndFanfare(isRecord: boolean)
 
 	if isRecord then
 		SoundFacade.playOneShot("level_up")
+	elseif rot then
+		-- Panel plays `payout_run_of_day` same frame; keep fanfare layer lighter (pitch-warmed purchase).
+		SoundFacade.playOneShot("purchase", 1.07)
 	else
 		SoundFacade.playOneShot("purchase")
 	end
 
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Position = Vector3.new(0, 6, 0)
 		att.Parent = root
 		local burst = Instance.new("ParticleEmitter")
 		burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		burst.Color = ColorSequence.new(Color3.fromRGB(255, 215, 60))
+		local burstCol, showerCol = runEndFanfareBurstShowerColors(isRecord, rot)
+		burst.Color = ColorSequence.new(burstCol)
 		burst.Lifetime = NumberRange.new(0.5, 1.2)
 		burst.Speed = NumberRange.new(4, 22)
 		burst.SpreadAngle = Vector2.new(180, 180)
@@ -1909,11 +2764,11 @@ function VFXController.runEndFanfare(isRecord: boolean)
 		burst.LightEmission = 0.85
 		burst.Parent = att
 		local mul = lodBurstMul()
-		burst:Emit(math.floor((isRecord and 140 or 95) * mul))
+		burst:Emit(math.floor((highParticle and 140 or 95) * mul))
 
 		local shower = Instance.new("ParticleEmitter")
 		shower.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		shower.Color = ColorSequence.new(Color3.fromRGB(255, 200, 50))
+		shower.Color = ColorSequence.new(showerCol)
 		shower.Lifetime = NumberRange.new(0.8, 1.4)
 		shower.Speed = NumberRange.new(8, 28)
 		shower.SpreadAngle = Vector2.new(25, 25)
@@ -1921,7 +2776,7 @@ function VFXController.runEndFanfare(isRecord: boolean)
 		shower.Acceleration = Vector3.new(0, -35, 0)
 		shower.Rate = 0
 		shower.Parent = att
-		shower:Emit(math.floor((isRecord and 70 or 45) * mul))
+		shower:Emit(math.floor((highParticle and 70 or 45) * mul))
 
 		task.delay(2, function()
 			att:Destroy()
@@ -1929,23 +2784,71 @@ function VFXController.runEndFanfare(isRecord: boolean)
 	end
 end
 
+-- Brief full-screen vignette when the coins stat line lands (POLA-367). No FOV — see RunEndFanfareDesignSpec.
+function VFXController.payoutStaggerBigLine()
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	local gui = playerGui:FindFirstChild("DACPayout") :: ScreenGui?
+	if not gui or not gui.Enabled then
+		return
+	end
+	local Z = Cfg.UILayer.z
+	local f = Instance.new("Frame")
+	f.Name = "PayoutStaggerVignette"
+	f.BackgroundColor3 = Color3.new(0, 0, 0)
+	f.BorderSizePixel = 0
+	f.Size = UDim2.fromScale(1, 1)
+	f.ZIndex = Z.payoutFlash
+	f.BackgroundTransparency = 0.88
+	f.Parent = gui
+	TweenService:Create(f, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
+	task.delay(0.4, function()
+		if f.Parent then
+			f:Destroy()
+		end
+	end)
+end
+
 function VFXController.speedTrail(speed: number)
 	ensureTrailOnCar()
-	if not trailEmitterL or not trailEmitterR then
+	if not trail.emitterL or not trail.emitterR then
 		return
 	end
 
-	local theme = WORLD_TRAIL_NEON[activeWorldId] or WORLD_TRAIL_NEON.grasslands
+	local theme = WORLD_TRAIL_NEON[activeWorldId] or WORLD_TRAIL_NEON.forest
 	local tc = trailColorFromSpeed(speed)
 	local mul = lodTrailRateMul()
-	local perWheel = math.clamp((TRAIL_BUDGET * 0.5) * mul * 0.02, 4, 50)
-	configureTrailEmitter(trailEmitterL, speed, tc, theme)
-	configureTrailEmitter(trailEmitterR, speed, tc, theme)
-	trailEmitterL.Rate = perWheel
-	trailEmitterR.Rate = perWheel
-	if boostEmitter and boostActive then
-		local starBudget = math.clamp(20 * mul, 5, 40)
-		boostEmitter.Rate = starBudget
+	local power = vehicleVfxPowerMul()
+	local perWheel = math.clamp((TRAIL_BUDGET * 0.5) * mul * 0.02 * power, 3, 62)
+	configureTrailEmitter(trail.emitterL, speed, tc, theme, power)
+	configureTrailEmitter(trail.emitterR, speed, tc, theme, power)
+	trail.emitterL.Rate = perWheel
+	trail.emitterR.Rate = perWheel
+	if trail.boostEmitter and camState.boostActive then
+		local starBudget = math.clamp(20 * mul * power, 5, 48)
+		trail.boostEmitter.Rate = starBudget
+	end
+
+	if trail.idleSparkEmitter and trail.idleSparkEmitter.Parent then
+		if runVehicleVfxTier >= 3 and speed < 18 then
+			trail.idleSparkEmitter.Enabled = true
+			local sparkRate = (runVehicleVfxTier - 2) * 5.5 * mul * power
+			trail.idleSparkEmitter.Rate = math.clamp(sparkRate, 0, 28)
+			trail.idleSparkEmitter.Color = ColorSequence.new(tc:Lerp(theme, 0.28))
+		else
+			trail.idleSparkEmitter.Enabled = false
+			trail.idleSparkEmitter.Rate = 0
+		end
+	end
+	if trail.underglowEmitter and trail.underglowEmitter.Parent and runVehicleVfxTier >= 4 then
+		trail.underglowEmitter.Enabled = true
+		local ug = math.clamp(0.26 + (speed / 140) * 0.98, 0.26, 1.28)
+		local ugRate = if speed > 5 then (6 * ug * mul * power) else (1.8 * mul * power)
+		trail.underglowEmitter.Rate = math.clamp(ugRate, 0, 30)
+		trail.underglowEmitter.Color = ColorSequence.new(theme:Lerp(Color3.new(1, 1, 1), 0.18))
+	elseif trail.underglowEmitter then
+		trail.underglowEmitter.Rate = 0
 	end
 end
 
@@ -2252,7 +3155,7 @@ function VFXController.hatchReveal(petData: any)
 	end
 	local rarity = if type(petData.rarity) == "string" then string.lower(petData.rarity) else "common"
 	local petName = if type(petData.petName) == "string" then petData.petName else "Pet"
-	local hcEntry = HatchCrackVisualSpec.getForRarity(rarity) or HatchCrackVisualSpec.getForRarity("common") :: any
+	local hcEntry = Cfg.HatchCrackVisual.getForRarity(rarity) or Cfg.HatchCrackVisual.getForRarity("common") :: any
 	local hatchCol = hcEntry.glowColor
 	local col = Constants.RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
 	local spec = BURST_TABLE[rarity] or BURST_TABLE.common
@@ -2276,8 +3179,7 @@ function VFXController.hatchReveal(petData: any)
 	local luckyStreak = eggRareStreak
 	local streakParticleMul = eggStreakParticleMul(luckyStreak)
 
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 
 	local sg = screenGui
 	if not sg then
@@ -2300,6 +3202,28 @@ function VFXController.hatchReveal(petData: any)
 	local eggCorner = Instance.new("UICorner")
 	eggCorner.CornerRadius = UDim.new(0, 24)
 	eggCorner.Parent = eggFrame
+
+	local eggAnticipate = Instance.new("UIScale")
+	eggAnticipate.Scale = 0.9
+	eggAnticipate.Parent = eggFrame
+	TweenService:Create(eggAnticipate, TweenInfo.new(0.26, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.04 }):Play()
+	task.delay(0.28, function()
+		if eggAnticipate.Parent then
+			TweenService:Create(eggAnticipate, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Scale = 1 }):Play()
+		end
+	end)
+
+	local rim = Instance.new("UIStroke")
+	rim.Name = "HatchEggRim"
+	rim.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	rim.Thickness = if rarity == "mythic" or rarity == "legendary" then 3 else 2
+	rim.Color = Color3.fromRGB(255, 255, 255)
+	rim.Transparency = 0.88
+	rim.Parent = eggFrame
+	TweenService:Create(rim, TweenInfo.new(math.min(1.1, breakT * 0.55), Enum.EasingStyle.Quad), {
+		Transparency = 0.34,
+		Color = hatchCol,
+	}):Play()
 
 	local darkOverlay: Frame? = nil
 	if rarity == "mythic" then
@@ -2384,7 +3308,7 @@ function VFXController.hatchReveal(petData: any)
 		if hitstopDur > 0.001 and elapsed >= hitstopStart and elapsed < hitstopStart + hitstopDur then
 			eggFrame.Rotation = rotAtFreeze
 		elseif elapsed < hitstopStart then
-			rotAtFreeze = HatchCrackVisualSpec.wobbleAt(hcEntry, elapsed)
+			rotAtFreeze = Cfg.HatchCrackVisual.wobbleAt(hcEntry, elapsed)
 			eggFrame.Rotation = rotAtFreeze
 		else
 			eggFrame.Rotation = rotAtFreeze
@@ -2406,8 +3330,8 @@ function VFXController.hatchReveal(petData: any)
 		dustAtt = Instance.new("Attachment")
 		dustAtt.Position = Vector3.new(0, -2, 0)
 		dustAtt.Parent = root
-		local dustRate = if lodTier <= 1 then 4 else 12
-		local sparkRate = if lodTier <= 1 then 5 else 14
+		local dustRate = if effLod() <= 1 then 4 else 12
+		local sparkRate = if effLod() <= 1 then 5 else 14
 		if rarity == "uncommon" then
 			dustRate += 1
 			sparkRate += 1
@@ -2606,15 +3530,17 @@ function VFXController.hatchReveal(petData: any)
 				cameraShake(shakeAmt, shakeDur)
 			end)
 		end
-		if rarity == "legendary" or rarity == "mythic" then
+		applyHatchLightingReveal(hcEntry, hatchCol)
+
+		local fovPunchAmt = hcEntry.fovPunch
+		if type(fovPunchAmt) == "number" and fovPunchAmt > 0.05 then
 			local cam = workspace.CurrentCamera
 			if cam then
 				local startFov = cam.FieldOfView
-				local punch = if (hcEntry.fovPunch or 0) > 0 then hcEntry.fovPunch :: number else (if rarity == "mythic" then 8 else 4)
-				local punchInT = 0.28
-				local returnT = if (hcEntry.fovReturnSec or 0) > 0 then hcEntry.fovReturnSec :: number else 0.28
-				TweenService:Create(cam, TweenInfo.new(punchInT, Enum.EasingStyle.Quad), { FieldOfView = startFov + punch }):Play()
-				task.delay(0.32, function()
+				local punchInT = 0.26
+				local returnT = if (hcEntry.fovReturnSec or 0) > 0 then hcEntry.fovReturnSec :: number else 0.26
+				TweenService:Create(cam, TweenInfo.new(punchInT, Enum.EasingStyle.Quad), { FieldOfView = startFov + fovPunchAmt }):Play()
+				task.delay(0.3, function()
 					if cam.Parent then
 						TweenService:Create(cam, TweenInfo.new(returnT), { FieldOfView = startFov }):Play()
 					end
@@ -2622,7 +3548,15 @@ function VFXController.hatchReveal(petData: any)
 			end
 		end
 
-		local attParent = root or trailPart
+		local rp = root
+		if rp and not rp.Parent then
+			rp = nil
+		end
+		local tp = trail.part
+		if tp and not tp.Parent then
+			tp = nil
+		end
+		local attParent = rp or tp
 		if attParent and attParent:IsA("BasePart") then
 			local att = Instance.new("Attachment")
 			att.Position = Vector3.new(0, 1, 0)
@@ -2676,9 +3610,40 @@ function VFXController.hatchReveal(petData: any)
 			end)
 		end
 
+		local nameY = 0.52
+		if isRarePlusRarity(rarity) then
+			local lead = Instance.new("TextLabel")
+			lead.Name = "HatchRevealLead"
+			lead.Size = UDim2.new(0.9, 0, 0, 26)
+			lead.Position = UDim2.new(0.05, 0, 0.435, 0)
+			lead.BackgroundTransparency = 1
+			lead.Font = Enum.Font.GothamBold
+			lead.TextSize = 22
+			lead.TextColor3 = Color3.fromRGB(255, 252, 245)
+			lead.TextStrokeColor3 = Color3.fromRGB(30, 25, 45)
+			lead.TextStrokeTransparency = 0.35
+			lead.Text = "YOU HATCHED"
+			lead.TextTransparency = 0.05
+			lead.ZIndex = 59
+			lead.Parent = sg
+			local leadSc = Instance.new("UIScale")
+			leadSc.Scale = 0.82
+			leadSc.Parent = lead
+			TweenService:Create(leadSc, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			TweenService:Create(lead, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Position = UDim2.new(0.05, 0, 0.405, 0),
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				lead:Destroy()
+			end)
+			nameY = 0.505
+		end
+
 		local nameLbl = Instance.new("TextLabel")
 		nameLbl.Size = UDim2.new(0.9, 0, 0, 44)
-		nameLbl.Position = UDim2.new(0.05, 0, 0.52, 0)
+		nameLbl.Position = UDim2.new(0.05, 0, nameY, 0)
 		nameLbl.BackgroundTransparency = 1
 		nameLbl.Font = Enum.Font.GothamBold
 		nameLbl.TextSize = 30
@@ -2687,8 +3652,12 @@ function VFXController.hatchReveal(petData: any)
 		nameLbl.Text = petName .. " • " .. string.upper(rarity)
 		nameLbl.ZIndex = 60
 		nameLbl.Parent = sg
+		local nameSc = Instance.new("UIScale")
+		nameSc.Scale = 0.92
+		nameSc.Parent = nameLbl
+		TweenService:Create(nameSc, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 		TweenService:Create(nameLbl, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Position = UDim2.new(0.05, 0, 0.46, 0),
+			Position = UDim2.new(0.05, 0, nameY - 0.06, 0),
 			TextTransparency = 1,
 		}):Play()
 		task.delay(0.85, function()
@@ -2705,14 +3674,22 @@ function VFXController.hatchReveal(petData: any)
 
 	if rarity == "common" or rarity == "uncommon" then
 		task.delay(breakT + 0.25, function()
-			local tpl = SocialFeedConfig.pickLine("PityEncouragement")
+			local tpl = Cfg.SocialFeed.pickLine("PityEncouragement")
 			local line = tpl:gsub("{n}", tostring(math.random(3, 14)))
 			VFXController.milestonePopup(line, "almost_there")
 		end)
 	end
 
 	task.delay(breakT + 1.5, function()
-		local confRoot = root or trailPart
+		local rp = root
+		if rp and not rp.Parent then
+			rp = nil
+		end
+		local tp = trail.part
+		if tp and not tp.Parent then
+			tp = nil
+		end
+		local confRoot = rp or tp
 		if confRoot and confRoot:IsA("BasePart") then
 			local ca = Instance.new("Attachment")
 			ca.Parent = confRoot
@@ -2720,7 +3697,7 @@ function VFXController.hatchReveal(petData: any)
 			conf.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 			conf.Color = ColorSequence.new(col)
 			conf.Lifetime = NumberRange.new(0.6, 1.2)
-			conf.Rate = if lodTier <= 1 then 12 else 32
+			conf.Rate = if effLod() <= 1 then 12 else 32
 			conf.Speed = NumberRange.new(6, 18)
 			conf.SpreadAngle = Vector2.new(40, 40)
 			conf.EmissionDirection = Enum.NormalId.Top
@@ -2784,9 +3761,12 @@ function VFXController.fusionReveal(payload: any)
 		return
 	end
 
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local attParent = root or trailPart
+	local root = Utils.getLocalHumanoidRootPart()
+	local tp: BasePart? = trail.part
+	if tp and not tp.Parent then
+		tp = nil
+	end
+	local attParent = root or tp
 
 	local layer = getCelebrationLayer()
 	local chamber = Instance.new("Frame")
@@ -3072,7 +4052,7 @@ function VFXController.fusionReveal(payload: any)
 end
 
 local function rebirthMilestoneLabel(key: string): string
-	for _, row in ipairs(RebirthMilestoneConfig.MILESTONES) do
+	for _, row in ipairs(Cfg.RebirthMilestone.MILESTONES) do
 		if row.key == key then
 			return row.label
 		end
@@ -3115,8 +4095,7 @@ local function rebirthMilestoneVfx(key: string, rebirthCount: number, suppressTe
 			screenFlash(Color3.fromRGB(255, 200, 120), 0.5, 0.52)
 		end)
 		SoundFacade.playOneShot("rebirth_boom")
-		local char = player.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3137,8 +4116,7 @@ local function rebirthMilestoneVfx(key: string, rebirthCount: number, suppressTe
 	elseif key == "elite" then
 		screenFlash(Color3.fromRGB(220, 230, 240), 0.55, 0.65)
 		SoundFacade.playOneShot("rebirth_confetti")
-		local char = player.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			for i = 1, 3 do
 				local att = Instance.new("Attachment")
@@ -3173,8 +4151,7 @@ local function rebirthMilestoneVfx(key: string, rebirthCount: number, suppressTe
 			cameraShake(0.5, 0.45)
 		end)
 		SoundFacade.playOneShot("rebirth_boom")
-		local char = player.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3202,8 +4179,7 @@ local function rebirthMilestoneVfx(key: string, rebirthCount: number, suppressTe
 			cameraShake(0.65, 0.55)
 		end)
 		SoundFacade.playOneShot("rebirth_boom")
-		local char = player.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3243,8 +4219,7 @@ local function rebirthMilestoneVfx(key: string, rebirthCount: number, suppressTe
 		task.delay(0.15, function()
 			SoundFacade.playOneShot("rebirth_boom")
 		end)
-		local char = player.Character
-		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3334,6 +4309,11 @@ local function rebirthFlashStandard(rebirthCount: number)
 	task.delay(0.08, function()
 		screenFlash(Color3.fromRGB(255, 210, 90), 0.6, 0.55)
 	end)
+	-- Payoff SFX (milestone tiers use rebirthMilestoneVfx; this path is non-tier rebirths)
+	SoundFacade.playOneShot("rebirth_boom")
+	task.delay(0.1, function()
+		SoundFacade.playOneShot("rebirth_confetti")
+	end)
 
 	local sg = screenGui
 	if not sg then
@@ -3358,8 +4338,7 @@ local function rebirthFlashStandard(rebirthCount: number)
 		n:Destroy()
 	end)
 
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Parent = root
@@ -3406,6 +4385,11 @@ function VFXController.milestonePopup(text: string, style: string?)
 		return
 	end
 	local st = style or "small"
+	-- Defer optional FOMO / collection nudges for low-session players (see NewPlayerCalmWindow).
+	if NewPlayerCalmWindow.shouldDeferMilestoneStyle(st) then
+		NewPlayerCalmWindow.enqueueMilestone(text, st)
+		return
+	end
 	local lbl = acquirePopup()
 	lbl.Text = text
 	lbl.TextTransparency = 0
@@ -3418,7 +4402,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 		lbl.TextColor3 = Color3.fromRGB(255, 250, 220)
 		SoundFacade.playOneShot("distance_marker")
 		local spark = Instance.new("ParticleEmitter")
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			spark.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 			spark.Color = ColorSequence.new(Color3.fromRGB(255, 255, 200))
@@ -3471,7 +4455,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 	elseif st == "world_unlock" then
 		lbl.TextSize = 40
 		lbl.TextColor3 = Color3.fromRGB(200, 255, 220)
-		local worldId = "grasslands"
+		local worldId = "forest"
 		local pipe = string.find(text, "|", 1, true)
 		if pipe then
 			lbl.Text = string.sub(text, 1, pipe - 1)
@@ -3480,7 +4464,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 			lbl.Text = "NEW WORLD UNLOCKED!"
 			worldId = text
 		end
-		local flashCol = WORLD_TRAIL_NEON[worldId] or WORLD_TRAIL_NEON.grasslands
+		local flashCol = WORLD_TRAIL_NEON[worldId] or WORLD_TRAIL_NEON.forest
 		screenFlash(flashCol, 0.4, 0.35)
 		SoundFacade.playOneShot("world_unlock")
 	elseif st == "close_call" then
@@ -3491,7 +4475,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 		lbl.TextSize = 48
 		lbl.TextColor3 = Color3.fromRGB(255, 255, 200)
 		SoundFacade.playOneShot("hatch_legendary")
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3537,7 +4521,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 			cameraShake(0.55, 0.42)
 		end)
 		SoundFacade.playOneShot("rebirth_boom")
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local root = Utils.getLocalHumanoidRootPart()
 		if root then
 			local att = Instance.new("Attachment")
 			att.Parent = root
@@ -3570,10 +4554,68 @@ function VFXController.milestonePopup(text: string, style: string?)
 			lbl.Visible = false
 		end)
 		return
+	elseif st == "vehicle_reset_ok" then
+		-- POLA-468: large, readable on phone (not failure_toast-sized)
+		lbl.TextSize = 38
+		lbl.TextWrapped = true
+		lbl.TextColor3 = Color3.fromRGB(130, 255, 175)
+		lbl.TextStrokeColor3 = Color3.fromRGB(18, 45, 28)
+		lbl.TextStrokeTransparency = 0.28
+		lbl.Size = UDim2.new(0.9, 0, 0, 100)
+		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+		lbl.Position = UDim2.new(0.5, 0, 0.6, 0)
+		local dur = 1.9
+		TweenService:Create(lbl, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+			Position = UDim2.new(0.5, 0, 0.56, 0),
+		}):Play()
+		task.delay(dur + 0.08, function()
+			lbl.Visible = false
+		end)
+		return
+	elseif st == "vehicle_reset_hint" then
+		lbl.TextSize = 36
+		lbl.TextWrapped = true
+		lbl.TextColor3 = Color3.fromRGB(255, 230, 140)
+		lbl.TextStrokeColor3 = Color3.fromRGB(60, 40, 10)
+		lbl.TextStrokeTransparency = 0.3
+		lbl.Size = UDim2.new(0.92, 0, 0, 108)
+		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+		lbl.Position = UDim2.new(0.5, 0, 0.6, 0)
+		local dur = 2.2
+		TweenService:Create(lbl, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+			Position = UDim2.new(0.5, 0, 0.56, 0),
+		}):Play()
+		task.delay(dur + 0.08, function()
+			lbl.Visible = false
+		end)
+		return
+	elseif st == "vehicle_reset_err" then
+		lbl.TextSize = 38
+		lbl.TextWrapped = true
+		lbl.TextColor3 = Color3.fromRGB(255, 155, 135)
+		lbl.TextStrokeColor3 = Color3.fromRGB(55, 18, 18)
+		lbl.TextStrokeTransparency = 0.26
+		lbl.Size = UDim2.new(0.92, 0, 0, 108)
+		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
+		lbl.Position = UDim2.new(0.5, 0, 0.62, 0)
+		local dur = 2.05
+		TweenService:Create(lbl, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+			Position = UDim2.new(0.5, 0, 0.58, 0),
+		}):Play()
+		task.delay(dur + 0.08, function()
+			lbl.Visible = false
+		end)
+		return
 	elseif st == "world_arrival" then
 		local headline = "Welcome!"
 		local flavor = ""
-		local worldId = "grasslands"
+		local worldId = "forest"
 		local p1 = string.find(text, "|", 1, true)
 		if p1 then
 			headline = string.sub(text, 1, p1 - 1)
@@ -3594,7 +4636,7 @@ function VFXController.milestonePopup(text: string, style: string?)
 		lbl.TextSize = 28
 		lbl.TextColor3 = Color3.fromRGB(255, 245, 215)
 		lbl.Position = UDim2.new(0.5, 0, 0.38, 0)
-		local flashCol = WORLD_TRAIL_NEON[worldId] or WORLD_TRAIL_NEON.grasslands
+		local flashCol = WORLD_TRAIL_NEON[worldId] or WORLD_TRAIL_NEON.forest
 		screenFlash(flashCol, 0.2, 0.26)
 	elseif st == "almost_there" then
 		lbl.TextSize = 28
@@ -3691,21 +4733,7 @@ local function escapeRichtext(s: string): string
 	return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
 end
 
-function VFXController.ceremonyFirstTime(payload: any)
-	if type(payload) ~= "table" then
-		return
-	end
-	local body = payload.body
-	if type(body) ~= "string" or body == "" then
-		return
-	end
-	VFXController.milestonePopup(body, "first_time_ceremony")
-end
-
-function VFXController.ceremonySpendMilestone(payload: any)
-	if type(payload) ~= "table" then
-		return
-	end
+local function runSpendMilestoneImmediate(payload: any)
 	local sg = screenGui
 	if not sg then
 		return
@@ -3748,6 +4776,101 @@ function VFXController.ceremonySpendMilestone(payload: any)
 	end)
 end
 
+-- Full-screen / hero ceremonies from MilestoneCeremonyService queue (first-time + spend).
+-- Phase4NotificationLaneJuiceSpec §3.3 / §4: separate from achievement FIFO; blocks [C] while active.
+function VFXController.isCeremonyHeroBlocking(): boolean
+	return cer.showing
+end
+
+local function scheduleCeremonySlotAfterGap()
+	task.delay(0.4, function()
+		VFXController.tryProcessCeremonyQueue()
+		if not cer.showing then
+			NotificationLaneBridge.resume()
+		end
+	end)
+end
+
+function VFXController.tryProcessCeremonyQueue()
+	if cer.showing or runActive then
+		return
+	end
+	if #cer.queue == 0 then
+		return
+	end
+	cer.showing = true
+	local item = table.remove(cer.queue, 1)
+	if item.kind == "first" then
+		local body = (item.payload :: any).body
+		if type(body) == "string" and body ~= "" then
+			VFXController.milestonePopup(body, "first_time_ceremony")
+		end
+		task.delay(2.15, function()
+			cer.showing = false
+			scheduleCeremonySlotAfterGap()
+		end)
+	elseif item.kind == "spend" then
+		runSpendMilestoneImmediate(item.payload)
+		task.delay(2.55, function()
+			cer.showing = false
+			scheduleCeremonySlotAfterGap()
+		end)
+	else
+		cer.showing = false
+		NotificationLaneBridge.resume()
+	end
+end
+
+local function enqueueFullCeremony(kind: "first" | "spend", payload: any)
+	local entry: CeremonyQueued = { kind = kind, payload = payload }
+	if runActive then
+		if #cer.queueDuringRun >= 3 then
+			return
+		end
+		table.insert(cer.queueDuringRun, entry)
+		return
+	end
+	if #cer.queue >= 3 then
+		return
+	end
+	table.insert(cer.queue, entry)
+	VFXController.tryProcessCeremonyQueue()
+end
+
+function VFXController.flushCeremonyDeferredAfterRun()
+	while #cer.queueDuringRun > 0 and #cer.queue < 3 do
+		table.insert(cer.queue, table.remove(cer.queueDuringRun, 1))
+	end
+	VFXController.tryProcessCeremonyQueue()
+	if not cer.showing then
+		NotificationLaneBridge.resume()
+	end
+end
+
+function VFXController.ceremonyFirstTime(payload: any)
+	if type(payload) ~= "table" then
+		return
+	end
+	local body = payload.body
+	if type(body) ~= "string" or body == "" then
+		return
+	end
+	enqueueFullCeremony("first", payload)
+end
+
+function VFXController.ceremonySpendMilestone(payload: any)
+	if type(payload) ~= "table" then
+		return
+	end
+	if not screenGui then
+		return
+	end
+	enqueueFullCeremony("spend", payload)
+end
+
+-- Streak milestones: MilestoneCeremonyDesignSpec keeps these on the fast toast channel (not the
+-- first/spend hero queue), so cer.showing stays false — Phase4NotificationLaneJuiceSpec §5.3
+-- hero precedence applies only to queued full ceremonies vs [C], not to streak toasts.
 function VFXController.ceremonyStreakMilestone(payload: any)
 	if type(payload) ~= "table" then
 		return
@@ -3768,13 +4891,9 @@ local function subVfxTemplate(s: string, vars: { [string]: string }): string
 end
 
 local function getCurrencyAmount(data: any, currency: string): number
-	local c = string.lower(currency)
-	if c == "coins" then
-		return if type(data.coins) == "number" then data.coins else 0
-	elseif c == "gems" then
-		return if type(data.gems) == "number" then data.gems else 0
-	elseif c == "crystals" then
-		return if type(data.crystals) == "number" then data.crystals else 0
+	local v = data[currency]
+	if type(v) == "number" then
+		return v
 	end
 	return 0
 end
@@ -3794,7 +4913,7 @@ local function processAlmostThereNudges(data: any)
 	if type(data) ~= "table" then
 		return
 	end
-	local tpl = (SocialFeedConfig :: any).AlmostThereVFX
+	local tpl = (Cfg.SocialFeed :: any).AlmostThereVFX
 	if type(tpl) ~= "table" then
 		return
 	end
@@ -3803,7 +4922,7 @@ local function processAlmostThereNudges(data: any)
 	local coins = if type(data.coins) == "number" then data.coins else 0
 	local worlds = cloneWorldMap(data.unlockedWorlds)
 
-	local cost = Utils.calculateRebirthCost(reb, RebirthConfig.BaseCost, RebirthConfig.CostMultiplier)
+	local cost = Utils.calculateRebirthCost(reb, Cfg.Rebirth.BaseCost, Cfg.Rebirth.CostMultiplier)
 	if cost > 0 and coins >= cost * 0.8 and coins < cost then
 		local line = tpl.rebirth
 		if type(line) == "string" and line ~= "" then
@@ -3811,18 +4930,18 @@ local function processAlmostThereNudges(data: any)
 		end
 	end
 
-	local sorted = WorldConfig.getWorldsSorted()
+	local sorted = Cfg.World.getWorldsSorted()
 	local nextWorldRow: any = nil
 	for _, w in sorted do
 		if not worlds[w.id] then
-			nextWorldRow = WorldConfig.Worlds[w.id]
+			nextWorldRow = Cfg.World.Worlds[w.id]
 			break
 		end
 	end
 
 	if nextWorldRow then
 		local wid = nextWorldRow.id :: string
-		local thresholds = (WorldUnlockConfig :: any).RebirthThresholdsByWorldId
+		local thresholds = (Cfg.WorldUnlock :: any).RebirthThresholdsByWorldId
 		local worldNudged = false
 		local wantRebirthWorldNudge = false
 		if type(thresholds) == "table" then
@@ -3855,7 +4974,7 @@ local function processAlmostThereNudges(data: any)
 		end
 	end
 
-	local totalSpecies = PetConfig.getTotalSpeciesCount()
+	local totalSpecies = Cfg.Pet.getTotalSpeciesCount()
 	if totalSpecies > 0 then
 		local newDisc = cloneDiscoveredMap(data.discoveredPets)
 		local newC = countDiscoveredSpecies(newDisc)
@@ -3879,7 +4998,7 @@ function VFXController.petIndexDiscovery(petId: string)
 	if not sg then
 		return
 	end
-	local def = PetConfig.Pets[petId]
+	local def = Cfg.Pet.Pets[petId]
 	local rarity = if def and type(def.rarity) == "string" then string.lower(def.rarity) else "common"
 	local petName = if def and type(def.name) == "string" then def.name else "???"
 	local col = Constants.RARITY_COLORS[rarity] or Color3.fromRGB(200, 200, 200)
@@ -3892,7 +5011,7 @@ function VFXController.petIndexDiscovery(petId: string)
 
 	screenFlash(col, 0.14, 0.42)
 
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Parent = root
@@ -4018,7 +5137,7 @@ function VFXController.petIndexDiscovery(petId: string)
 		if not ok or type(data) ~= "table" then
 			return
 		end
-		local totalSpecies = PetConfig.getTotalSpeciesCount()
+		local totalSpecies = Cfg.Pet.getTotalSpeciesCount()
 		local found = 0
 		if type(data.discoveredPets) == "table" then
 			for _, v in pairs(data.discoveredPets) do
@@ -4029,8 +5148,12 @@ function VFXController.petIndexDiscovery(petId: string)
 		end
 		local pct = if totalSpecies > 0 then math.floor((found * 100) / totalSpecies) else 0
 		local remaining = math.max(0, totalSpecies - found)
-		local tpl = MicrocopyConfig.pickVariant(MicrocopyConfig.CollectionNewDiscovery)
-		tpl = tpl:gsub("{PET}", petName):gsub("{REMAINING}", tostring(remaining)):gsub("{PERCENT}", tostring(pct))
+		local tpl = Cfg.Microcopy.pickVariant(Cfg.Microcopy.CollectionNewDiscovery)
+		tpl = tpl
+			:gsub("{PET}", petName)
+			:gsub("{RARITY}", string.upper(rarity))
+			:gsub("{REMAINING}", tostring(remaining))
+			:gsub("{PERCENT}", tostring(pct))
 		VFXFacade.milestonePopup(tpl, "collection_toast")
 	end)
 
@@ -4048,14 +5171,23 @@ function VFXController.petIndexDiscovery(petId: string)
 	end)
 end
 
-function VFXController.nearMissSpark(fromRight: boolean)
-	local primary = trailPart
+function VFXController.nearMissSpark(fromRight: boolean, comboStreak: number?)
+	local primary = trail.part
 	if not primary or not primary.Parent then
 		ensureTrailOnCar()
-		primary = trailPart
+		primary = trail.part
 	end
 	if not primary then
 		return
+	end
+	local streak = math.max(1, math.floor(tonumber(comboStreak) or 1))
+	local mul = 1
+	if streak >= 5 then
+		mul = 2
+	elseif streak >= 3 then
+		mul = 1.6
+	elseif streak == 2 then
+		mul = 1.3
 	end
 	local sign = if fromRight then 1 else -1
 	local att = Instance.new("Attachment")
@@ -4063,17 +5195,45 @@ function VFXController.nearMissSpark(fromRight: boolean)
 	att.Parent = primary
 	local sp = Instance.new("ParticleEmitter")
 	sp.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	sp.Color = ColorSequence.new(Color3.fromRGB(255, 120, 80))
-	sp.Lifetime = NumberRange.new(0.12, 0.28)
-	sp.Speed = NumberRange.new(8, 22)
-	sp.SpreadAngle = Vector2.new(40, 40)
+	sp.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 60, 30)),
+		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 120, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 200, 80)),
+	})
+	sp.Lifetime = NumberRange.new(0.1, 0.25)
+	sp.Speed = NumberRange.new(10, 26)
+	sp.SpreadAngle = Vector2.new(50, 50)
 	sp.EmissionDirection = if fromRight then Enum.NormalId.Right else Enum.NormalId.Left
 	sp.Rate = 0
-	sp.Size = NumberSequence.new(0.12, 0.45)
+	sp.Size = NumberSequence.new(0.1, 0.4)
+	sp.LightEmission = 0.9
+	sp.Drag = 0.8
 	sp.Parent = att
-	sp:Emit(math.floor(math.random(3, 5) * lodBurstMul()))
-	task.delay(0.45, function()
-		att:Destroy()
+	local burst = math.floor(6 * lodBurstMul() * mul)
+	sp:Emit(burst)
+	if effLod() >= 3 then
+		task.delay(0.06, function()
+			if not att.Parent then
+				return
+			end
+			local sp2 = Instance.new("ParticleEmitter")
+			sp2.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			sp2.Color = ColorSequence.new(Color3.fromRGB(255, 240, 160))
+			sp2.Lifetime = NumberRange.new(0.15, 0.35)
+			sp2.Speed = NumberRange.new(4, 12)
+			sp2.SpreadAngle = Vector2.new(90, 90)
+			sp2.Rate = 0
+			sp2.Size = NumberSequence.new(0.06, 0.22)
+			sp2.LightEmission = 0.7
+			sp2.Acceleration = Vector3.new(0, 3, 0)
+			sp2.Parent = att
+			sp2:Emit(math.floor(4 * lodBurstMul()))
+		end)
+	end
+	task.delay(0.5, function()
+		if att.Parent then
+			att:Destroy()
+		end
 	end)
 end
 
@@ -4086,10 +5246,60 @@ function VFXController.nearMissEdgeEnterFx(fromRight: boolean)
 	task.delay(0.12, function()
 		TweenService:Create(vig, TweenInfo.new(0.22, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 }):Play()
 	end)
+	if effLod() >= 2 then
+		local sg = screenGui
+		if sg then
+			if nearMissEdgeFlashStrip and nearMissEdgeFlashStrip.Parent then
+				nearMissEdgeFlashStrip:Destroy()
+			end
+			local strip = Instance.new("Frame")
+			strip.Name = "NearMissEdgeFlash"
+			strip.ZIndex = 996
+			strip.BorderSizePixel = 0
+			strip.Size = UDim2.new(0.15, 0, 1, 0)
+			strip.Position = if fromRight then UDim2.new(0.85, 0, 0, 0) else UDim2.new(0, 0, 0, 0)
+			strip.BackgroundColor3 = Color3.fromRGB(255, 40, 20)
+			strip.BackgroundTransparency = 0.15
+			local g = Instance.new("UIGradient")
+			g.Rotation = 0
+			if fromRight then
+				g.Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 1),
+					NumberSequenceKeypoint.new(0.7, 0.4),
+					NumberSequenceKeypoint.new(1, 0),
+				})
+			else
+				g.Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0),
+					NumberSequenceKeypoint.new(0.3, 0.4),
+					NumberSequenceKeypoint.new(1, 1),
+				})
+			end
+			g.Parent = strip
+			strip.Parent = sg
+			nearMissEdgeFlashStrip = strip
+			TweenService:Create(strip, TweenInfo.new(0.08, Enum.EasingStyle.Quad), {
+				BackgroundColor3 = Color3.fromRGB(255, 200, 80),
+			}):Play()
+			task.delay(0.14, function()
+				if strip.Parent then
+					TweenService:Create(strip, TweenInfo.new(0.18, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 }):Play()
+				end
+			end)
+			task.delay(0.4, function()
+				if strip.Parent then
+					strip:Destroy()
+				end
+				if nearMissEdgeFlashStrip == strip then
+					nearMissEdgeFlashStrip = nil
+				end
+			end)
+		end
+	end
 	SoundFacade.playOneShot(if math.random(1, 2) == 1 then "screech" else "rebirth_whoosh")
 end
 
-function VFXController.nearMissRecover()
+function VFXController.nearMissRecover(comboStreak: number?)
 	if not nearMissPendingRecover then
 		return
 	end
@@ -4099,7 +5309,62 @@ function VFXController.nearMissRecover()
 	end
 	lastCloseCallClock = now
 	nearMissPendingRecover = false
-	VFXController.milestonePopup("CLOSE CALL!", "close_call")
+	local streak = math.max(1, math.floor(tonumber(comboStreak) or 1))
+	if streak >= 3 then
+		screenFlash(Color3.fromRGB(255, 220, 120), 0.15, 0.7)
+		task.spawn(function()
+			cameraShake(0.08, 0.08)
+		end)
+	end
+	if streak >= 5 then
+		pcall(function()
+			-- POLA-668: ascending pitch with streak (MANIFEST); SoundController clamps 0.5–2
+			local p = math.clamp(0.88 + (math.min(streak, 20) - 5) * 0.06, 0.85, 1.95)
+			SoundFacade.playOneShot("combo_ding", p)
+		end)
+	end
+	local sg = screenGui
+	if sg then
+		local bonus = Instance.new("TextLabel")
+		bonus.Name = "NearMissBonus"
+		bonus.BackgroundTransparency = 1
+		bonus.Size = UDim2.fromOffset(120, 28)
+		bonus.AnchorPoint = Vector2.new(0.5, 1)
+		bonus.Position = UDim2.new(0.5, (math.random() - 0.5) * 40, 0.48, 0)
+		bonus.Font = Enum.Font.GothamBlack
+		bonus.TextSize = 18
+		bonus.TextColor3 = Color3.fromRGB(255, 255, 200)
+		bonus.TextStrokeTransparency = 0.4
+		bonus.TextStrokeColor3 = Color3.fromRGB(120, 80, 0)
+		bonus.Text = "+50"
+		bonus.ZIndex = 850
+		bonus.Parent = sg
+		local sc = Instance.new("UIScale")
+		sc.Scale = 0.5
+		sc.Parent = bonus
+		TweenService:Create(sc, TweenInfo.new(0.08, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.2 }):Play()
+		task.delay(0.08, function()
+			if sc.Parent then
+				TweenService:Create(sc, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			end
+		end)
+		TweenService:Create(bonus, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, (math.random() - 0.5) * 30, 0.42, 0),
+		}):Play()
+		task.delay(0.35, function()
+			if bonus.Parent then
+				TweenService:Create(bonus, TweenInfo.new(0.25, Enum.EasingStyle.Quad), { TextTransparency = 1 }):Play()
+			end
+		end)
+		task.delay(0.65, function()
+			if bonus.Parent then
+				bonus:Destroy()
+			end
+		end)
+	end
+	pcall(function()
+		SoundFacade.playOneShot("notification")
+	end)
 end
 
 function VFXController.currencyPopup(currencyType: string, amount: number, flavorLine: string?)
@@ -4159,8 +5424,7 @@ function VFXController.skullDrop(amount: number)
 		lbl.Visible = false
 	end)
 
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Parent = root
@@ -4182,7 +5446,8 @@ end
 
 function VFXController.upgradeFlash()
 	-- Lightweight fallback when stat deltas are unknown; prefer statLevelUp from data updates.
-	local car = player.Character and player.Character:FindFirstChild("Car")
+	local char = Utils.getLocalCharacter()
+	local car = char and char:FindFirstChild("Car")
 	local primary = car and car:IsA("Model") and (car :: Model).PrimaryPart
 	if primary then
 		local att = Instance.new("Attachment")
@@ -4215,80 +5480,443 @@ local function formatLapTimeDisplay(lapTimeSeconds: number?): string
 	return string.format("%.2fs", lapTimeSeconds)
 end
 
-local function lapCenterToast(text: string)
+local function lapCenterToast(text: string, subtitle: string?)
 	local sg = screenGui
 	if not sg or text == "" then
 		return
 	end
+	local holder = Instance.new("Frame")
+	holder.Name = "LapToastHolder"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.new(0.92, 0, 0, if subtitle and subtitle ~= "" then 108 else 72)
+	holder.Position = UDim2.new(0.5, 0, 0.45, 0)
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.ZIndex = 900
+	holder.Parent = sg
 	local lbl = Instance.new("TextLabel")
 	lbl.Name = "LapToast"
-	lbl.AnchorPoint = Vector2.new(0.5, 0.5)
-	lbl.Size = UDim2.new(0.92, 0, 0, 72)
-	lbl.Position = UDim2.new(0.5, 0, 0.45, 0)
+	lbl.AnchorPoint = Vector2.new(0.5, 0)
+	lbl.Size = UDim2.new(1, 0, 0, 48)
+	lbl.Position = UDim2.new(0.5, 0, 0, 0)
 	lbl.BackgroundTransparency = 1
 	lbl.Font = Enum.Font.GothamBlack
-	lbl.TextSize = 40
+	lbl.TextSize = if subtitle and subtitle ~= "" then 36 else 40
 	lbl.TextColor3 = Color3.fromRGB(255, 245, 220)
 	lbl.TextStrokeTransparency = 0.35
 	lbl.TextStrokeColor3 = Color3.fromRGB(60, 40, 0)
 	lbl.Text = text
 	lbl.TextTransparency = 1
-	lbl.ZIndex = 900
-	lbl.Parent = sg
+	lbl.ZIndex = 901
+	lbl.Parent = holder
+	local subLbl: TextLabel? = nil
+	if subtitle and subtitle ~= "" then
+		local s = Instance.new("TextLabel")
+		s.Name = "LapToastSub"
+		s.AnchorPoint = Vector2.new(0.5, 0)
+		s.Size = UDim2.new(1, 0, 0, 28)
+		s.Position = UDim2.new(0.5, 0, 0, 50)
+		s.BackgroundTransparency = 1
+		s.Font = Enum.Font.GothamBold
+		s.TextSize = 18
+		s.TextColor3 = Color3.fromRGB(255, 240, 180)
+		s.TextStrokeTransparency = 0.45
+		s.Text = subtitle
+		s.TextTransparency = 1
+		s.ZIndex = 901
+		s.Parent = holder
+		subLbl = s
+	end
 	local sc = Instance.new("UIScale")
 	sc.Scale = 0.8
-	sc.Parent = lbl
+	sc.Parent = holder
 	TweenService:Create(sc, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	TweenService:Create(lbl, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+	if subLbl then
+		TweenService:Create(subLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+	end
 	task.delay(2.3, function()
 		if lbl.Parent then
 			TweenService:Create(lbl, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				TextTransparency = 1,
 				TextStrokeTransparency = 1,
 			}):Play()
+			if subLbl and subLbl.Parent then
+				TweenService:Create(subLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					TextTransparency = 1,
+					TextStrokeTransparency = 1,
+				}):Play()
+			end
 			TweenService:Create(sc, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 0.95 }):Play()
 		end
 	end)
 	task.delay(2.75, function()
-		if lbl.Parent then
-			lbl:Destroy()
+		if holder.Parent then
+			holder:Destroy()
 		end
 	end)
 end
 
-function VFXController.lapFlash(isPersonalBest: boolean, lapTimeSeconds: number?)
-	SoundFacade.playOneShot("lap_horn")
+local function lapSpeedStreakBurst(sg: ScreenGui, isPb: boolean)
+	if effLod() < 1 then
+		return
+	end
+	local baseCol = if isPb then Color3.fromRGB(255, 228, 100) else Color3.fromRGB(255, 255, 255)
+	local holder = Instance.new("Frame")
+	holder.Name = "LapSpeedStreakBurst"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.fromScale(1, 1)
+	holder.ZIndex = 1001
+	holder.Parent = sg
+	for i = 1, 3 do
+		local y = 0.40 + (i - 2) * 0.038
+		local line = Instance.new("Frame")
+		line.BorderSizePixel = 0
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.Position = UDim2.fromScale(-0.25, y)
+		line.Size = UDim2.new(0.5, 0, 0, 4)
+		line.BackgroundColor3 = baseCol
+		line.BackgroundTransparency = 0.2
+		line.ZIndex = 1002
+		line.Parent = holder
+		local grad = Instance.new("UIGradient")
+		grad.Rotation = 0
+		grad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, baseCol:Lerp(Color3.new(1, 1, 1), 0.35)),
+			ColorSequenceKeypoint.new(0.5, baseCol),
+			ColorSequenceKeypoint.new(1, baseCol:Lerp(Color3.new(0, 0, 0), 0.2)),
+		})
+		grad.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.55),
+			NumberSequenceKeypoint.new(0.45, 0),
+			NumberSequenceKeypoint.new(1, 0.65),
+		})
+		grad.Parent = line
+		local delay = (i - 1) * 0.04
+		task.delay(delay, function()
+			if not line.Parent then
+				return
+			end
+			TweenService:Create(line, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Position = UDim2.fromScale(1.15, y),
+				BackgroundTransparency = 1,
+			}):Play()
+		end)
+	end
+	task.delay(0.55, function()
+		if holder.Parent then
+			holder:Destroy()
+		end
+	end)
+end
+
+local function lapDeltaPopBanner(deltaSeconds: number)
 	local sg = screenGui
+	if not sg then
+		return
+	end
+	local absd = math.abs(deltaSeconds)
+	local signChar = if deltaSeconds >= 0 then "+" else "−"
+	local txt = string.format("%s%.2fs", signChar, absd)
+	-- POLA-450: green = faster vs reference; soft amber = slower (not punishing)
+	local col = if deltaSeconds < -0.002 then Color3.fromRGB(72, 230, 130)
+		elseif deltaSeconds > 0.002 then Color3.fromRGB(255, 210, 155)
+		else Color3.fromRGB(230, 230, 255)
+	local holder = Instance.new("Frame")
+	holder.Name = "LapDeltaPop"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.new(0, 220, 0, 44)
+	holder.Position = UDim2.new(0.5, 0, 0.34, 0)
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.ZIndex = 902
+	holder.Parent = sg
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "Delta"
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextSize = 28
+	lbl.Text = txt
+	lbl.TextColor3 = col
+	lbl.TextStrokeTransparency = 0.25
+	lbl.TextStrokeColor3 = Color3.fromRGB(20, 20, 30)
+	lbl.TextTransparency = 1
+	lbl.ZIndex = 903
+	lbl.Parent = holder
+	local sc = Instance.new("UIScale")
+	sc.Scale = 0.65
+	sc.Parent = holder
+	TweenService:Create(sc, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.05 }):Play()
+	TweenService:Create(lbl, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+	task.delay(1.6, function()
+		if lbl.Parent then
+			TweenService:Create(lbl, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			}):Play()
+			TweenService:Create(sc, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 0.92 }):Play()
+		end
+	end)
+	task.delay(2.05, function()
+		if holder.Parent then
+			holder:Destroy()
+		end
+	end)
+end
+
+-- Lap / highway segment complete (POLA-452): full-width FINISHED strip + scale-in; ephemeral HUD juice.
+local function lapFinishedBannerFlash(sg: ScreenGui)
+	if ClientPerformanceProfile.isReducedMotion() then
+		return
+	end
+	local holder = Instance.new("Frame")
+	holder.Name = "LapFinishedBanner"
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.Size = UDim2.new(1, 0, 0.2, 0)
+	holder.Position = UDim2.new(0.5, 0, 0.38, 0)
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.ZIndex = 1002
+	holder.Parent = sg
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Strip"
+	bar.BorderSizePixel = 0
+	bar.BackgroundColor3 = Color3.fromRGB(255, 230, 140)
+	bar.BackgroundTransparency = 0.08
+	bar.Size = UDim2.new(1, 0, 0.78, 0)
+	bar.Position = UDim2.fromScale(0.5, 0.5)
+	bar.AnchorPoint = Vector2.new(0.5, 0.5)
+	bar.Parent = holder
+	local bc = Instance.new("UICorner")
+	bc.CornerRadius = UDim.new(0, 10)
+	bc.Parent = bar
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 90)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 245, 200)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 185, 95)),
+	})
+	grad.Rotation = 0
+	grad.Parent = bar
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Color = Color3.fromRGB(42, 42, 64)
+	stroke.Transparency = 0.15
+	stroke.Parent = bar
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "FinishedLabel"
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextScaled = true
+	lbl.Text = "FINISHED"
+	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	lbl.TextStrokeTransparency = 0.2
+	lbl.TextStrokeColor3 = Color3.fromRGB(20, 20, 35)
+	lbl.ZIndex = 1003
+	lbl.Parent = bar
+
+	local sc = Instance.new("UIScale")
+	sc.Scale = 0.38
+	sc.Parent = holder
+	TweenService:Create(sc, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(0.85, function()
+		if not holder.Parent then
+			return
+		end
+		TweenService:Create(bar, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			BackgroundTransparency = 1,
+		}):Play()
+		TweenService:Create(lbl, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		}):Play()
+		TweenService:Create(stroke, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Transparency = 1,
+		}):Play()
+	end)
+	task.delay(1.25, function()
+		if holder.Parent then
+			holder:Destroy()
+		end
+	end)
+end
+
+-- Light camera confetti for every lap finish (POLA-452); PB path still adds car-attached gold burst.
+local function lapFinishLineConfettiSprinkle()
+	if ClientPerformanceProfile.isReducedMotion() or ClientPerformanceProfile.isLowGraphicsTier() then
+		return
+	end
+	if effLod() < 2 then
+		return
+	end
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local att = Instance.new("Attachment")
+	att.Name = "LapFinishConfetti"
+	att.Parent = cam
+	att.WorldCFrame = cam.CFrame * CFrame.new(0, 1.2, -12)
+	local mul = lodBurstMul()
+	local function burst(col: Color3, n: number)
+		local p = Instance.new("ParticleEmitter")
+		p.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		p.Color = ColorSequence.new(col)
+		p.Lifetime = NumberRange.new(0.35, 0.75)
+		p.Speed = NumberRange.new(6, 18)
+		p.SpreadAngle = Vector2.new(180, 180)
+		p.Rate = 0
+		p.Drag = 0.38
+		p.Acceleration = Vector3.new(0, -12, 0)
+		p.LightEmission = 0.55
+		p.Parent = att
+		p:Emit(math.floor(n * mul))
+	end
+	burst(Color3.fromRGB(255, 210, 120), 10)
+	burst(Color3.fromRGB(200, 160, 255), 8)
+	task.delay(1.05, function()
+		if att.Parent then
+			att:Destroy()
+		end
+	end)
+end
+
+function VFXController.lapFlash(
+	isPersonalBest: boolean,
+	lapTimeSeconds: number?,
+	lapDeltaSecondsFromBest: number?,
+	lapDeltaSecondsFromLast: number?
+)
+	local now = os.clock()
+	if now - lastLapFanfareClock < LAP_FANFARE_DEBOUNCE_SEC then
+		return
+	end
+	lastLapFanfareClock = now
+
+	if SoundFacade.isGameplayDucked() then
+		return
+	end
+
+	-- Prefer lap-to-lap delta when available (lap 2+); else vs stored PB / prior best.
+	local refDelta: number? = nil
+	if type(lapDeltaSecondsFromLast) == "number" then
+		refDelta = lapDeltaSecondsFromLast
+	elseif type(lapDeltaSecondsFromBest) == "number" then
+		refDelta = lapDeltaSecondsFromBest
+	end
+
+	SoundFacade.playOneShotPrefer({ "race_finish_fanfare", "lap_complete", "lap_horn" })
+	if type(refDelta) == "number" and math.abs(refDelta) > 0.002 then
+		if refDelta < 0 then
+			pcall(function()
+				SoundFacade.playOneShot("split_improve")
+			end)
+		else
+			pcall(function()
+				SoundFacade.playOneShot("split_slower")
+			end)
+		end
+	end
+	local sg = screenGui
+	if sg then
+		lapFinishedBannerFlash(sg)
+		lapSpeedStreakBurst(sg, isPersonalBest)
+		lapFinishLineConfettiSprinkle()
+	end
+	if type(refDelta) == "number" then
+		lapDeltaPopBanner(refDelta)
+	end
 	local lapLine = ""
-	if isPersonalBest and #NearMissCopyConfig.LapPersonalBest > 0 then
-		lapLine = NearMissCopyConfig.LapPersonalBest[math.random(1, #NearMissCopyConfig.LapPersonalBest)]
+	local lapSub: string? = nil
+	if isPersonalBest and #Cfg.NearMissCopy.LapPersonalBest > 0 then
+		lapLine = Cfg.NearMissCopy.LapPersonalBest[math.random(1, #Cfg.NearMissCopy.LapPersonalBest)]
+		if #Cfg.NearMissCopy.LapHumor > 0 then
+			lapSub = Cfg.NearMissCopy.LapHumor[math.random(1, #Cfg.NearMissCopy.LapHumor)]
+		end
 	elseif not isPersonalBest then
-		if math.random() < 0.7 and #NearMissCopyConfig.LapComplete > 0 then
-			lapLine = NearMissCopyConfig.LapComplete[math.random(1, #NearMissCopyConfig.LapComplete)]
-		elseif #NearMissCopyConfig.LapHumor > 0 then
-			lapLine = NearMissCopyConfig.LapHumor[math.random(1, #NearMissCopyConfig.LapHumor)]
-		elseif #NearMissCopyConfig.LapComplete > 0 then
-			lapLine = NearMissCopyConfig.LapComplete[math.random(1, #NearMissCopyConfig.LapComplete)]
+		if math.random() < 0.7 and #Cfg.NearMissCopy.LapComplete > 0 then
+			lapLine = Cfg.NearMissCopy.LapComplete[math.random(1, #Cfg.NearMissCopy.LapComplete)]
+		elseif #Cfg.NearMissCopy.LapHumor > 0 then
+			lapLine = Cfg.NearMissCopy.LapHumor[math.random(1, #Cfg.NearMissCopy.LapHumor)]
+		elseif #Cfg.NearMissCopy.LapComplete > 0 then
+			lapLine = Cfg.NearMissCopy.LapComplete[math.random(1, #Cfg.NearMissCopy.LapComplete)]
 		end
 	end
 	if lapLine ~= "" then
 		local timeStr = formatLapTimeDisplay(lapTimeSeconds)
 		lapLine = (lapLine:gsub("{TIME}", timeStr))
-		lapCenterToast(lapLine)
+		if lapSub then
+			lapSub = (lapSub:gsub("{TIME}", timeStr))
+		end
+		lapCenterToast(lapLine, lapSub)
+	end
+	if isPersonalBest then
+		pcall(function()
+			SoundFacade.playOneShot("lap_pb_chime")
+		end)
 	end
 	if not sg then
 		return
 	end
-	local peak = if isPersonalBest then 0.45 else 0.35
+
+	local improvedVsRef = type(refDelta) == "number" and refDelta < -0.002
+	local regressVsRef = type(refDelta) == "number" and refDelta > 0.002
+	local peak: number
+	local edge: Color3
+	if isPersonalBest or improvedVsRef then
+		peak = if isPersonalBest then 0.45 else 0.38
+		edge = Color3.fromRGB(65, 215, 125)
+	elseif regressVsRef then
+		peak = 0.28
+		edge = Color3.fromRGB(255, 205, 155)
+	else
+		peak = 0.34
+		edge = Color3.fromHex("FACC15")
+	end
 	local f = getLapFlashFrame()
 	f.BackgroundColor3 = Color3.new(1, 1, 1)
 	f.BackgroundTransparency = 1
-	local edge = Color3.fromHex("FACC15")
 	TweenService:Create(f, TweenInfo.new(0.08, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 - peak }):Play()
 	task.delay(0.08, function()
 		f.BackgroundColor3 = edge
 		TweenService:Create(f, TweenInfo.new(0.27, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 }):Play()
 	end)
+
+	if isPersonalBest and effLod() >= 2 then
+		local radial = Instance.new("Frame")
+		radial.Name = "PBRadialBurst"
+		radial.ZIndex = 998
+		radial.AnchorPoint = Vector2.new(0.5, 0.5)
+		radial.Position = UDim2.fromScale(0.5, 0.5)
+		radial.Size = UDim2.fromScale(0.3, 0.3)
+		radial.BackgroundColor3 = Color3.fromRGB(255, 220, 80)
+		radial.BackgroundTransparency = 0.4
+		radial.BorderSizePixel = 0
+		radial.Parent = sg
+		local rc = Instance.new("UICorner")
+		rc.CornerRadius = UDim.new(0.5, 0)
+		rc.Parent = radial
+		local rg = Instance.new("UIGradient")
+		rg.Rotation = 0
+		rg.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.3),
+			NumberSequenceKeypoint.new(0.35, 0.65),
+			NumberSequenceKeypoint.new(0.7, 1),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		rg.Parent = radial
+		TweenService:Create(radial, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.fromScale(1.5, 1.5),
+			BackgroundTransparency = 1,
+		}):Play()
+		task.delay(0.5, function()
+			if radial.Parent then
+				radial:Destroy()
+			end
+		end)
+	end
 
 	local vig = getVignetteFrame()
 	vig.BackgroundTransparency = 1
@@ -4297,14 +5925,13 @@ function VFXController.lapFlash(isPersonalBest: boolean, lapTimeSeconds: number?
 		TweenService:Create(vig, TweenInfo.new(0.2), { BackgroundTransparency = 1 }):Play()
 	end)
 
-	if lodTier >= 2 then
+	if effLod() >= 2 then
 		task.spawn(function()
 			cameraShake(if isPersonalBest then 0.2 else 0.12, 0.12)
 		end)
 	end
 
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local root = Utils.getLocalHumanoidRootPart()
 	if root then
 		local att = Instance.new("Attachment")
 		att.Position = Vector3.new(0, -4, 0)
@@ -4317,7 +5944,7 @@ function VFXController.lapFlash(isPersonalBest: boolean, lapTimeSeconds: number?
 		streaks.EmissionDirection = Enum.NormalId.Bottom
 		streaks.Rate = 0
 		streaks.Parent = att
-		local n = if lodTier <= 1 then 12 else 16
+		local n = if effLod() <= 1 then 12 else 16
 		streaks:Emit(n)
 		if isPersonalBest then
 			local conf = Instance.new("ParticleEmitter")
@@ -4344,20 +5971,20 @@ function VFXController.failureFeedback(copyLine: string, _kind: string?)
 end
 
 function VFXController.speedMilestone(speed: number)
-	speedMilestoneRushBoostUntil = os.clock() + 0.35
+	sr.milestoneBoostUntil = os.clock() + 0.35
 
 	local thr = speed
 	local tierIdx = 1
-	for i, t in ipairs(SpeedMilestoneConfig.Thresholds) do
+	for i, t in ipairs(Cfg.SpeedMilestone.Thresholds) do
 		if t == thr then
 			tierIdx = i
 			break
 		end
 	end
-	local maxTier = #SpeedMilestoneConfig.Thresholds
+	local maxTier = #Cfg.SpeedMilestone.Thresholds
 	local scale = if maxTier > 1 then (tierIdx - 1) / (maxTier - 1) else 0
-	local col: Color3 = SpeedMilestoneConfig.CelebrationColor[thr] or Color3.fromRGB(255, 200, 55)
-	local hex = SpeedMilestoneConfig.MilestoneColor[thr]
+	local col: Color3 = Cfg.SpeedMilestone.CelebrationColor[thr] or Color3.fromRGB(255, 200, 55)
+	local hex = Cfg.SpeedMilestone.MilestoneColor[thr]
 	if type(hex) == "string" and hex ~= "" then
 		local ok, c = pcall(function()
 			return Color3.fromHex(hex)
@@ -4415,80 +6042,220 @@ function VFXController.speedMilestone(speed: number)
 	end
 end
 
-function VFXController.worldTransition(fromWorldId: string, toWorldId: string)
-	local char = player.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local col = WORLD_TRAIL_NEON[toWorldId] or WORLD_TRAIL_NEON.grasslands
+-- Phase 4 world travel: fade + optional vignette; total out ~0.35–0.65s by LOD. Enter runs after DataUpdate.
+local function snapWorldTransitionFlashClear()
+	if flashLayer and flashLayer.Parent then
+		flashLayer.BackgroundTransparency = 1
+	end
+	if vignetteLayer and vignetteLayer.Parent then
+		vignetteLayer.BackgroundTransparency = 1
+	end
+end
 
-	if root then
-		local att = Instance.new("Attachment")
-		att.Parent = root
-		local swirl = Instance.new("ParticleEmitter")
-		swirl.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		swirl.Color = ColorSequence.new(col)
-		swirl.Lifetime = NumberRange.new(0.4, 1.0)
-		swirl.Rate = if lodTier <= 1 then 20 else 40
-		swirl.Speed = NumberRange.new(2, 12)
-		swirl.SpreadAngle = Vector2.new(180, 180)
-		swirl.Parent = att
-		task.delay(2, function()
-			swirl.Rate = 0
-		end)
-		task.delay(2.5, function()
-			att:Destroy()
-		end)
+local function worldTransitionDurations(lod: number): (number, number, number, number)
+	if lod <= 1 then
+		return 0.14, 0.06, 0.16, 0
+	elseif lod == 2 then
+		return 0.2, 0.1, 0.24, 0.5
+	end
+	return 0.26, 0.15, 0.35, 1
+end
+
+local function runWorldTransitionIn(_fromWorldId: string, toWorldId: string)
+	local col = WORLD_TRAIL_NEON[toWorldId] or WORLD_TRAIL_NEON.forest
+	local _, _, fadeIn, vig = worldTransitionDurations(effLod())
+
+	local f = getFlashLayer()
+	f.BackgroundColor3 = Color3.new(0, 0, 0)
+	f.ZIndex = 1000
+	f.Active = false
+	local twFlash = TweenService:Create(
+		f,
+		TweenInfo.new(fadeIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = 1 }
+	)
+	twFlash:Play()
+	twFlash.Completed:Once(function()
+		SceneTransitionGate.setActive(false)
+	end)
+
+	if vig > 0 and effLod() > 1 then
+		local v = getVignetteFrame()
+		v.ZIndex = 999
+		TweenService:Create(v, TweenInfo.new(fadeIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 }):Play()
 	end
 
-	local cam = workspace.CurrentCamera
-	if cam then
-		TweenService:Create(cam, TweenInfo.new(1, Enum.EasingStyle.Sine), { FieldOfView = cam.FieldOfView + 12 }):Play()
-		task.delay(1, function()
-			TweenService:Create(cam, TweenInfo.new(0.8), { FieldOfView = baseCameraFov }):Play()
+	if effLod() >= 2 then
+		task.delay(fadeIn * 0.35, function()
+			local amb = Lighting
+			TweenService:Create(amb, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Ambient = col:Lerp(amb.Ambient, 0.35),
+				OutdoorAmbient = col:Lerp(amb.OutdoorAmbient, 0.25),
+			}):Play()
 		end)
 	end
+end
 
-	-- Teleport fade 0.3 + 0.3 hold + 0.4 in
+local function scheduleWorldTravelTimeout()
+	lod.travelToken += 1
+	local tok = lod.travelToken
+	task.delay(4, function()
+		if tok ~= lod.travelToken then
+			return
+		end
+		local p = lod.pendingTravel
+		if not p then
+			return
+		end
+		lod.pendingTravel = nil
+		runWorldTransitionIn(p.from, p.to)
+	end)
+end
+
+function VFXController.finishWorldTravel(currentWorld: string)
+	local p = lod.pendingTravel
+	if not p then
+		return
+	end
+	if p.to ~= currentWorld then
+		lod.pendingTravel = nil
+		lod.travelToken += 1
+		snapWorldTransitionFlashClear()
+		SceneTransitionGate.setActive(false)
+		return
+	end
+	lod.pendingTravel = nil
+	lod.travelToken += 1
+	runWorldTransitionIn(p.from, p.to)
+end
+
+--[[
+	POLA-493: Failed ChangeWorld / client error after fade — clear pending travel, release SceneTransitionGate,
+	and re-apply full world bed (onWorldLeave ducked audio; without this, music/ambient stay suppressed).
+]]
+function VFXController.abortWorldTravel(restoreWorldId: string?)
+	lod.travelToken += 1
+	lod.pendingTravel = nil
+	snapWorldTransitionFlashClear()
+	SceneTransitionGate.setActive(false)
+	if type(restoreWorldId) == "string" and restoreWorldId ~= "" then
+		SoundFacade.onWorldEnter(restoreWorldId)
+	end
+end
+
+function VFXController.resetTravelFlashState()
+	lod.travelToken += 1
+	lod.pendingTravel = nil
+	snapWorldTransitionFlashClear()
+	SceneTransitionGate.setActive(false)
+end
+
+function VFXController.worldTransition(fromWorldId: string, toWorldId: string, onFadeOutComplete: (() -> ())?)
+	ClientUiLifecycle.tearDownTransientUi("world_travel_fade")
+	if not SceneTransitionGate.isActive() then
+		SceneTransitionGate.setActive(true)
+	end
+
+	local col = WORLD_TRAIL_NEON[toWorldId] or WORLD_TRAIL_NEON.forest
+	local fadeOut, hold, _, vig = worldTransitionDurations(effLod())
+
+	if effLod() >= 2 then
+		local root = Utils.getLocalHumanoidRootPart()
+		if root then
+			local att = Instance.new("Attachment")
+			att.Parent = root
+			local swirl = Instance.new("ParticleEmitter")
+			swirl.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			swirl.Color = ColorSequence.new(col)
+			swirl.Lifetime = NumberRange.new(0.4, 1.0)
+			swirl.Rate = if effLod() == 2 then 28 else 40
+			swirl.Speed = NumberRange.new(2, 12)
+			swirl.SpreadAngle = Vector2.new(180, 180)
+			swirl.Parent = att
+			task.delay(2, function()
+				swirl.Rate = 0
+			end)
+			task.delay(2.5, function()
+				att:Destroy()
+			end)
+		end
+	end
+
+	if effLod() >= 3 then
+		local cam = safeCamera()
+		if cam then
+			TweenService:Create(cam, TweenInfo.new(0.65, Enum.EasingStyle.Sine), { FieldOfView = cam.FieldOfView + 10 }):Play()
+			task.delay(0.65, function()
+				local c = safeCamera()
+				if c and c.Parent then
+					TweenService:Create(c, TweenInfo.new(0.75, Enum.EasingStyle.Sine), { FieldOfView = camState.baseFov }):Play()
+				end
+			end)
+		end
+	end
+
 	local f = getFlashLayer()
 	f.BackgroundColor3 = Color3.new(0, 0, 0)
 	f.BackgroundTransparency = 1
-	TweenService:Create(f, TweenInfo.new(0.3), { BackgroundTransparency = 0 }):Play()
-	task.delay(0.3, function()
-		task.delay(0.3, function()
-			TweenService:Create(f, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-		end)
-	end)
+	f.ZIndex = 1000
+	f.Active = false
 
-	local amb = Lighting
-	TweenService:Create(amb, TweenInfo.new(1.2), {
-		Ambient = col:Lerp(amb.Ambient, 0.35),
-		OutdoorAmbient = col:Lerp(amb.OutdoorAmbient, 0.25),
-	}):Play()
+	if vig > 0 then
+		local v = getVignetteFrame()
+		v.BackgroundTransparency = 1
+		v.ZIndex = 999
+		TweenService:Create(v, TweenInfo.new(fadeOut, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.38 }):Play()
+	end
+
+	TweenService:Create(f, TweenInfo.new(fadeOut, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { BackgroundTransparency = 0 }):Play()
+
+	task.delay(fadeOut + hold, function()
+		lod.pendingTravel = { from = fromWorldId, to = toWorldId }
+		scheduleWorldTravelTimeout()
+		if onFadeOutComplete then
+			onFadeOutComplete()
+		end
+	end)
 end
 
 local function clearAmbient()
-	for _, e in ambientEmitters do
+	for _, e in ambient.emitters do
 		if e.Parent then
 			e:Destroy()
 		end
 	end
-	table.clear(ambientEmitters)
-	if ambientFolder then
-		ambientFolder:Destroy()
-		ambientFolder = nil
+	table.clear(ambient.emitters)
+	if ambient.nearAttach then
+		ambient.nearAttach:Destroy()
+		ambient.nearAttach = nil
+	end
+	if ambient.farAttach then
+		ambient.farAttach:Destroy()
+		ambient.farAttach = nil
 	end
 end
 
+local function registerAmbientEmitter(e: ParticleEmitter): boolean
+	if #ambient.emitters >= ambient.MAX_EMITTERS then
+		e:Destroy()
+		return false
+	end
+	table.insert(ambient.emitters, e)
+	return true
+end
+
 function VFXController.ambientStop()
-	ambientRunning = false
+	ambient.running = false
 	clearAmbient()
 end
 
 function VFXController.ambientStart()
 	local allowedAmbient = {
-		grasslands = true,
+		forest = true,
 		desert = true,
-		frozen = true,
-		neon = true,
+		ice = true,
+		volcano = true,
+		space = true,
 	}
 	if not allowedAmbient[activeWorldId] then
 		return
@@ -4496,50 +6263,52 @@ function VFXController.ambientStart()
 	if runActive then
 		return
 	end
-	if lodTier <= 1 then
+	if effLod() <= 1 then
 		return
 	end
-	if ambientRunning then
+	if ambient.running then
 		return
 	end
-	ambientRunning = true
 	clearAmbient()
-	local folder = Instance.new("Folder")
-	folder.Name = "DACVFX_Ambient"
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if root then
-		folder.Parent = root
-	else
-		folder.Parent = workspace.CurrentCamera or workspace
+	local root = Utils.getLocalHumanoidRootPart()
+	if not root then
+		return
 	end
-	ambientFolder = folder
 
-	local rateMul = if lodTier == 2 then 0.65 else 1
-	local accent = WORLD_TRAIL_NEON[activeWorldId] or WORLD_TRAIL_NEON.grasslands
+	local nearAtt = Instance.new("Attachment")
+	nearAtt.Name = "DACVFX_AmbientNear"
+	nearAtt.Parent = root
+	ambient.nearAttach = nearAtt
 
-	if activeWorldId == "grasslands" then
+	ambient.running = true
+
+	local rateMul = if effLod() == 2 then 0.65 else 1
+	local palette = Cfg.WorldAmbientVFX.get(activeWorldId)
+	local accent = palette.primary
+
+	if activeWorldId == "forest" then
 		local pollen = Instance.new("ParticleEmitter")
 		pollen.Name = "Pollen"
 		pollen.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		pollen.Color = ColorSequence.new(Color3.fromRGB(255, 250, 200))
+		pollen.Color = ColorSequence.new(palette.secondary:Lerp(Color3.fromRGB(255, 250, 200), 0.35))
 		pollen.Lifetime = NumberRange.new(4, 8)
-		pollen.Rate = (if lodTier == 2 then 2 else 3) * rateMul
+		pollen.Rate = (if effLod() == 2 then 2 else 3) * rateMul
 		pollen.Speed = NumberRange.new(0.2, 1.2)
 		pollen.SpreadAngle = Vector2.new(180, 180)
 		pollen.Size = NumberSequence.new(0.08, 0.2)
-		pollen.Parent = folder
-		table.insert(ambientEmitters, pollen)
+		pollen.Parent = nearAtt
+		registerAmbientEmitter(pollen)
 
 		local seeds = Instance.new("ParticleEmitter")
 		seeds.Name = "Seeds"
 		seeds.Texture = "rbxasset://textures/particles/smoke_main.dds"
-		seeds.Color = ColorSequence.new(Color3.fromRGB(200, 180, 120))
+		seeds.Color = ColorSequence.new(accent:Lerp(Color3.fromRGB(200, 180, 120), 0.45))
 		seeds.Lifetime = NumberRange.new(5, 9)
-		seeds.Rate = (if lodTier == 2 then 1.5 else 2.5) * rateMul
+		seeds.Rate = (if effLod() == 2 then 1.5 else 2.5) * rateMul
 		seeds.Speed = NumberRange.new(0.5, 2)
 		seeds.SpreadAngle = Vector2.new(180, 180)
-		seeds.Parent = folder
-		table.insert(ambientEmitters, seeds)
+		seeds.Parent = nearAtt
+		registerAmbientEmitter(seeds)
 	elseif activeWorldId == "desert" then
 		local heat = Instance.new("ParticleEmitter")
 		heat.Name = "HeatShimmer"
@@ -4563,8 +6332,8 @@ function VFXController.ambientStart()
 			NumberSequenceKeypoint.new(0.6, 0.75),
 			NumberSequenceKeypoint.new(1, 1),
 		})
-		heat.Parent = folder
-		table.insert(ambientEmitters, heat)
+		heat.Parent = nearAtt
+		registerAmbientEmitter(heat)
 
 		local sand = Instance.new("ParticleEmitter")
 		sand.Name = "SandMotes"
@@ -4579,13 +6348,13 @@ function VFXController.ambientStart()
 		sand.Drag = 0.8
 		sand.RotSpeed = NumberRange.new(-20, 20)
 		sand.Size = NumberSequence.new(0.06, 0.18)
-		sand.Parent = folder
-		table.insert(ambientEmitters, sand)
-	elseif activeWorldId == "frozen" then
+		sand.Parent = nearAtt
+		registerAmbientEmitter(sand)
+	elseif activeWorldId == "ice" then
 		local snow = Instance.new("ParticleEmitter")
 		snow.Name = "Snowflakes"
 		snow.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		snow.Color = ColorSequence.new(Color3.fromRGB(240, 248, 255))
+		snow.Color = ColorSequence.new(palette.sky:Lerp(Color3.fromRGB(240, 248, 255), 0.5))
 		snow.Lifetime = NumberRange.new(4, 7)
 		snow.Rate = 2.8 * rateMul
 		snow.Speed = NumberRange.new(0.8, 2.5)
@@ -4594,8 +6363,8 @@ function VFXController.ambientStart()
 		snow.Acceleration = Vector3.new(0, -1.2, 0)
 		snow.Drag = 0.5
 		snow.Size = NumberSequence.new(0.1, 0.28)
-		snow.Parent = folder
-		table.insert(ambientEmitters, snow)
+		snow.Parent = nearAtt
+		registerAmbientEmitter(snow)
 
 		local ice = Instance.new("ParticleEmitter")
 		ice.Name = "IceSparkle"
@@ -4612,23 +6381,48 @@ function VFXController.ambientStart()
 			NumberSequenceKeypoint.new(0.5, 0.45),
 			NumberSequenceKeypoint.new(1, 1),
 		})
-		ice.Parent = folder
-		table.insert(ambientEmitters, ice)
-	else -- neon
+		ice.Parent = nearAtt
+		registerAmbientEmitter(ice)
+	elseif activeWorldId == "volcano" or activeWorldId == "space" then
 		local fleck = Instance.new("ParticleEmitter")
 		fleck.Name = "NeonFleck"
 		fleck.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 		fleck.Color = ColorSequence.new(accent)
 		fleck.Lifetime = NumberRange.new(1.5, 3)
-		fleck.Rate = 3 * rateMul
+		fleck.Rate = 2.4 * rateMul
 		fleck.Speed = NumberRange.new(1.5, 5)
 		fleck.SpreadAngle = Vector2.new(40, 40)
 		fleck.EmissionDirection = Enum.NormalId.Top
 		fleck.Acceleration = Vector3.new(0, 1.2, 0)
 		fleck.LightEmission = 0.9
 		fleck.Size = NumberSequence.new(0.08, 0.22)
-		fleck.Parent = folder
-		table.insert(ambientEmitters, fleck)
+		fleck.Parent = nearAtt
+		registerAmbientEmitter(fleck)
+
+		local drift = Instance.new("ParticleEmitter")
+		drift.Name = "NeonCyanDrift"
+		drift.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		drift.Color = ColorSequence.new(palette.secondary:Lerp(Color3.fromRGB(200, 255, 255), 0.2))
+		drift.Lifetime = NumberRange.new(2.2, 4.5)
+		drift.Rate = 1.8 * rateMul
+		drift.Speed = NumberRange.new(0.4, 2.2)
+		drift.SpreadAngle = Vector2.new(180, 180)
+		drift.EmissionDirection = Enum.NormalId.Front
+		drift.Acceleration = Vector3.new(0, 0.15, -0.4)
+		drift.Drag = 1.1
+		drift.LightEmission = 0.55
+		drift.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.25),
+			NumberSequenceKeypoint.new(0.5, 0.45),
+			NumberSequenceKeypoint.new(1, 0.12),
+		})
+		drift.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.55),
+			NumberSequenceKeypoint.new(0.6, 0.75),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		drift.Parent = nearAtt
+		registerAmbientEmitter(drift)
 
 		local spark = Instance.new("ParticleEmitter")
 		spark.Name = "StaticCrackle"
@@ -4636,24 +6430,53 @@ function VFXController.ambientStart()
 		spark.Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
 			ColorSequenceKeypoint.new(0.5, accent),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 220, 255)),
+			ColorSequenceKeypoint.new(1, palette.secondary),
 		})
 		spark.Lifetime = NumberRange.new(0.08, 0.22)
-		spark.Rate = 8 * rateMul
+		spark.Rate = math.min(8 * rateMul, 6)
 		spark.Speed = NumberRange.new(4, 14)
 		spark.SpreadAngle = Vector2.new(180, 180)
 		spark.LightEmission = 1
 		spark.Size = NumberSequence.new(0.04, 0.12)
-		spark.Parent = folder
-		table.insert(ambientEmitters, spark)
+		spark.Parent = nearAtt
+		registerAmbientEmitter(spark)
+	end
+
+	-- Far-field volume (offset forward/up) — extra depth; tier-3 only, still capped by ambient.MAX_EMITTERS.
+	if effLod() >= 3 and #ambient.emitters < ambient.MAX_EMITTERS then
+		local farAtt = Instance.new("Attachment")
+		farAtt.Name = "DACVFX_AmbientFar"
+		farAtt.Position = Vector3.new(0, 14, -22)
+		farAtt.Parent = root
+		local vol = Instance.new("ParticleEmitter")
+		vol.Name = "FarFieldVolume"
+		vol.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		vol.Color = ColorSequence.new(accent:Lerp(Color3.fromRGB(255, 255, 255), 0.5))
+		vol.Lifetime = NumberRange.new(3, 7)
+		vol.Rate = 1.1 * rateMul
+		vol.Speed = NumberRange.new(0.3, 2.5)
+		vol.SpreadAngle = Vector2.new(180, 180)
+		vol.LightEmission = 0.35
+		vol.Size = NumberSequence.new(0.05, 0.16)
+		vol.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.35),
+			NumberSequenceKeypoint.new(0.7, 0.65),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		vol.Parent = farAtt
+		if registerAmbientEmitter(vol) then
+			ambient.farAttach = farAtt
+		else
+			farAtt:Destroy()
+		end
 	end
 end
 
 -- Pet equip one-shot entrance (see PetEntranceDesignSpec.luau)
 local function petEquipBeamRingCount(base: number): number
-	if lodTier <= 1 then
+	if effLod() <= 1 then
 		return 0
-	elseif lodTier == 2 then
+	elseif effLod() == 2 then
 		return math.max(1, math.floor(base * 0.66 + 0.5))
 	end
 	return base
@@ -4734,6 +6557,13 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 
 	task.spawn(function()
 		local m = model :: Model
+		local modelScale = 1
+		pcall(function()
+			modelScale = (m :: any):GetScale()
+		end)
+		if modelScale ~= modelScale or modelScale < 0.01 then
+			modelScale = 1
+		end
 		local primary = m.PrimaryPart :: BasePart
 		local col = Constants.RARITY_COLORS[r] or Color3.new(1, 1, 1)
 
@@ -4759,7 +6589,7 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 			end)
 			if canScale then
 				pcall(function()
-					(m :: any):ScaleTo(0.01)
+					(m :: any):ScaleTo(0.01 * modelScale)
 				end)
 				local nv = Instance.new("NumberValue")
 				nv.Value = 0
@@ -4770,12 +6600,15 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 					{ Value = 1 }
 				)
 				nv:GetPropertyChangedSignal("Value"):Connect(function()
-					local s = 0.01 + 0.99 * nv.Value
+					local s = modelScale * (0.01 + 0.99 * nv.Value)
 					pcall(function()
 						(m :: any):ScaleTo(s)
 					end)
 				end)
 				tw.Completed:Connect(function()
+					pcall(function()
+						(m :: any):ScaleTo(modelScale)
+					end)
 					nv:Destroy()
 				end)
 				tw:Play()
@@ -5147,17 +6980,17 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 		local prevTrailR: number? = nil
 		local prevBoost: number? = nil
 		if runActive then
-			if trailEmitterL then
-				prevTrailL = trailEmitterL.Rate
-				trailEmitterL.Rate = 0
+			if trail.emitterL then
+				prevTrailL = trail.emitterL.Rate
+				trail.emitterL.Rate = 0
 			end
-			if trailEmitterR then
-				prevTrailR = trailEmitterR.Rate
-				trailEmitterR.Rate = 0
+			if trail.emitterR then
+				prevTrailR = trail.emitterR.Rate
+				trail.emitterR.Rate = 0
 			end
-			if boostEmitter then
-				prevBoost = boostEmitter.Rate
-				boostEmitter.Rate = 0
+			if trail.boostEmitter then
+				prevBoost = trail.boostEmitter.Rate
+				trail.boostEmitter.Rate = 0
 			end
 		end
 		SoundFacade.playOneShot("pet_equip_mythic_tear")
@@ -5208,14 +7041,14 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 		end
 		task.delay(0.35, function()
 			if runActive then
-				if trailEmitterL and prevTrailL ~= nil then
-					trailEmitterL.Rate = prevTrailL
+				if trail.emitterL and prevTrailL ~= nil then
+					trail.emitterL.Rate = prevTrailL
 				end
-				if trailEmitterR and prevTrailR ~= nil then
-					trailEmitterR.Rate = prevTrailR
+				if trail.emitterR and prevTrailR ~= nil then
+					trail.emitterR.Rate = prevTrailR
 				end
-				if boostEmitter and prevBoost ~= nil then
-					boostEmitter.Rate = prevBoost
+				if trail.boostEmitter and prevBoost ~= nil then
+					trail.boostEmitter.Rate = prevBoost
 				end
 			end
 			if not petEquipAlive(m) then
@@ -5231,7 +7064,7 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 			end)
 			if canScale then
 				pcall(function()
-					(m :: any):ScaleTo(0.01)
+					(m :: any):ScaleTo(0.01 * modelScale)
 				end)
 				local nv = Instance.new("NumberValue")
 				nv.Value = 0
@@ -5242,14 +7075,14 @@ function VFXController.petEquipEntrance(_petUid: string, model: Model?, rarity: 
 					{ Value = 1 }
 				)
 				nv:GetPropertyChangedSignal("Value"):Connect(function()
-					local s = 0.01 + 0.99 * nv.Value
+					local s = modelScale * (0.01 + 0.99 * nv.Value)
 					pcall(function()
 						(m :: any):ScaleTo(s)
 					end)
 				end)
 				tw.Completed:Connect(function()
 					pcall(function()
-						(m :: any):ScaleTo(1)
+						(m :: any):ScaleTo(modelScale)
 					end)
 					nv:Destroy()
 				end)
@@ -5477,7 +7310,7 @@ function VFXController.petOrbitGlow(petUid: string, model: Model?, rarity: strin
 	end
 
 	local orbitStars: ParticleEmitter? = nil
-	if (r == "legendary" or r == "mythic") and lodTier > 1 then
+	if (r == "legendary" or r == "mythic") and effLod() > 1 then
 		local os = Instance.new("ParticleEmitter")
 		os.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 		os.Color = if r == "mythic" then mythicRainbowSequence() else ColorSequence.new(Color3.fromHex("F59E0B"))
@@ -5509,7 +7342,7 @@ function VFXController.onPlayerDataUpdate(data: any)
 				table.insert(equipped, { power = pet.power or 0 })
 			end
 		end
-		cachedPetModifier = Utils.calculatePetModifier(equipped)
+		combo.petModifier = Utils.calculatePetModifier(equipped)
 	end
 
 	if type(data) == "table" and type(data.cars) == "table" then
@@ -5524,7 +7357,7 @@ function VFXController.onPlayerDataUpdate(data: any)
 			for carId, c in pairs(data.cars) do
 				if type(c) == "table" and not lastOwnedCarIds[carId :: string] then
 					lastOwnedCarIds[carId :: string] = true
-					local def = CarConfig.Cars[carId :: string]
+					local def = Cfg.Car.Cars[carId :: string]
 					local nm = if def and type(def.name) == "string" then def.name else carId :: string
 					VFXFacade.carUnlockCelebration(carId :: string, nm)
 				end
@@ -5557,13 +7390,13 @@ function VFXController.onPlayerDataUpdate(data: any)
 
 	if type(data) == "table" and type(data.currentWorld) == "string" then
 		local w = data.currentWorld
-		if lastWorldForTransition ~= nil and lastWorldForTransition ~= w then
-			local wf = WorldUnlockConfig.WorldFlavor[w]
+		if lod.lastWorld ~= nil and lod.lastWorld ~= w then
+			local wf = Cfg.WorldUnlock.WorldFlavor[w]
 			if wf and type(wf.headline) == "string" and type(wf.flavor) == "string" then
 				VFXController.milestonePopup(wf.headline .. "|" .. wf.flavor .. "|" .. w, "world_arrival")
 			end
 		end
-		lastWorldForTransition = w
+		lod.lastWorld = w
 		activeWorldId = w
 		if not runActive then
 			VFXFacade.ambientStop()
@@ -5610,7 +7443,7 @@ function VFXController.onPlayerDataUpdate(data: any)
 				VFXController.milestonePopup("FIRST PET!", "first_pet")
 			end
 			if prev.rebirths < reb then
-				local mk = RebirthMilestoneConfig.getHighestMilestoneCrossed(prev.rebirths, reb)
+				local mk = Cfg.RebirthMilestone.getHighestMilestoneCrossed(prev.rebirths, reb)
 				VFXController.rebirthFlash(reb, mk, mk ~= nil)
 			end
 			if prev.rebirths == 0 and reb >= 1 then
@@ -5620,7 +7453,7 @@ function VFXController.onPlayerDataUpdate(data: any)
 				VFXController.milestonePopup("Pet Collector!", "banner")
 			end
 			if prev.coins < 100_000 and coins >= 100_000 then
-				VFXController.milestonePopup("Money Maker!", "banner")
+				VFXController.milestonePopup("Coin Tycoon!", "banner")
 			end
 			for wid, unlocked in pairs(worlds) do
 				if unlocked and not prev.worlds[wid] then
@@ -5634,6 +7467,18 @@ function VFXController.onPlayerDataUpdate(data: any)
 				worlds = worlds,
 				discoveredPets = newDisc,
 			}
+		end
+	end
+
+	if type(data) == "table" and type(data.settings) == "table" then
+		local s = data.settings
+		local sig = tostring(s.particles) .. ":" .. tostring(if type(s.particleDensity) == "number" then s.particleDensity else 2)
+		if sig ~= lod.ambientSig then
+			lod.ambientSig = sig
+			if not runActive then
+				VFXFacade.ambientStop()
+				VFXFacade.ambientStart()
+			end
 		end
 	end
 
@@ -5672,6 +7517,43 @@ function VFXController.rewardChestBurst()
 	coins:Emit(28)
 
 	task.delay(1.1, function()
+		if att.Parent then
+			att:Destroy()
+		end
+	end)
+end
+
+-- Codes panel: compact multicolor confetti (lighter than rewardChestBurst; pairs with codeRedeem success SFX).
+function VFXController.codeRedeemConfettiBurst()
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local att = Instance.new("Attachment")
+	att.Name = "DAC_CodeRedeemConfetti"
+	att.Parent = cam
+	att.WorldCFrame = cam.CFrame * CFrame.new(0, 0.5, -10)
+
+	local function emitBurst(col: Color3, n: number, spread: number)
+		local burst = Instance.new("ParticleEmitter")
+		burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		burst.Color = ColorSequence.new(col)
+		burst.Lifetime = NumberRange.new(0.4, 0.95)
+		burst.Speed = NumberRange.new(7, 20)
+		burst.SpreadAngle = Vector2.new(spread, spread)
+		burst.Rate = 0
+		burst.Drag = 0.35
+		burst.Acceleration = Vector3.new(0, -10, 0)
+		burst.LightEmission = 0.65
+		burst.Parent = att
+		burst:Emit(n)
+	end
+
+	emitBurst(Color3.fromRGB(255, 120, 200), 22, 180)
+	emitBurst(Color3.fromRGB(180, 140, 255), 18, 160)
+	emitBurst(Color3.fromRGB(255, 220, 90), 20, 200)
+
+	task.delay(1.25, function()
 		if att.Parent then
 			att:Destroy()
 		end
@@ -6168,7 +8050,7 @@ function VFXController.premiumWelcomeFanfare()
 	sub.TextSize = 15
 	sub.TextColor3 = Color3.fromRGB(255, 240, 180)
 	sub.TextWrapped = true
-	sub.Text = MicrocopyConfig.PremiumWelcome[math.random(1, #MicrocopyConfig.PremiumWelcome)]
+	sub.Text = Cfg.Microcopy.PremiumWelcome[math.random(1, #Cfg.Microcopy.PremiumWelcome)]
 	sub.ZIndex = CELEBRATION_Z + 2
 	sub.Parent = badge
 
@@ -6217,7 +8099,7 @@ function VFXController.premiumWelcomeFanfare()
 	end)
 end
 
-local function serverDropResolveLine(playerName: string, petName: string, rarity: string): string
+local function serverDropResolveLine(playerName: string, petName: string, rarity: string, oddsText: string?): string
 	local ok, cfg = pcall(function()
 		return require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
 	end)
@@ -6227,15 +8109,17 @@ local function serverDropResolveLine(playerName: string, petName: string, rarity
 		if type(picked) == "string" and picked ~= "" then
 			template = picked
 		else
-			template = "{PLAYER} hatched {PET} ({RARITY})!"
+			template = "{PLAYER} hatched {PET} ({RARITY}) • {ODDS}"
 		end
 	else
-		template = "{PLAYER} hatched {PET} ({RARITY})!"
+		template = "{PLAYER} hatched {PET} ({RARITY}) • {ODDS}"
 	end
+	local odds = if oddsText and oddsText ~= "" then oddsText else "—"
 	return template
 		:gsub("{PLAYER}", playerName)
 		:gsub("{PET}", petName)
 		:gsub("{RARITY}", string.upper(rarity))
+		:gsub("{ODDS}", odds)
 end
 
 local function serverDropStyleForRarity(rarity: string): (Color3, Color3, boolean)
@@ -6255,22 +8139,22 @@ end
 local serverDropShowNext: () -> ()
 
 local function serverDropScheduleDrain()
-	if serverDropShowing then
+	if drop.showing then
 		return
 	end
-	if #serverDropQueue == 0 then
+	if #drop.queue == 0 then
 		return
 	end
-	if serverDropPendingDrain then
-		task.cancel(serverDropPendingDrain)
-		serverDropPendingDrain = nil
+	if drop.pendingDrain then
+		task.cancel(drop.pendingDrain)
+		drop.pendingDrain = nil
 	end
 	local now = os.clock()
-	local since = if serverDropLastStartClock > 0 then (now - serverDropLastStartClock) else SERVER_DROP_THROTTLE_SEC
-	local gap = SERVER_DROP_THROTTLE_SEC - since
+	local since = if drop.lastClock > 0 then (now - drop.lastClock) else drop.THROTTLE_SEC
+	local gap = drop.THROTTLE_SEC - since
 	if gap > 0.01 then
-		serverDropPendingDrain = task.delay(gap, function()
-			serverDropPendingDrain = nil
+		drop.pendingDrain = task.delay(gap, function()
+			drop.pendingDrain = nil
 			serverDropShowNext()
 		end)
 		return
@@ -6279,36 +8163,59 @@ local function serverDropScheduleDrain()
 end
 
 serverDropShowNext = function()
-	if serverDropShowing then
+	if drop.showing then
 		return
 	end
-	if #serverDropQueue == 0 then
+	if #drop.queue == 0 then
 		return
 	end
 	local sg = screenGui
 	if not sg then
-		while #serverDropQueue > 0 do
-			table.remove(serverDropQueue, 1)
+		while #drop.queue > 0 do
+			table.remove(drop.queue, 1)
 		end
 		return
 	end
-	local item = table.remove(serverDropQueue, 1)
-	serverDropShowing = true
-	serverDropLastStartClock = os.clock()
+	local item = table.remove(drop.queue, 1)
+	drop.showing = true
+	drop.lastClock = os.clock()
 
-	local bgCol, strokeCol, useMythicGradient = serverDropStyleForRarity(item.rarity)
-	local line = serverDropResolveLine(item.playerName, item.petName, item.rarity)
+	local line: string
+	local bgCol: Color3
+	local strokeCol: Color3
+	local useMythicGradient: boolean
+	if item.kind == "friend_play" then
+		line = if type(item.line) == "string" then item.line else ""
+		bgCol = Color3.fromRGB(36, 52, 78)
+		strokeCol = Color3.fromRGB(120, 200, 255)
+		useMythicGradient = false
+	else
+		local playerName = if type(item.playerName) == "string" then item.playerName else "Someone"
+		local petName = if type(item.petName) == "string" then item.petName else "Pet"
+		local rarityRaw = if type(item.rarity) == "string" then item.rarity else "rare"
+		bgCol, strokeCol, useMythicGradient = serverDropStyleForRarity(rarityRaw)
+		local oddsRaw = if type(item.oddsText) == "string" then item.oddsText else nil
+		line = serverDropResolveLine(playerName, petName, rarityRaw, oddsRaw)
+	end
+
+	local dacMain = playerGui:FindFirstChild("DACMain") :: ScreenGui?
+	local hostGui = dacMain or sg
+	local insetLeft, insetTop = HudSafeArea.getManualInsetForScreenGui(hostGui)
+	local topY = Cfg.HudLayout.serverDropBaseTopPx + insetTop
+	local vw = HudSafeArea.getViewportWidth()
+	local edge = Cfg.HudLayout.edgeMarginPx
+	local bannerW = math.max(200, math.min(Cfg.HudLayout.serverDropMaxWidthPx, vw - insetLeft - 2 * edge))
 
 	local root = Instance.new("Frame")
 	root.Name = "ServerDropFeedBanner"
 	root.AnchorPoint = Vector2.new(0.5, 0)
-	root.Size = UDim2.fromOffset(460, 48)
-	root.Position = UDim2.new(1.35, 0, 0, SERVER_DROP_TOP_PX)
+	root.Size = UDim2.fromOffset(bannerW, 48)
+	root.Position = UDim2.new(1.35, 0, 0, topY)
 	root.BackgroundColor3 = bgCol
 	root.BackgroundTransparency = 0.12
 	root.BorderSizePixel = 0
-	root.ZIndex = 8000
-	root.Parent = sg
+	root.ZIndex = Cfg.HudLayout.serverDropFrameZIndex
+	root.Parent = hostGui
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 10)
@@ -6341,9 +8248,10 @@ serverDropShowNext = function()
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextWrapped = true
 	label.Text = line
+	label.TextTruncate = Enum.TextTruncate.AtEnd
 	label.TextColor3 = Color3.fromRGB(245, 248, 255)
 	label.TextStrokeTransparency = 0.5
-	label.ZIndex = 8001
+	label.ZIndex = Cfg.HudLayout.serverDropFrameZIndex + 1
 	label.Parent = root
 
 	if useMythicGradient then
@@ -6363,22 +8271,22 @@ serverDropShowNext = function()
 	local holdT = 3.0
 	local slideOut = TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
-	local inPos = UDim2.new(0.5, 0, 0, SERVER_DROP_TOP_PX)
+	local inPos = UDim2.new(0.5, 0, 0, topY)
 	TweenService:Create(root, slideIn, { Position = inPos }):Play()
 	task.delay(0.38 + holdT, function()
 		if not root.Parent then
-			serverDropShowing = false
+			drop.showing = false
 			serverDropScheduleDrain()
 			return
 		end
-		local outPos = UDim2.new(-0.35, 0, 0, SERVER_DROP_TOP_PX)
+		local outPos = UDim2.new(-0.35, 0, 0, topY)
 		local tw = TweenService:Create(root, slideOut, { Position = outPos })
 		tw:Play()
 		tw.Completed:Connect(function()
 			if root.Parent then
 				root:Destroy()
 			end
-			serverDropShowing = false
+			drop.showing = false
 			serverDropScheduleDrain()
 		end)
 	end)
@@ -6392,19 +8300,42 @@ function VFXController.serverDropFeedBanner(payload: any)
 	if uid and uid == player.UserId then
 		return
 	end
+	if NewPlayerCalmWindow.shouldDeferServerFeed() then
+		NewPlayerCalmWindow.enqueueServerDrop(payload)
+		return
+	end
+	if payload.kind == "friend_play" then
+		if type(payload.line) ~= "string" or payload.line == "" then
+			return
+		end
+		table.insert(drop.queue, {
+			kind = "friend_play",
+			line = payload.line,
+			userId = uid or 0,
+		})
+		while #drop.queue > drop.MAX_QUEUE do
+			table.remove(drop.queue, 1)
+		end
+		serverDropScheduleDrain()
+		return
+	end
+
 	local playerName = if type(payload.playerName) == "string" then payload.playerName else "Someone"
 	local petName = if type(payload.petName) == "string" then payload.petName else "Pet"
 	local rarityRaw = if type(payload.rarity) == "string" then payload.rarity else "rare"
 	local rarity = string.lower(rarityRaw)
+	local oddsText = if type(payload.oddsText) == "string" then payload.oddsText else nil
 
-	table.insert(serverDropQueue, {
+	table.insert(drop.queue, {
+		kind = "hatch",
 		playerName = playerName,
 		petName = petName,
 		rarity = rarity,
 		userId = uid or 0,
+		oddsText = oddsText,
 	})
-	while #serverDropQueue > SERVER_DROP_MAX_QUEUE do
-		table.remove(serverDropQueue, 1)
+	while #drop.queue > drop.MAX_QUEUE do
+		table.remove(drop.queue, 1)
 	end
 	serverDropScheduleDrain()
 end

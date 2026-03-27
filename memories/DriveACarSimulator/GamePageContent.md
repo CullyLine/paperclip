@@ -81,6 +81,24 @@ Built by Polymita Media × Stylxus
 
 (131 characters — fits in social shares and short-form contexts)
 
+### FAQ — How rebirth works (player-facing)
+
+Paste-ready block (~170 words) for experience description, group pinned post, or Discord. Mechanics align with `RebirthConfig` / `RebirthService` (no hard-coded coin amounts or boost numbers — those can change in balance passes).
+
+```markdown
+**How does rebirth work?**
+
+Rebirth is how you turn a big coin run into *permanent* power. When you rebirth, you earn lasting boosts to **gas**, **power**, and **speed** that stack every time you do it, plus **crystals** that stay on your account.
+
+**What you keep:** your owned **cars** and **pets**, plus **gems**, **crystals**, and **skulls** — those currencies are not wiped.
+
+**What resets:** your **coins**, your **egg inventory**, and **car upgrade levels** (upgrades start over so you climb again with a stronger baseline).
+
+**Why it costs coins:** each rebirth asks for a coin payment that **increases** the further you’ve already progressed — so you’re choosing “cash in this grind for the next tier of long-term strength.” The optional **Rebirth Rush** game pass reduces that coin cost; some developer products can skip the coin gate when you want to move faster.
+
+**Why it matters:** stacked rebirth boosts are the main way your account gets stronger across many sessions, not just one afternoon. Big rebirth totals also unlock milestone celebration moments and prestige flair over time.
+```
+
 ---
 
 ## 3. Game Tags

@@ -1,8 +1,11 @@
 --!strict
 
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Constants = require(DAC:WaitForChild("Constants"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
@@ -11,13 +14,77 @@ local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
-local QuestService = require(script.Parent:WaitForChild("QuestService"))
+-- local QuestService = require(script.Parent:WaitForChild("QuestService"))
 local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
 local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 
 local PetService = {}
 
+local function broadcastEquippedPets(player: Player)
+	local data = DataManager.get(player)
+	if not data or type(data.pets) ~= "table" then
+		return
+	end
+	local equipped = {}
+	for uid, pet in data.pets do
+		if type(pet) == "table" and pet.equipped then
+			local def = PetConfig.Pets[pet.id]
+			local rarity = if def then def.rarity else "common"
+			table.insert(equipped, { uid = uid, id = pet.id, rarity = rarity })
+		end
+	end
+	Remotes.getEvent("PetEquipSync"):FireAllClients(player.UserId, equipped)
+end
+
+-- Roblox GUIDs are short ASCII; reject absurd client strings before table lookups.
+local MAX_PET_UID_LEN = 128
+-- Client-generated idempotency token (UUID); replay within TTL returns cached FusionResult only.
+local MAX_FUSE_REQUEST_TOKEN_LEN = 48
+local FUSE_IDEMPOTENCY_TTL_SEC = 180
+
 local RARITY_ORDER = { "common", "uncommon", "rare", "epic", "legendary", "mythic" }
+
+local fusionInFlight: { [number]: boolean } = {}
+local fusionIdempotencyCache: { [number]: { [string]: { payload: any, expiresAt: number } } } = {}
+
+local function cleanupFusionState(userId: number)
+	fusionInFlight[userId] = nil
+	fusionIdempotencyCache[userId] = nil
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	cleanupFusionState(player.UserId)
+end)
+
+local function isValidFuseRequestToken(token: string): boolean
+	if #token == 0 or #token > MAX_FUSE_REQUEST_TOKEN_LEN then
+		return false
+	end
+	for i = 1, #token do
+		local b = string.byte(token, i)
+		local ok = (b >= 48 and b <= 57) -- 0-9
+			or (b >= 65 and b <= 90)
+			or (b >= 97 and b <= 122)
+			or b == 45 -- hyphen
+		if not ok then
+			return false
+		end
+	end
+	return true
+end
+
+local function pruneExpiredFusionCache(uid: number)
+	local bucket = fusionIdempotencyCache[uid]
+	if not bucket then
+		return
+	end
+	local now = os.clock()
+	for token, entry in bucket do
+		if entry.expiresAt <= now then
+			bucket[token] = nil
+		end
+	end
+end
 
 local function getNextRarity(rarity: string): string?
 	for i, r in RARITY_ORDER do
@@ -74,6 +141,7 @@ function PetService.equipPet(player: Player, petUid: string): (boolean, string?)
 	QuestService.onPetEquip(player, petUid)
 	TutorialService.onEquipPet(player)
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	broadcastEquippedPets(player)
 	return true, nil
 end
 
@@ -88,6 +156,7 @@ function PetService.unequipPet(player: Player, petUid: string): (boolean, string
 
 	pet.equipped = false
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	broadcastEquippedPets(player)
 	return true, nil
 end
 
@@ -115,29 +184,87 @@ function PetService.equipBest(player: Player)
 		data.pets[sorted[i].uid].equipped = true
 	end
 
-	QuestService.evaluatePetArmy(player)
+	-- QuestService.evaluatePetArmy(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	broadcastEquippedPets(player)
 end
 
-function PetService.fusePets(player: Player, petUids: { string }): (boolean, string?)
+function PetService.fusePets(player: Player, petUids: { string }, requestToken: string?): (boolean, string?)
+	local uid = player.UserId
 	local data = DataManager.get(player)
 	if not data then return false, "No data" end
 
+	if fusionInFlight[uid] then
+		return false, "Fusion already in progress"
+	end
+
+	local tokenKey: string? = nil
+	if requestToken ~= nil and requestToken ~= "" then
+		if type(requestToken) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_bad_token_type", "")
+			return false, "Invalid fusion request"
+		end
+		if not isValidFuseRequestToken(requestToken) then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_bad_token_shape", "")
+			return false, "Invalid fusion request"
+		end
+		tokenKey = requestToken
+		pruneExpiredFusionCache(uid)
+		local cached = fusionIdempotencyCache[uid] and fusionIdempotencyCache[uid][requestToken]
+		if cached and cached.expiresAt > os.clock() then
+			Remotes.getEvent("FusionResult"):FireClient(player, cached.payload)
+			return true, nil
+		end
+	end
+
 	local requiredCount = PetConfig.FuseCost.petsRequired
 	if #petUids ~= requiredCount then
+		ValidationService.logAnomalyOncePerSession(player, "fuse_wrong_count", `expected {requiredCount} got {#petUids}`)
 		return false, `Need exactly {requiredCount} pets to fuse`
 	end
 
-	-- Validate all pets exist and share a rarity tier
+	local seenUid: { [string]: boolean } = {}
+	for _, petUid in petUids do
+		if type(petUid) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_bad_uid_type", "")
+			return false, "Invalid pet selection"
+		end
+		if petUid == "" or #petUid > MAX_PET_UID_LEN then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_bad_uid_len", "")
+			return false, "Invalid pet selection"
+		end
+		if seenUid[petUid] then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_duplicate_uid", petUid)
+			return false, "Invalid pet selection"
+		end
+		seenUid[petUid] = true
+	end
+
+	-- Validate all pets exist, templates are authoritative, same rarity; reject equipped (server-owned state).
 	local targetRarity: string? = nil
 	local sacrificedNames: { string } = {}
-	for _, uid in petUids do
-		local pet = data.pets[uid]
+	for _, petUid in petUids do
+		local pet = data.pets[petUid]
 		if not pet then return false, "Pet not found" end
 
+		if type(pet.id) ~= "string" or pet.id == "" or #pet.id > 64 then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_bad_pet_id_field", petUid)
+			return false, "Invalid pet"
+		end
+
 		local petDef = PetConfig.Pets[pet.id]
-		if not petDef then return false, "Invalid pet" end
+		if not petDef then
+			ValidationService.logAnomalyOncePerSession(player, "fuse_unknown_template", pet.id)
+			return false, "Invalid pet"
+		end
+		if petDef.id ~= pet.id then
+			return false, "Invalid pet"
+		end
+
+		if pet.equipped == true then
+			return false, "Unequip pets before fusing"
+		end
 
 		table.insert(sacrificedNames, petDef.name)
 
@@ -153,34 +280,48 @@ function PetService.fusePets(player: Player, petUids: { string }): (boolean, str
 	local nextRarity = getNextRarity(targetRarity)
 	if not nextRarity then return false, "Cannot fuse mythic pets" end
 
-	-- Calculate and charge fuse cost
-	local rarityIdx = getRarityIndex(targetRarity)
-	local fuseCost = PetConfig.FuseCost.coinCost * (PetConfig.FuseCost.coinCostMultiplier ^ (rarityIdx - 1))
-	if not CurrencyService.spend(player, "coins", math.floor(fuseCost)) then
-		return false, "Not enough coins"
-	end
-
-	-- Remove fused pets
-	local totalPower = 0
-	for _, uid in petUids do
-		totalPower += data.pets[uid].power
-		data.pets[uid] = nil
-	end
-
-	-- Find a random pet of the next rarity
-	local candidates = {}
-	for petId, petDef in PetConfig.Pets do
-		if petDef.rarity == nextRarity then
+	local candidates: { string } = {}
+	for petId, def in PetConfig.Pets do
+		if def.rarity == nextRarity then
 			table.insert(candidates, petId)
 		end
 	end
+	if #candidates == 0 then
+		ValidationService.logViolation(player, "fuse_no_candidates", "critical", nextRarity)
+		return false, "No pets available at next rarity"
+	end
 
-	if #candidates == 0 then return false, "No pets available at next rarity" end
+	-- Calculate and charge fuse cost (server-side only; client never sends a price).
+	local rarityIdx = getRarityIndex(targetRarity)
+	local fuseCost = PetConfig.FuseCost.coinCost * (PetConfig.FuseCost.coinCostMultiplier ^ (rarityIdx - 1))
+	local fuseCostInt = math.floor(fuseCost)
+
+	fusionInFlight[uid] = true
+
+	if not CurrencyService.spend(player, "coins", fuseCostInt) then
+		fusionInFlight[uid] = nil
+		return false, "Not enough coins"
+	end
+
+	-- Snapshot power then remove all (no partial delete if a pet disappears mid-flight).
+	local totalPower = 0
+	for _, petUid in petUids do
+		local p = data.pets[petUid]
+		if not p then
+			CurrencyService.add(player, "coins", fuseCostInt, "admin")
+			fusionInFlight[uid] = nil
+			ValidationService.logViolation(player, "fuse_pet_vanished", "high", petUid)
+			return false, "Pet not found"
+		end
+		totalPower += p.power
+	end
+	for _, petUid in petUids do
+		data.pets[petUid] = nil
+	end
 
 	local chosenPetId = candidates[math.random(#candidates)]
 	local chosenDef = PetConfig.Pets[chosenPetId]
 
-	local HttpService = game:GetService("HttpService")
 	local newUid = HttpService:GenerateGUID(false)
 
 	-- Fused pet gets a power bonus from the sacrificed pets
@@ -193,9 +334,7 @@ function PetService.fusePets(player: Player, petUids: { string }): (boolean, str
 		equipped = false,
 	}
 
-	Remotes.getEvent("DataUpdate"):FireClient(player, data)
-
-	Remotes.getEvent("FusionResult"):FireClient(player, {
+	local fusionPayload = {
 		petId = chosenPetId,
 		petName = chosenDef.name,
 		modelName = chosenDef.modelName,
@@ -204,49 +343,141 @@ function PetService.fusePets(player: Player, petUids: { string }): (boolean, str
 		previousPowerTotal = totalPower,
 		sourceRarity = targetRarity,
 		sacrificedNames = sacrificedNames,
-	})
+	}
+
+	if tokenKey then
+		if not fusionIdempotencyCache[uid] then
+			fusionIdempotencyCache[uid] = {}
+		end
+		fusionIdempotencyCache[uid][tokenKey] = {
+			payload = fusionPayload,
+			expiresAt = os.clock() + FUSE_IDEMPOTENCY_TTL_SEC,
+		}
+	end
+
+	fusionInFlight[uid] = nil
+
+	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	Remotes.getEvent("FusionResult"):FireClient(player, fusionPayload)
+	broadcastEquippedPets(player)
 
 	return true, nil
 end
 
 function PetService.init()
 	Remotes.getEvent("EquipPet").OnServerEvent:Connect(function(player, petUid)
-		if type(petUid) ~= "string" then return end
 		if not ValidationService.checkRemoteRate(player, "EquipPet") then
 			return
 		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		if type(petUid) ~= "string" then
+			return
+		end
 		if not RemoteCooldown.allow(player, "EquipPet", Constants.REMOTE_COOLDOWN_DEFAULT) then
+			return
+		end
+		if petUid == "" then
+			ValidationService.logAnomalyOncePerSession(player, "equip_empty_uid", "")
+			return
+		end
+		if petUid ~= "__BEST__" and #petUid > MAX_PET_UID_LEN then
+			ValidationService.logAnomalyOncePerSession(player, "equip_uid_len", "")
 			return
 		end
 		if petUid == "__BEST__" then
 			PetService.equipBest(player)
 			return
 		end
-		PetService.equipPet(player, petUid)
+		local ok, err = PetService.equipPet(player, petUid)
+		if not ok and err == "Pet not found" then
+			ValidationService.logAnomalyOncePerSession(player, "equip_unknown_pet", petUid)
+		end
 	end)
 
 	Remotes.getEvent("UnequipPet").OnServerEvent:Connect(function(player, petUid)
-		if type(petUid) ~= "string" then return end
 		if not ValidationService.checkRemoteRate(player, "UnequipPet") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		if type(petUid) ~= "string" then
 			return
 		end
 		if not RemoteCooldown.allow(player, "UnequipPet", Constants.REMOTE_COOLDOWN_DEFAULT) then
 			return
 		end
-		PetService.unequipPet(player, petUid)
+		if petUid == "" or #petUid > MAX_PET_UID_LEN then
+			if petUid == "" then
+				ValidationService.logAnomalyOncePerSession(player, "unequip_empty_uid", "")
+			else
+				ValidationService.logAnomalyOncePerSession(player, "unequip_uid_len", "")
+			end
+			return
+		end
+		local ok, err = PetService.unequipPet(player, petUid)
+		if not ok and err == "Pet not found" then
+			ValidationService.logAnomalyOncePerSession(player, "unequip_unknown_pet", petUid)
+		end
 	end)
 
-	Remotes.getEvent("FusePets").OnServerEvent:Connect(function(player, petUids)
-		if type(petUids) ~= "table" then return end
+	Players.PlayerAdded:Connect(function(newPlayer)
+		task.defer(function()
+			task.wait(2)
+			if not newPlayer.Parent then
+				return
+			end
+			for _, existing in Players:GetPlayers() do
+				if existing ~= newPlayer then
+					local eData = DataManager.get(existing)
+					if eData and type(eData.pets) == "table" then
+						local equipped = {}
+						for uid, pet in eData.pets do
+							if type(pet) == "table" and pet.equipped then
+								local def = PetConfig.Pets[pet.id]
+								local rarity = if def then def.rarity else "common"
+								table.insert(equipped, { uid = uid, id = pet.id, rarity = rarity })
+							end
+						end
+						if #equipped > 0 then
+							Remotes.getEvent("PetEquipSync"):FireClient(newPlayer, existing.UserId, equipped)
+						end
+					end
+				end
+			end
+		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(leaving)
+		Remotes.getEvent("PetEquipSync"):FireAllClients(leaving.UserId, {})
+	end)
+
+	Remotes.getEvent("FusePets").OnServerEvent:Connect(function(player, petUids, requestToken)
 		if not ValidationService.checkRemoteRate(player, "FusePets") then
+			return
+		end
+		local canAct = ValidationService.canActWithReason(player)
+		if not canAct then
+			NotificationDispatchService.notify(player, {
+				type = "error",
+				message = "Cannot fuse right now",
+			})
+			return
+		end
+		if type(petUids) ~= "table" then
+			return
+		end
+		if requestToken ~= nil and type(requestToken) ~= "string" then
 			return
 		end
 		if not RemoteCooldown.allow(player, "FusePets", 1) then
 			return
 		end
-		local success, err = PetService.fusePets(player, petUids)
+		local success, err = PetService.fusePets(player, petUids, requestToken :: string?)
 		if not success then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Fuse failed",
 			})

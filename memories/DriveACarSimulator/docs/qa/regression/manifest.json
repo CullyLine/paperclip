@@ -1,0 +1,27 @@
+[
+  {
+    "file": "regression_shop_store.png",
+    "luau_return": "{\"returnValue\":\"ok Store\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "regression_trophy_case.png",
+    "luau_return": "{\"returnValue\":\"ok TrophyCase\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "regression_tutorial_overlay.png",
+    "luau_return": "{\"returnValue\":\"ok DACTutorialOverlay\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "regression_payout_overlay.png",
+    "luau_return": "{\"returnValue\":\"ok DACPayout\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  },
+  {
+    "file": "regression_settings.png",
+    "luau_return": "{\"returnValue\":\"ok Settings\",\"message\":\"Code executed successfully\",\"success\":true,\"output\":[]}",
+    "saved_png": "True"
+  }
+]

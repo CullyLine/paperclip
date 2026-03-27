@@ -4,6 +4,8 @@
 **Date:** March 20, 2026
 **Pre-Launch Status:** Final Review
 
+**Revision (engineer truth sync):** **2026-03-23** — Cross-checked `CarConfig.luau`, `PetConfig.luau`, `EggConfig.luau`, `BattlePassService.luau` (distance→XP), `RunService.luau`. Sections below that still read like older meta (e.g. Neon Egg at 30% mythic) are **superseded** by the revision notes and by source files.
+
 ---
 
 ## 1. Progression Timeline Analysis
@@ -37,6 +39,8 @@ awardedCoins   = totalCoins × founderMultiplier (applied in CurrencyService.add
 | Glacier Phantom (ice_racer) | 75 | 140 | 60 | 10,500 | 75s | 16,800 | 806,400 |
 | Neon Pulse (cyber_car) | 90 | 180 | 80 | 16,200 | 90s | 29,160 | 1,166,400 |
 | Void Runner (hyper_car) | 70 | 250 | 100 | 17,500 | 70s | 35,000 | 1,800,000 |
+
+*Not listed:* **Midnight Drifter** (`midnight_drifter` in `CarConfig`) — Season 1 exclusive, **0 coins**, grasslands; omitted from F2P coin-ladder analysis.
 
 *Desert cars earn 2× (desert coinMultiplier). Frozen cars earn 4×. Neon cars earn 10×.*
 
@@ -255,6 +259,8 @@ That's enough to buy the Venom GT outright. On the first run of the game.
 
 ## 3. Pet Economy
 
+**Catalog size (2026-03):** `PetConfig.Pets` defines **16** species (including Season 1 exclusives and the group-reward pet). Egg drop tables reference a subset; Neon Egg pulls endgame species from the neon pool.
+
 ### 3.1 Egg Hatch Rates & Chase Tension
 
 | Egg | Price | Rarity Distribution | Mythic % |
@@ -274,22 +280,18 @@ That's enough to buy the Venom GT outright. On the first run of the game.
 
 ### 3.2 ~~RED FLAG~~ RESOLVED: Neon Egg Mythic Rate Now 7%
 
-**~~Problem:~~** ~~The Neon Egg had a 30% combined mythic drop rate.~~ **Updated (POLA-55 audit):** Current config has 7% combined mythic (4% Void Serpent + 3% Cosmic Whale), aligned with recommended ~5-8% range.
+**Historical (pre–POLA-55):** Design drafts and early audits assumed a **~30%** combined mythic rate on Neon Egg.
 
-**Competitive comparison:**
-- Pet Simulator 99: Huge/Titanic rates are **<0.1%** — players spend thousands trying
-- Anime Defenders: Top-tier unit rates are **<1%**
-- Standard gacha games: Highest rarity at **1-5%**
-- Our Frozen Egg: 1% mythic (excellent tension)
-- Our Neon Egg: **30% mythic (way too generous)**
+**Current `EggConfig.neon_egg` (as of 2026-03):** Mythic weights are **4 + 3 = 7** on a **100** total weight pool → **7% combined mythic** (Void Serpent + Cosmic Whale). Epic + legendary weights fill the remainder. This matches the intended ~5–8% chase band.
 
-**Impact:** With 30% mythic, a player hatching 10 Neon Eggs (50,000 crystals) expects ~3 mythic pets. To fill all 8 slots with mythics, they need ~27 eggs (135,000 crystals). This seems like a lot of crystals, but it eliminates the chase entirely. There's no "will I get it?" tension — it's just a matter of farming enough crystals.
+**Competitive comparison (rates are approximate industry norms):**
+- Pet Simulator 99: top-tier **<0.1%**
+- Anime Defenders: top-tier **<1%**
+- Standard gacha: highest rarity often **1–5%**
+- Our Frozen Egg: **1%** mythic (`frozen_egg` weights)
+- Our Neon Egg: **7%** mythic — **current config**, not 30%
 
-**Recommendation:** Reduce Neon Egg mythic rate to **5% total** (3% Void Serpent + 2% Cosmic Whale). Redistribute to legendaries (55%) and epics (40%). This:
-- Creates proper chase tension (expected ~160 eggs for 8 mythics instead of ~27)
-- Extends endgame engagement dramatically
-- Makes mythic pets feel truly mythic
-- Increases crystal dev product purchases (players need more eggs = more crystals)
+**Legacy impact note:** If mythic had stayed at 30%, expected mythics per 10 eggs would be ~3; at **7%**, ~0.7 per 10 eggs — **chase tension is restored** relative to that old draft. Further tuning (e.g. 5% vs 7%) is a **design** call, not a doc-vs-code mismatch.
 
 ### 3.3 Pet Power Values & the Coin Curve
 
@@ -306,7 +308,7 @@ That's enough to buy the Venom GT outright. On the first run of the game.
 | 8 mythic (avg 525) | 4,200 | 43.00× | +4,200% |
 | 16 mythic (Extra Pets pass) | 8,400 | 85.00× | +8,400% |
 
-**Assessment:** The jump from legendaries (12.6×) to mythics (43×) is a **3.4× increase**. This is aggressive but acceptable given how hard mythics are to obtain (if the Neon Egg rate is fixed per recommendation above).
+**Assessment:** The jump from legendaries (12.6×) to mythics (43×) is a **3.4× increase**. This is aggressive but acceptable given mythic rarity in eggs (Neon Egg **7%** mythic in current `EggConfig`).
 
 **The Extra Pet Slots pass (16 slots) concern:** With 16 mythic pets, the modifier reaches 85×. Combined with Neon world (10×) and full game passes, a single run could yield:
 - 17,500 × 10 × 85 × 2 × 2 × 1.5 × 1.1 = **~985M coins per 70-second run**
@@ -344,26 +346,19 @@ This is expected endgame whale behavior and acceptable — these players have sp
 
 ## 4. Red Flags & Recommendations
 
-### 4.1 CRITICAL: Neon Egg Mythic Rate (30%) Must Be Reduced
+### 4.1 ~~CRITICAL: Neon Egg Mythic Rate (30%) Must Be Reduced~~ **Aligned with code (2026-03)**
 
-**Current:** 30% mythic drop rate on Neon Egg.
-**Problem:** Undermines chase tension, shortens endgame, reduces crystal purchase motivation.
-**Fix:** Change in `EggConfig.luau`:
+**Previous concern:** Draft balance assumed **30%** mythic on Neon Egg.
+
+**Current `EggConfig.neon_egg`:** Weights **35 + 30 + 28 + 4 + 3 = 100**; mythic share **(4+3)/100 = 7%**. No further doc-driven change required unless design intentionally retunes weights.
+
+*Reference snippet (informative — matches repo):*
 
 ```lua
-neon_egg = {
-    -- Change weights from 15/15 mythic to 3/2 mythic
-    drops = {
-        { petId = "phoenix_chick", rarity = "epic", weight = 35 },    -- was 25
-        { petId = "golden_dragon", rarity = "legendary", weight = 30 }, -- was 25
-        { petId = "unicorn", rarity = "legendary", weight = 28 },      -- was 20
-        { petId = "void_serpent", rarity = "mythic", weight = 4 },     -- was 15
-        { petId = "cosmic_whale", rarity = "mythic", weight = 3 },     -- was 15
-    },
-}
+-- EggConfig.neon_egg drops (mythic total 7%)
+{ petId = "void_serpent", rarity = "mythic", weight = 4 },
+{ petId = "cosmic_whale", rarity = "mythic", weight = 3 },
 ```
-
-This reduces mythic rate from 30% to 7%, extending the chase and increasing crystal monetization.
 
 ### 4.2 HIGH: Frozen World Unlock (50K Gems) Creates Unwinnable F2P Wall
 
@@ -436,9 +431,9 @@ Skulls are earned based on distance (1 per 100K studs, capped at 10/run). This i
 
 These are completely different bundles. Ensure one matches the intended design before launch.
 
-### 4.8 LOW: Battle Pass XP Source Unclear
+### 4.8 ~~LOW: Battle Pass XP Source Unclear~~ **Verified (2026-03)**
 
-**BattlePassService.addXP(player, run.totalDistance)** — XP appears to be added based on raw distance traveled. If 1 XP = 1 stud, then a single Neon world run (17,500 studs) would earn 17,500 XP, which exceeds the total 15,000 XP needed for all 50 tiers. There must be a conversion factor inside BattlePassService (likely distance/100 or similar), but this should be verified. If distance passes XP directly, the battle pass would be completable in a single run, breaking the season pacing entirely.
+**Implementation:** `BattlePassService.addXP` awards **`floor(distance / 100)`** Season XP per run (see comment in `BattlePassService.luau`: 1 Season XP per 100 studs). A **17,500** stud run yields **175** XP, not 17,500 — season pacing is **not** broken by a single Neon run.
 
 ---
 
@@ -455,9 +450,9 @@ These are completely different bundles. Ensure one matches the intended design b
 - **Egg progression** from Meadow → Neon creates clear aspirational tiers
 
 ### Must-Fix Before Launch
-1. **Neon Egg mythic rate: 30% → 7%** (chase tension, endgame extension, monetization)
-2. **Verify Battle Pass XP conversion** (ensure season isn't completable in 1 run)
-3. **Update or deprecate stale numbers** in CompetitiveAnalysis doc
+1. ~~**Neon Egg mythic rate: 30% → 7%**~~ — **Done in config** (`EggConfig.neon_egg` weights = **7%** mythic as of 2026-03). Revisit only if design wants a different target band.
+2. ~~**Verify Battle Pass XP conversion**~~ — **Verified:** `distance / 100` Season XP per run (`BattlePassService.addXP`).
+3. **Update or deprecate stale numbers** in `CompetitiveAnalysis_EconomyDesign.md` (still a source of drift vs Luau configs).
 
 ### Should-Fix Before Launch
 4. **Frozen World unlock: 50K → 15-20K gems** (prevent F2P churn at the 2.5-year wall)

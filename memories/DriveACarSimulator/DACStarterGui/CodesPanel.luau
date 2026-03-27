@@ -37,7 +37,38 @@ function CodesPanel.init()
 
 	local redeemPending = false
 	local redeemGen = 0
+	local lastFiredRequestId = 0
+	local lastFanfareRequestId = 0
 	local origInputBg = box.BackgroundColor3
+	local statusStroke = statusLabel:FindFirstChildOfClass("UIStroke") :: UIStroke?
+	local origStrokeTransparency = if statusStroke then statusStroke.Transparency else nil
+
+	local uiScale = root:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Name = "RedeemSuccessPunch"
+		uiScale.Parent = root
+	end
+
+	local redeemBtnDefaultText = redeemBtn.Text
+
+	local function setRedeemBusy(busy: boolean)
+		redeemBtn.Active = not busy
+		box.TextEditable = not busy
+		redeemBtn.Text = if busy then "Wait…" else redeemBtnDefaultText
+	end
+
+	local function playSuccessJuice()
+		SoundFacade.playOneShot("code_redeem_success")
+		VFXFacade.rewardChestBurst()
+		VFXFacade.codeRedeemConfettiBurst()
+		uiScale.Scale = 0.9
+		TweenService:Create(
+			uiScale,
+			TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+			{ Scale = 1 }
+		):Play()
+	end
 
 	Remotes.getEvent("Notification").OnClientEvent:Connect(function(n: any)
 		if not redeemPending or type(n) ~= "table" then return end
@@ -46,11 +77,31 @@ function CodesPanel.init()
 		local msg = if type(n.message) == "string" then n.message else ""
 		if kind == "success" then
 			if not string.find(msg, "Code redeemed", 1, true) then return end
+			if lastFanfareRequestId == lastFiredRequestId then
+				return
+			end
+			lastFanfareRequestId = lastFiredRequestId
 			redeemPending = false
+			setRedeemBusy(false)
 			statusLabel.Text = MicrocopyConfig.CodeRedeemSuccess[math.random(1, #MicrocopyConfig.CodeRedeemSuccess)]
 			statusLabel.TextColor3 = Color3.fromRGB(160, 255, 180)
-			SoundFacade.playOneShot("cha_ching")
-			VFXFacade.rewardChestBurst()
+			statusLabel.TextTransparency = 1
+			if statusStroke and origStrokeTransparency ~= nil then
+				statusStroke.Transparency = 1
+			end
+			playSuccessJuice()
+			TweenService:Create(
+				statusLabel,
+				TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ TextTransparency = 0 }
+			):Play()
+			if statusStroke and origStrokeTransparency ~= nil then
+				TweenService:Create(
+					statusStroke,
+					TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ Transparency = origStrokeTransparency }
+				):Play()
+			end
 			TweenService:Create(box, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundColor3 = Color3.fromRGB(72, 180, 96) }):Play()
 			task.delay(0.2, function()
 				if box.Parent then
@@ -59,14 +110,25 @@ function CodesPanel.init()
 			end)
 		elseif kind == "error" then
 			redeemPending = false
+			setRedeemBusy(false)
 			local line: string
 			if string.find(msg, "expired", 1, true) then
 				line = MicrocopyConfig.CodeRedeemExpired[math.random(1, #MicrocopyConfig.CodeRedeemExpired)]
+			elseif string.find(msg, "Already redeemed", 1, true) then
+				line = MicrocopyConfig.CodeRedeemAlreadyUsed[math.random(1, #MicrocopyConfig.CodeRedeemAlreadyUsed)]
+			elseif string.find(msg, "Too many code attempts", 1, true) then
+				line = MicrocopyConfig.CodeRedeemRateLimited[math.random(1, #MicrocopyConfig.CodeRedeemRateLimited)]
+			elseif string.find(msg, "Invalid code format", 1, true) then
+				line = MicrocopyConfig.CodeRedeemFormatError[math.random(1, #MicrocopyConfig.CodeRedeemFormatError)]
 			else
 				line = MicrocopyConfig.CodeRedeemError[math.random(1, #MicrocopyConfig.CodeRedeemError)]
 			end
 			statusLabel.Text = line
 			statusLabel.TextColor3 = Color3.fromRGB(255, 140, 140)
+			statusLabel.TextTransparency = 0
+			if statusStroke and origStrokeTransparency ~= nil then
+				statusStroke.Transparency = origStrokeTransparency
+			end
 			SoundFacade.playOneShot("purchase_fail")
 			task.spawn(function() shakeInput(box) end)
 			TweenService:Create(box, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundColor3 = Color3.fromRGB(120, 50, 50) }):Play()
@@ -79,17 +141,27 @@ function CodesPanel.init()
 	end)
 
 	redeemBtn.MouseButton1Click:Connect(function()
+		if redeemPending then
+			return
+		end
 		SoundFacade.playOneShot("click")
+		lastFiredRequestId += 1
 		redeemPending = true
+		setRedeemBusy(true)
 		redeemGen += 1
 		local gen = redeemGen
-		statusLabel.Text = "Redeeming\u{2026}"
+		statusLabel.Text = MicrocopyConfig.CodeRedeemInProgress
 		statusLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
+		statusLabel.TextTransparency = 0
+		if statusStroke and origStrokeTransparency ~= nil then
+			statusStroke.Transparency = origStrokeTransparency
+		end
 		Remotes.getEvent("RedeemCode"):FireServer(box.Text)
 		task.delay(15, function()
 			if gen ~= redeemGen then return end
-			if redeemPending and statusLabel.Text == "Redeeming\u{2026}" then
+			if redeemPending and statusLabel.Text == MicrocopyConfig.CodeRedeemInProgress then
 				redeemPending = false
+				setRedeemBusy(false)
 				statusLabel.Text = ""
 			end
 		end)

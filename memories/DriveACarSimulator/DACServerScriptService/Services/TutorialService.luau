@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
@@ -59,28 +60,30 @@ local function push(player: Player, data: any)
 
 	local payloads: { [number]: { title: string, body: string, targetName: string? } } = {
 		[1] = {
-			title = "Welcome",
-			body = "Welcome! Tap Drive to take your car on the highway.",
-			targetName = "StartDriveButton",
+			title = MicrocopyConfig.FirstSessionTutorialStep1Title,
+			body = MicrocopyConfig.FirstSessionTutorialStep1Body,
+			-- No named UI target: first runs start by entering the world's Start zone (see RunService start pads).
+			targetName = nil,
 		},
 		[2] = {
-			title = "First Drive",
-			body = "Keep driving until your gas runs out to bank coins from your run.",
+			title = MicrocopyConfig.FirstSessionTutorialStep2Title,
+			body = MicrocopyConfig.FirstSessionTutorialStep2Body,
 			targetName = nil,
 		},
 		[3] = {
-			title = "First Upgrade",
-			body = "Open the menu → Store, then upgrade Speed on your car.",
+			title = MicrocopyConfig.FirstSessionTutorialStep3Title,
+			body = MicrocopyConfig.FirstSessionTutorialStep3Body,
 			targetName = "TutorialUpgradeSpeed",
 		},
+		-- Egg shop slots are named by egg id (see UIController.wireEggStorePanel); Meadow = basic_egg.
 		[4] = {
-			title = "First Egg",
-			body = "Open Eggs, buy a Meadow Egg if needed, then tap Hatch.",
-			targetName = "TutorialEggHatchBasic",
+			title = MicrocopyConfig.FirstSessionTutorialStep4Title,
+			body = MicrocopyConfig.FirstSessionTutorialStep4Body,
+			targetName = "basic_egg",
 		},
 		[5] = {
-			title = "Equip your pet",
-			body = "Open Garage and tap Equip on your new pet.",
+			title = MicrocopyConfig.FirstSessionTutorialStep5Title,
+			body = MicrocopyConfig.FirstSessionTutorialStep5Body,
 			targetName = "TutorialPetEquipFirst",
 		},
 	}
@@ -203,8 +206,8 @@ function TutorialService.onEquipPet(player: Player)
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	Remotes.getEvent("TutorialStep"):FireClient(player, {
 		step = 6,
-		title = "Tutorial complete!",
-		body = `You earned {BONUS_COINS} bonus coins. Have fun!`,
+		title = "You're ready to grind!",
+		body = `Here's {BONUS_COINS} bonus coins to spend! Next goals: keep upgrading, hatch rarer pets, and Rebirth for permanent speed. Check Store & Game Passes anytime for extra boosts — happy driving!`,
 		targetName = nil :: string?,
 		done = true,
 	})

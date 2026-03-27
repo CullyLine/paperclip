@@ -14,6 +14,7 @@ local TextService = game:GetService("TextService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
@@ -24,6 +25,7 @@ local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePass
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 local _dACRunService: any = nil
 local _questService: any = nil
 local _gamePassService: any = nil
@@ -86,14 +88,14 @@ local ADMIN_GROUP_ID = 0
 local ADMIN_MIN_RANK = 250
 
 local function reply(player: Player, msg: string)
-	Remotes.getEvent("Notification"):FireClient(player, {
+	NotificationDispatchService.notify(player, {
 		type = "success",
 		message = "[Admin] " .. msg,
 	})
 end
 
 local function replyErr(player: Player, msg: string)
-	Remotes.getEvent("Notification"):FireClient(player, {
+	NotificationDispatchService.notify(player, {
 		type = "error",
 		message = "[Admin] " .. msg,
 	})
@@ -162,10 +164,10 @@ local function runAdmin(player: Player, parts: { string })
 		local kind = string.lower(parts[3] or "")
 		local n = tonumber(parts[4])
 		if not n or n < 0 then
-			replyErr(player, "Usage: /admin give coins|gems|crystals|skulls <amount>")
+			replyErr(player, "Usage: /admin give <currency> <amount>")
 			return
 		end
-		if kind == "coins" or kind == "gems" or kind == "crystals" or kind == "skulls" then
+		if kind == "coins" or kind == "sandGranules" or kind == "icycles" or kind == "magmaCores" or kind == "infinitium" then
 			DataManager.addCurrency(player, kind, n, "admin")
 			syncFull(player)
 			reply(player, `Added {n} {kind}.`)
@@ -240,12 +242,8 @@ local function runAdmin(player: Player, parts: { string })
 		getDACRunService().adminAbortRunNoPayout(player)
 		DataManager.resetToDefault(player)
 		getGamePassService().checkAllPasses(player)
-		getBattlePassService().ensureSeason(player)
-		getQuestService().ensureQuests(player)
-		local fresh = DataManager.get(player)
-		if fresh then
-			getQuestService().onWorldChanged(player, fresh.currentWorld)
-		end
+		-- getBattlePassService().ensureSeason(player)
+		-- getQuestService().ensureQuests(player)
 		syncFull(player)
 		reply(player, "Profile reset to defaults (session).")
 		return
@@ -292,10 +290,10 @@ local function runAdmin(player: Player, parts: { string })
 
 	if cmd == "listpasses" then
 		local lines: { string } = {}
-		for passId, passDef in GamePassConfig.Passes do
-			local owns = getGamePassService().hasPass(player, passId)
+		for passKey, passDef in GamePassConfig.Passes do
+			local owns = getGamePassService().hasPass(player, passKey)
 			local yn = if owns then "yes" else "no"
-			table.insert(lines, `{passId}: {yn} ({passDef.name})`)
+			table.insert(lines, `{passKey}: {yn} ({passDef.name})`)
 		end
 		table.sort(lines)
 		reply(player, table.concat(lines, " · "))
@@ -313,31 +311,14 @@ local function runAdmin(player: Player, parts: { string })
 			replyErr(player, "Invalid tier.")
 			return
 		end
-		tier = math.min(math.floor(tier), BattlePassConfig.TIER_COUNT)
-		getBattlePassService().ensureSeason(player)
-		local d = DataManager.get(player)
-		if not d or not d.battlePass then
-			replyErr(player, "No battle pass data.")
-			return
-		end
-		d.battlePass.xp = BattlePassConfig.tierStartXp(tier)
-		syncFull(player)
-		reply(player, `Battle pass XP set to start of tier {tier}.`)
+		-- v1.0: BattlePass disabled
+		replyErr(player, "Battle pass is disabled in v1.0.")
 		return
 	end
 
 	if cmd == "addquest" then
-		local qid = parts[3]
-		if not qid then
-			replyErr(player, "Usage: /admin addquest <questKey>")
-			return
-		end
-		local ok, err = getQuestService().adminForceCompleteQuest(player, qid)
-		if ok then
-			reply(player, `Completed quest: {qid}`)
-		else
-			replyErr(player, err or "Failed")
-		end
+		-- v1.0: Quests disabled
+		replyErr(player, "Quests are disabled in v1.0.")
 		return
 	end
 
@@ -483,7 +464,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		local kind = payload.currency
 		local amount = tonumber(payload.amount)
 		if type(kind) ~= "string" or not amount or amount <= 0 then return end
-		if kind == "coins" or kind == "gems" or kind == "crystals" or kind == "skulls" then
+		if kind == "coins" or kind == "sandGranules" or kind == "icycles" or kind == "magmaCores" or kind == "infinitium" then
 			DataManager.addCurrency(target, kind, math.floor(amount), "admin")
 			syncFull(target)
 			reply(player, `Gave {target.Name} {Utils.formatNumber(amount)} {kind}`)
@@ -577,13 +558,13 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 	end
 
 	if action == "toggle_pass" then
-		local passId = payload.passId
-		if type(passId) ~= "string" then return end
+		local passKey = payload.passId
+		if type(passKey) ~= "string" then return end
 		local gps = getGamePassService()
 		if gps.adminTogglePass then
-			gps.adminTogglePass(target, passId)
+			gps.adminTogglePass(target, passKey)
 			syncFull(target)
-			reply(player, `Toggled pass {passId} for {target.Name}`)
+			reply(player, `Toggled pass {passKey} for {target.Name}`)
 		else
 			gps.adminCycleVipTesting(target)
 			reply(player, "Toggled VIP")
@@ -592,16 +573,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 	end
 
 	if action == "set_bp_tier" then
-		local tier = tonumber(payload.tier)
-		if not tier or tier < 1 then return end
-		tier = math.min(math.floor(tier), BattlePassConfig.TIER_COUNT)
-		getBattlePassService().ensureSeason(target)
-		local d = DataManager.get(target)
-		if d and d.battlePass then
-			d.battlePass.xp = BattlePassConfig.tierStartXp(tier)
-			syncFull(target)
-			reply(player, `BP tier set to {tier} for {target.Name}`)
-		end
+		-- v1.0: BattlePass disabled
 		return
 	end
 
@@ -609,10 +581,8 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		getDACRunService().adminAbortRunNoPayout(target)
 		DataManager.resetToDefault(target)
 		getGamePassService().checkAllPasses(target)
-		getBattlePassService().ensureSeason(target)
-		getQuestService().ensureQuests(target)
-		local fresh = DataManager.get(target)
-		if fresh then getQuestService().onWorldChanged(target, fresh.currentWorld) end
+		-- getBattlePassService().ensureSeason(target)
+		-- getQuestService().ensureQuests(target)
 		syncFull(target)
 		reply(player, `Reset data for {target.Name}`)
 		return
@@ -687,7 +657,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		if type(msg) ~= "string" or msg == "" then return end
 		msg = filterText(msg, player.UserId)
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "[Server] " .. msg,
 			})
@@ -989,14 +959,14 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 	if action == "sw_fake_shutdown" then
 		local delay = tonumber(payload.seconds) or 10
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = `[SYSTEM] Server shutting down in {delay} seconds for maintenance...`,
 			})
 		end
 		task.delay(delay, function()
 			for _, p in Players:GetPlayers() do
-				Remotes.getEvent("Notification"):FireClient(p, {
+				NotificationDispatchService.notify(p, {
 					type = "success",
 					message = "[SYSTEM] Just kidding! ;)",
 				})
@@ -1294,7 +1264,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					if h then h.Health = 0 end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = if p == player then "[Admin] Skill issued." else "SKILL ISSUE",
 			})
@@ -1304,7 +1274,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 
 	if action == "sw_l_ratio" then
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "L + Ratio + You fell off + No one asked",
 			})
@@ -1329,7 +1299,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "SIGMA GRINDSET ACTIVATED. You are now the main character.",
 			})
@@ -1347,7 +1317,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					if h then h.WalkSpeed = 0 end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "CAUGHT IN 4K",
 			})
@@ -1376,7 +1346,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					f.Parent = hrp
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "Only in Ohio...",
 			})
@@ -1403,7 +1373,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = msg })
+					NotificationDispatchService.notify(p, { type = "error", message = msg })
 				end
 				task.wait(1.5)
 			end
@@ -1424,7 +1394,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "You are now an NPC. Embrace the vibe.",
 			})
@@ -1436,7 +1406,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 	if action == "sw_baller" then
 		for _, p in Players:GetPlayers() do
 			setBallerScale(p)
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "BALLER.",
 			})
@@ -1457,7 +1427,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		}
 		local msg = glitches[math.random(1, #glitches)]
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = msg })
+			NotificationDispatchService.notify(p, { type = "error", message = msg })
 		end
 		reply(player, "Fake glitch sent!")
 		return
@@ -1478,7 +1448,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = if p == player then "YEETED." else "GET YEETED",
 			})
@@ -1497,7 +1467,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 			}
 			for _, msg in chain do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(2)
 			end
@@ -1515,7 +1485,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					if h then h.Health = 0 end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = "oof" })
+			NotificationDispatchService.notify(p, { type = "error", message = "oof" })
 		end
 		reply(player, "oof'd everyone")
 		return
@@ -1531,7 +1501,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = msg })
+					NotificationDispatchService.notify(p, { type = "error", message = msg })
 				end
 				task.wait(2)
 			end
@@ -1562,7 +1532,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = "WE ARE SO BACK." })
+			NotificationDispatchService.notify(p, { type = "success", message = "WE ARE SO BACK." })
 		end
 		reply(player, "We are so back.")
 		return
@@ -1641,7 +1611,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		}
 		for _, p in Players:GetPlayers() do
 			local msg = compliments[math.random(1, #compliments)]
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+			NotificationDispatchService.notify(p, { type = "success", message = msg })
 		end
 		reply(player, "Compliments delivered!")
 		return
@@ -1668,7 +1638,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "You get a gold star! Everyone gets a gold star!",
 			})
@@ -1716,7 +1686,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					pe.Parent = head
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "GROUP HUG! Everyone come together!",
 			})
@@ -1737,7 +1707,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		}
 		local msg = quotes[math.random(1, #quotes)]
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+			NotificationDispatchService.notify(p, { type = "success", message = msg })
 		end
 		reply(player, "Motivation delivered!")
 		return
@@ -1754,7 +1724,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(2)
 			end
@@ -1777,7 +1747,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "The whole server gives you a STANDING OVATION!",
 			})
@@ -1914,7 +1884,7 @@ local function handleGlobalCommand(data: { [string]: any })
 
 	if cmd == "announce" then
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "[GLOBAL] " .. (data.message or ""),
 			})
@@ -1930,7 +1900,7 @@ local function handleGlobalCommand(data: { [string]: any })
 		}
 		local msg = messages[math.random(1, #messages)]
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = msg })
+			NotificationDispatchService.notify(p, { type = "error", message = msg })
 		end
 	elseif cmd == "moon_gravity" then
 		game.Workspace.Gravity = 30
@@ -1973,21 +1943,21 @@ local function handleGlobalCommand(data: { [string]: any })
 			end
 		end
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "[EVENT] Speed Boost activated!",
 			})
 		end
 	elseif cmd == "fake_shutdown" then
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "[SYSTEM] Server shutting down in 10 seconds for maintenance...",
 			})
 		end
 		task.delay(10, function()
 			for _, p in Players:GetPlayers() do
-				Remotes.getEvent("Notification"):FireClient(p, {
+				NotificationDispatchService.notify(p, {
 					type = "success",
 					message = "[SYSTEM] Just kidding! ;)",
 				})
@@ -2040,7 +2010,7 @@ local function handleGlobalCommand(data: { [string]: any })
 				DataManager.addCurrency(p, "coins", amount, "admin_global")
 				syncFull(p)
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = `[GIFT] The creator gave everyone {Utils.formatNumber(amount)} coins!`,
 			})
@@ -2099,7 +2069,7 @@ local function handleGlobalCommand(data: { [string]: any })
 
 	elseif cmd == "l_ratio" then
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "L + Ratio + You fell off + No one asked (from the creator)",
 			})
@@ -2116,7 +2086,7 @@ local function handleGlobalCommand(data: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(3)
 			end
@@ -2146,7 +2116,7 @@ local function handleGlobalCommand(data: { [string]: any })
 				local h = c:FindFirstChildOfClass("Humanoid")
 				if h then h.WalkSpeed = 5 end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "OHIO FINAL BOSS HAS ARRIVED.",
 			})
@@ -2159,7 +2129,7 @@ local function handleGlobalCommand(data: { [string]: any })
 				local h = c:FindFirstChildOfClass("Humanoid")
 				if h then h.Health = 0 end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "error",
 				message = "SKILL ISSUE (from the creator, with love)",
 			})
@@ -2176,7 +2146,7 @@ local function handleGlobalCommand(data: { [string]: any })
 			}
 			for _, msg in chain do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(2)
 			end
@@ -2192,7 +2162,7 @@ local function handleGlobalCommand(data: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "error", message = msg })
+					NotificationDispatchService.notify(p, { type = "error", message = msg })
 				end
 				task.wait(2)
 			end
@@ -2220,7 +2190,7 @@ local function handleGlobalCommand(data: { [string]: any })
 					end
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = "WE ARE SO BACK." })
+			NotificationDispatchService.notify(p, { type = "success", message = "WE ARE SO BACK." })
 		end
 
 	-- ========== WHOLESOME GLOBAL HANDLERS ==========
@@ -2236,7 +2206,7 @@ local function handleGlobalCommand(data: { [string]: any })
 		}
 		for _, p in Players:GetPlayers() do
 			local msg = compliments[math.random(1, #compliments)]
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+			NotificationDispatchService.notify(p, { type = "success", message = msg })
 		end
 
 	elseif cmd == "wholesome_gold_stars" then
@@ -2257,7 +2227,7 @@ local function handleGlobalCommand(data: { [string]: any })
 					pe.Parent = head
 				end
 			end
-			Remotes.getEvent("Notification"):FireClient(p, {
+			NotificationDispatchService.notify(p, {
 				type = "success",
 				message = "You get a gold star! Everyone gets a gold star!",
 			})
@@ -2273,7 +2243,7 @@ local function handleGlobalCommand(data: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(2.5)
 			end
@@ -2289,7 +2259,7 @@ local function handleGlobalCommand(data: { [string]: any })
 		}
 		local msg = quotes[math.random(1, #quotes)]
 		for _, p in Players:GetPlayers() do
-			Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+			NotificationDispatchService.notify(p, { type = "success", message = msg })
 		end
 
 	elseif cmd == "wholesome_best_game" then
@@ -2302,7 +2272,7 @@ local function handleGlobalCommand(data: { [string]: any })
 			}
 			for _, msg in msgs do
 				for _, p in Players:GetPlayers() do
-					Remotes.getEvent("Notification"):FireClient(p, { type = "success", message = msg })
+					NotificationDispatchService.notify(p, { type = "success", message = msg })
 				end
 				task.wait(2.5)
 			end
@@ -2326,11 +2296,19 @@ function AdminService.init(_dataManager: any)
 	end
 
 	Remotes.getEvent("AdminCommand").OnServerEvent:Connect(function(player, payload)
-		if type(payload) ~= "table" then return end
+		if not ValidationService.checkRemoteRate(player, "AdminCommand") then
+			return
+		end
+		if type(payload) ~= "table" then
+			return
+		end
 		handleAdminCommand(player, payload)
 	end)
 
 	Remotes.getFunction("AdminAuth").OnServerInvoke = function(player)
+		if not ValidationService.checkRemoteRate(player, "AdminAuth") then
+			return false
+		end
 		return isAuthorized(player)
 	end
 

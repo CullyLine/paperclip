@@ -16,12 +16,35 @@ ReplicatedFirst:RemoveDefaultLoadingScreen()
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 
+-- POLA-334 / OS accessibility: before persisted settings replicate (ReplicatedFirst runs early).
+local function reducedMotionPreferred(): boolean
+	if player:GetAttribute("DAC_Settings_ReducedMotion") == true then
+		return true
+	end
+	local ok, ug = pcall(function()
+		return UserSettings():GetService("UserGameSettings")
+	end)
+	if ok and ug then
+		local ok2, v = pcall(function()
+			return (ug :: any).ReducedMotion == true
+		end)
+		if ok2 and v then
+			return true
+		end
+	end
+	return false
+end
+
+local reducedMotion = reducedMotionPreferred()
+local fadeDuration = if reducedMotion then 0.22 else 0.55
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local LoadingTipsConfig = require(DAC:WaitForChild("Config"):WaitForChild("LoadingTipsConfig"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local EasterEggConfig = require(DAC:WaitForChild("Config"):WaitForChild("EasterEggConfig"))
+local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
 
 local function soundIdFromAudioFolder(name: string): string?
 	local audio = ReplicatedStorage:FindFirstChild("Audio")
@@ -89,7 +112,7 @@ local headlineText = if #headlines > 0 then headlines[math.random(1, #headlines)
 local gui = Instance.new("ScreenGui")
 gui.Name = "DACLoadingScreen"
 gui.IgnoreGuiInset = true
-gui.DisplayOrder = 100_000
+gui.DisplayOrder = UILayerStack.screenGui.loadingScreen
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
@@ -138,6 +161,8 @@ root.Name = "Root"
 root.Size = UDim2.new(1, 0, 1, 0)
 root.BackgroundColor3 = Color3.fromRGB(14, 14, 32)
 root.BorderSizePixel = 0
+root.Active = true
+root.Selectable = false
 root.Parent = gui
 
 local gradient = Instance.new("UIGradient")
@@ -162,23 +187,25 @@ titleGlow.ScaleType = Enum.ScaleType.Stretch
 titleGlow.ZIndex = 1
 titleGlow.Parent = root
 
-task.spawn(function()
-	while gui.Parent do
-		local pulseOut = TweenService:Create(titleGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-			ImageTransparency = 0.3,
-			Size = UDim2.new(0.78, 0, 0, 140),
-		})
-		pulseOut:Play()
-		pulseOut.Completed:Wait()
+if not reducedMotion then
+	task.spawn(function()
+		while gui.Parent do
+			local pulseOut = TweenService:Create(titleGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+				ImageTransparency = 0.3,
+				Size = UDim2.new(0.78, 0, 0, 140),
+			})
+			pulseOut:Play()
+			pulseOut.Completed:Wait()
 
-		local pulseIn = TweenService:Create(titleGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-			ImageTransparency = 0.6,
-			Size = UDim2.new(0.7, 0, 0, 120),
-		})
-		pulseIn:Play()
-		pulseIn.Completed:Wait()
-	end
-end)
+			local pulseIn = TweenService:Create(titleGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+				ImageTransparency = 0.6,
+				Size = UDim2.new(0.7, 0, 0, 120),
+			})
+			pulseIn:Play()
+			pulseIn.Completed:Wait()
+		end
+	end)
+end
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
@@ -236,21 +263,23 @@ if headlineText then
 	headlineLbl.ZIndex = 3
 	headlineLbl.Parent = root
 
-	task.spawn(function()
-		while gui.Parent do
-			local blink = TweenService:Create(headlineLbl, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-				TextTransparency = 0.35,
-			})
-			blink:Play()
-			blink.Completed:Wait()
-			local restore = TweenService:Create(headlineLbl, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-				TextTransparency = 0,
-			})
-			restore:Play()
-			restore.Completed:Wait()
-			task.wait(2)
-		end
-	end)
+	if not reducedMotion then
+		task.spawn(function()
+			while gui.Parent do
+				local blink = TweenService:Create(headlineLbl, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					TextTransparency = 0.35,
+				})
+				blink:Play()
+				blink.Completed:Wait()
+				local restore = TweenService:Create(headlineLbl, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					TextTransparency = 0,
+				})
+				restore:Play()
+				restore.Completed:Wait()
+				task.wait(2)
+			end
+		end)
+	end
 end
 
 local tip = Instance.new("TextLabel")
@@ -271,6 +300,23 @@ local function applyTipStyle(idx: number)
 	tip.TextColor3 = if isPrem then Color3.fromRGB(255, 215, 100) else Color3.fromRGB(200, 210, 255)
 end
 applyTipStyle(1)
+
+local stageLabel = Instance.new("TextLabel")
+stageLabel.Name = "Stage"
+stageLabel.Size = UDim2.new(0.88, 0, 0, 26)
+stageLabel.Position = UDim2.new(0.5, 0, 0.62, 0)
+stageLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+stageLabel.BackgroundTransparency = 1
+stageLabel.Font = Enum.Font.GothamBold
+stageLabel.TextSize = 15
+stageLabel.TextColor3 = Color3.fromRGB(160, 200, 255)
+stageLabel.Text = "Authenticating…"
+stageLabel.ZIndex = 2
+stageLabel.Parent = root
+
+local function setStage(text: string)
+	stageLabel.Text = text
+end
 
 local barBack = Instance.new("Frame")
 barBack.Name = "ProgressBack"
@@ -307,13 +353,17 @@ barGradient.Color = ColorSequence.new({
 })
 barGradient.Parent = barFill
 
-task.spawn(function()
-	local offset = 0
-	while gui.Parent do
-		offset = (offset + RunService.RenderStepped:Wait() * 0.4) % 1
-		barGradient.Offset = Vector2.new(offset, 0)
-	end
-end)
+if not reducedMotion then
+	task.spawn(function()
+		local offset = 0
+		while gui.Parent do
+			offset = (offset + RunService.RenderStepped:Wait() * 0.4) % 1
+			barGradient.Offset = Vector2.new(offset, 0)
+		end
+	end)
+else
+	barGradient.Offset = Vector2.new(0.5, 0)
+end
 
 -- Sparkle particles around the loading bar
 local sparkleContainer = Instance.new("Frame")
@@ -326,36 +376,38 @@ sparkleContainer.ClipsDescendants = false
 sparkleContainer.ZIndex = 5
 sparkleContainer.Parent = root
 
-task.spawn(function()
-	while gui.Parent do
-		local sparkle = Instance.new("Frame")
-		sparkle.Size = UDim2.new(0, math.random(3, 6), 0, math.random(3, 6))
-		sparkle.Position = UDim2.new(math.random() * 0.96 + 0.02, 0, math.random() < 0.5 and 0.1 or 0.9, 0)
-		sparkle.AnchorPoint = Vector2.new(0.5, 0.5)
-		sparkle.BackgroundColor3 = Color3.fromRGB(255, 255, math.random(180, 255))
-		sparkle.BorderSizePixel = 0
-		sparkle.Rotation = math.random(0, 45)
-		sparkle.ZIndex = 5
-		sparkle.Parent = sparkleContainer
+if not reducedMotion then
+	task.spawn(function()
+		while gui.Parent do
+			local sparkle = Instance.new("Frame")
+			sparkle.Size = UDim2.new(0, math.random(3, 6), 0, math.random(3, 6))
+			sparkle.Position = UDim2.new(math.random() * 0.96 + 0.02, 0, math.random() < 0.5 and 0.1 or 0.9, 0)
+			sparkle.AnchorPoint = Vector2.new(0.5, 0.5)
+			sparkle.BackgroundColor3 = Color3.fromRGB(255, 255, math.random(180, 255))
+			sparkle.BorderSizePixel = 0
+			sparkle.Rotation = math.random(0, 45)
+			sparkle.ZIndex = 5
+			sparkle.Parent = sparkleContainer
 
-		local sparkleCorner = Instance.new("UICorner")
-		sparkleCorner.CornerRadius = UDim.new(1, 0)
-		sparkleCorner.Parent = sparkle
+			local sparkleCorner = Instance.new("UICorner")
+			sparkleCorner.CornerRadius = UDim.new(1, 0)
+			sparkleCorner.Parent = sparkle
 
-		local fadeDir = math.random() < 0.5 and -20 or 20
-		local tw = TweenService:Create(sparkle, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundTransparency = 1,
-			Position = sparkle.Position + UDim2.new(0, 0, 0, fadeDir),
-			Size = UDim2.new(0, 1, 0, 1),
-		})
-		tw:Play()
-		tw.Completed:Connect(function()
-			sparkle:Destroy()
-		end)
+			local fadeDir = math.random() < 0.5 and -20 or 20
+			local tw = TweenService:Create(sparkle, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				BackgroundTransparency = 1,
+				Position = sparkle.Position + UDim2.new(0, 0, 0, fadeDir),
+				Size = UDim2.new(0, 1, 0, 1),
+			})
+			tw:Play()
+			tw.Completed:Connect(function()
+				sparkle:Destroy()
+			end)
 
-		task.wait(math.random() * 0.15 + 0.05)
-	end
-end)
+			task.wait(math.random() * 0.15 + 0.05)
+		end
+	end)
+end
 
 local pctLabel = Instance.new("TextLabel")
 pctLabel.Name = "Pct"
@@ -372,7 +424,7 @@ pctLabel.Parent = root
 local tipIndex = 1
 task.spawn(function()
 	while gui.Parent do
-		task.wait(4)
+		task.wait(3 + math.random() * 2)
 		tipIndex = (tipIndex % #tips) + 1
 		tip.Text = tips[tipIndex]
 		applyTipStyle(tipIndex)
@@ -408,6 +460,7 @@ end)
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
+setStage("Loading assets…")
 targetProgress = math.max(targetProgress, 0.55)
 setBar(targetProgress)
 
@@ -423,28 +476,36 @@ if #preloadList > 0 then
 	end)
 end
 
+setStage("Spawning…")
 targetProgress = 1
 setBar(1)
-task.wait(0.35)
+task.wait(if reducedMotion then 0.12 else 0.35)
 
 playOneShotLoading("loading_ready", FALLBACK_READY, 0.42)
 
 local fade = TweenService:Create(
 	root,
-	TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+	TweenInfo.new(fadeDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 	{ BackgroundTransparency = 1 }
 )
 fade:Play()
-fadeAllLoadingAudio(0.55)
+fadeAllLoadingAudio(fadeDuration)
 for _, d in root:GetDescendants() do
 	if d:IsA("TextLabel") or d:IsA("TextButton") then
-		TweenService:Create(d, TweenInfo.new(0.55), { TextTransparency = 1 }):Play()
+		TweenService:Create(d, TweenInfo.new(fadeDuration), { TextTransparency = 1 }):Play()
 	elseif d:IsA("ImageLabel") then
-		TweenService:Create(d, TweenInfo.new(0.55), { ImageTransparency = 1 }):Play()
+		TweenService:Create(d, TweenInfo.new(fadeDuration), { ImageTransparency = 1 }):Play()
 	elseif d:IsA("Frame") and d ~= root then
-		TweenService:Create(d, TweenInfo.new(0.55), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(d, TweenInfo.new(fadeDuration), { BackgroundTransparency = 1 }):Play()
 	end
 end
 gradient:Destroy()
-task.wait(0.58)
+task.wait(fadeDuration + 0.03)
+-- POLA-493: stop bed + one-shots before destroy so no stray Sounds/Tween callbacks after ScreenGui teardown.
+ambientBed:Stop()
+for _, ch in audioRoot:GetChildren() do
+	if ch:IsA("Sound") then
+		ch:Stop()
+	end
+end
 gui:Destroy()

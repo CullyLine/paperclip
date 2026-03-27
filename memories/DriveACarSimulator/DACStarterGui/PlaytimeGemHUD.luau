@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Playtime gem countdown HUD.
+	Playtime bonus countdown HUD.
 	UI is pre-built in StarterGui.DACPlaytimeGem; this script only wires behavior.
 ]]
 
@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
 local Constants = require(DAC:WaitForChild("Constants"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
@@ -23,6 +24,7 @@ function PlaytimeGemHUD.init()
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gui = playerGui:WaitForChild("DACPlaytimeGem") :: ScreenGui
+	gui.DisplayOrder = UILayerStack.screenGui.hudPlaytimeGem
 	local root = gui:WaitForChild("Root") :: Frame
 	local rootScale = root:WaitForChild("UIScale") :: UIScale
 	local gemIcon = root:WaitForChild("GemIcon") :: TextLabel
@@ -31,23 +33,12 @@ function PlaytimeGemHUD.init()
 	local barBg = root:WaitForChild("ProgressBg") :: Frame
 	local barFill = barBg:WaitForChild("Fill") :: Frame
 
-	local need = Constants.PLAYTIME_GEM_INTERVAL or 300
+	local need = Constants.PLAYTIME_BONUS_INTERVAL or 300
 	local lastLeft = need
 	local lastPlaytimeProgress = 0
-
-	local function update(data: any)
-		if not data then return end
-		local p = data.playtimeSecondsSinceGem or 0
-		lastPlaytimeProgress = p
-		need = Constants.PLAYTIME_GEM_INTERVAL or 300
-		local left = math.max(0, need - p)
-		lastLeft = left
-		local prog = if need > 0 then math.clamp(p / need, 0, 1) else 0
-		barFill.Size = UDim2.new(prog, 0, 1, 0)
-		local m = math.floor(left / 60)
-		local s = math.floor(left % 60)
-		label.Text = ` Playtime gem in {m}:{string.format("%02d", s)} `
-	end
+	local urgencyConn: RBXScriptConnection? = nil
+	local lastUrgencyPulseClock = 0.0
+	local URGENCY_PULSE_INTERVAL = 0.05
 
 	local function setUrgencyVisuals(left: number)
 		local urgent = left <= 10 and left > 0
@@ -61,16 +52,51 @@ function PlaytimeGemHUD.init()
 		end
 	end
 
-	RunService.RenderStepped:Connect(function()
-		setUrgencyVisuals(lastLeft)
-	end)
+	local function disconnectUrgencyAnim()
+		if urgencyConn then
+			urgencyConn:Disconnect()
+			urgencyConn = nil
+		end
+		ringStroke.Color = Color3.fromRGB(90, 80, 140)
+		ringStroke.Transparency = 0.55
+	end
+
+	local function update(data: any)
+		if not data then return end
+		local p = data.playtimeSecondsSinceBonus or data.playtimeSecondsSinceGem or 0
+		lastPlaytimeProgress = p
+		need = Constants.PLAYTIME_BONUS_INTERVAL or 300
+		local left = math.max(0, need - p)
+		lastLeft = left
+		local prog = if need > 0 then math.clamp(p / need, 0, 1) else 0
+		barFill.Size = UDim2.new(prog, 0, 1, 0)
+		local m = math.floor(left / 60)
+		local s = math.floor(left % 60)
+		label.Text = ` Bonus in {m}:{string.format("%02d", s)} `
+		local urgent = left <= 10 and left > 0
+		if urgent then
+			if not urgencyConn then
+				urgencyConn = RunService.Heartbeat:Connect(function()
+					local now = os.clock()
+					if now - lastUrgencyPulseClock < URGENCY_PULSE_INTERVAL then
+						return
+					end
+					lastUrgencyPulseClock = now
+					setUrgencyVisuals(lastLeft)
+				end)
+			end
+		else
+			disconnectUrgencyAnim()
+			setUrgencyVisuals(lastLeft)
+		end
+	end
 
 	Remotes.getEvent("Notification").OnClientEvent:Connect(function(n)
 		if type(n) == "table" and type(n.message) == "string" and string.find(n.message, "Playtime bonus", 1, true) then
 			SoundFacade.playOneShot("level_up")
 			local edgeGlow = Instance.new("Frame")
 			edgeGlow.Name = "AwardEdgeGlow"
-			edgeGlow.BackgroundColor3 = Color3.fromRGB(200, 120, 255)
+			edgeGlow.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
 			edgeGlow.BackgroundTransparency = 0.65
 			edgeGlow.BorderSizePixel = 0
 			edgeGlow.Size = UDim2.new(1, 24, 1, 24)
@@ -80,9 +106,9 @@ function PlaytimeGemHUD.init()
 			edgeGlow.Parent = root
 			local eg = Instance.new("UIGradient")
 			eg.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 180, 255)),
-				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(120, 80, 255)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 220, 160)),
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 220, 100)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 180, 60)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 240, 160)),
 			})
 			eg.Transparency = NumberSequence.new({
 				NumberSequenceKeypoint.new(0, 0.5),
@@ -104,15 +130,9 @@ function PlaytimeGemHUD.init()
 			gemIcon.Rotation = 0
 			TweenService:Create(gemIcon, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Rotation = 360 }):Play()
 
-			local pool = MicrocopyConfig.PlaytimeGemReward
-			local template = pool[math.random(1, #pool)]
-			local secs = lastPlaytimeProgress
-			if secs < 1 then secs = Constants.PLAYTIME_GEM_INTERVAL or 300 end
-			local mins = math.max(1, math.floor(secs / 60))
-			local flavor = template:gsub("{AMOUNT}", "1"):gsub("{MINUTES}", tostring(mins))
-			VFXFacade.currencyPopup("gems", 1, flavor)
-			HUD.pulseCurrencyLabel("gems")
-			local bright = Color3.fromRGB(255, 200, 255)
+			VFXFacade.currencyPopup("coins", Constants.PLAYTIME_BONUS_BASE_COINS, "Playtime bonus!")
+			HUD.pulseCurrencyLabel("coins")
+			local bright = Color3.fromRGB(255, 230, 120)
 			local orig = label.TextColor3
 			TweenService:Create(label, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextColor3 = bright }):Play()
 			task.delay(0.14, function()
@@ -124,8 +144,12 @@ function PlaytimeGemHUD.init()
 	end)
 
 	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(update)
-	local d = Remotes.getFunction("GetPlayerData"):InvokeServer()
-	update(d)
+	local okInit, d = pcall(function()
+		return Remotes.getFunction("GetPlayerData"):InvokeServer()
+	end)
+	if okInit and d and player.Parent then
+		update(d)
+	end
 end
 
 return PlaytimeGemHUD

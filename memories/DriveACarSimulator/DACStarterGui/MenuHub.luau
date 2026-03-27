@@ -4,11 +4,21 @@
 	Feature panels (BattlePass, Quests, etc.) call MenuHub.registerPanel()
 	which forwards to UIController.registerPanel(). All open/close/toggle
 	goes through UIController so there is one unified panel system.
+
+	Hub ActionBar icon polish (UIScale + SoundFacade ui_quickbar_*): UIController.createActionBarButtons
+	calls UIHelpers.wireHubIconButtonsUnder(DACMain.ActionBar) — see UIHelpers.wireHubIconButtonJuice.
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DAC = ReplicatedStorage:WaitForChild("DAC")
+local Constants = require(DAC:WaitForChild("Constants"))
 
 local MenuHub = {}
+
+-- Idempotent init: hot reload must not re-resolve Panels reference redundantly (paired with GuiBootstrap guard).
+local menuHubInitDone = false
 
 local player = Players.LocalPlayer
 local playerGui: PlayerGui = player:WaitForChild("PlayerGui") :: PlayerGui
@@ -67,11 +77,20 @@ function MenuHub.toggle(id: string)
 	end
 end
 
+function MenuHub.getUIController(): any?
+	return getUIController()
+end
+
 function MenuHub.init()
+	if menuHubInitDone then
+		return
+	end
+	menuHubInitDone = true
+
 	local screenGui = playerGui:WaitForChild("DACMain") :: ScreenGui
 	panelsFrame = screenGui:WaitForChild("Panels") :: Frame
 
-	print("[DAC] MenuHub initialized (delegates to UIController)")
+	Constants.bootLog("[DAC] MenuHub initialized (delegates to UIController)")
 end
 
 return MenuHub

@@ -1,31 +1,86 @@
 --!strict
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local EconomyLogService = require(script.Parent:WaitForChild("EconomyLogService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
 local Constants = require(DAC:WaitForChild("Constants"))
 
 local CodeService = {}
 
+--[[
+	Sliding-window attempt log per player (monotonic time) — hard cap per minute.
+	Independent of RemoteCooldown / checkRemoteRate (defense in depth).
+]]
+local redeemAttemptTimes: { [number]: { number } } = {}
+
+local function trimWhitespace(s: string): string
+	return (string.gsub(s, "^%s*(.-)%s*$", "%1"))
+end
+
+local function pruneAttemptWindow(uid: number, now: number)
+	local list = redeemAttemptTimes[uid]
+	if not list then
+		return
+	end
+	local window = Constants.CODE_REDEEM_WINDOW_SEC
+	local i = 1
+	while i <= #list do
+		if now - list[i] > window then
+			table.remove(list, i)
+		else
+			i += 1
+		end
+	end
+end
+
+local function allowRedeemAttempt(player: Player): boolean
+	local uid = player.UserId
+	local now = os.clock()
+	local list = redeemAttemptTimes[uid]
+	if not list then
+		list = {}
+		redeemAttemptTimes[uid] = list
+	end
+	pruneAttemptWindow(uid, now)
+	if #list >= Constants.CODE_REDEEM_MAX_ATTEMPTS_PER_MINUTE then
+		return false
+	end
+	table.insert(list, now)
+	return true
+end
+
+local function isValidCodeShape(trimmed: string): boolean
+	local n = #trimmed
+	if n < Constants.CODE_REDEEM_MIN_LEN or n > Constants.CODE_REDEEM_MAX_LEN then
+		return false
+	end
+	return string.match(trimmed, "^[%a%d]+$") ~= nil
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	redeemAttemptTimes[player.UserId] = nil
+end)
+
 -- Add new codes here. Expired codes stay in the table with active = false.
 local CODES: { [string]: { active: boolean, rewards: { { currency: string, amount: number } } } } = {
 	LAUNCH = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 5_000 },
-			{ currency = "gems", amount = 100 },
+			{ currency = "coins", amount = 10_000 },
 		},
 	},
 	STYLXUS90K = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 10_000 },
-			{ currency = "crystals", amount = 50 },
+			{ currency = "coins", amount = 15_000 },
 		},
 	},
 	SPEED = {
@@ -37,8 +92,7 @@ local CODES: { [string]: { active: boolean, rewards: { { currency: string, amoun
 	DRIVEFAST = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 3_000 },
-			{ currency = "gems", amount = 50 },
+			{ currency = "coins", amount = 5_000 },
 		},
 	},
 	PETPOWER = {
@@ -56,29 +110,25 @@ local CODES: { [string]: { active: boolean, rewards: { { currency: string, amoun
 	NEONHYPE = {
 		active = true,
 		rewards = {
-			{ currency = "crystals", amount = 200 },
+			{ currency = "coins", amount = 20_000 },
 		},
 	},
 	DESERT2X = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 5_000 },
-			{ currency = "gems", amount = 100 },
+			{ currency = "coins", amount = 10_000 },
 		},
 	},
 	THANKYOU = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 7_500 },
-			{ currency = "gems", amount = 75 },
-			{ currency = "crystals", amount = 25 },
+			{ currency = "coins", amount = 15_000 },
 		},
 	},
 	UPDATE1 = {
 		active = true,
 		rewards = {
-			{ currency = "coins", amount = 8_000 },
-			{ currency = "gems", amount = 150 },
+			{ currency = "coins", amount = 12_000 },
 		},
 	},
 }
@@ -104,6 +154,8 @@ function CodeService.redeem(player: Player, code: string): (boolean, string?)
 
 	data.redeemedCodes[upperCode] = true
 
+	EconomyLogService.logCodeRedeem(player, upperCode)
+
 	local messages = {}
 	for _, reward in codeDef.rewards do
 		CurrencyService.add(player, reward.currency, reward.amount, "code_redemption")
@@ -111,7 +163,7 @@ function CodeService.redeem(player: Player, code: string): (boolean, string?)
 	end
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
-	Remotes.getEvent("Notification"):FireClient(player, {
+	NotificationDispatchService.notify(player, {
 		type = "success",
 		message = "Code redeemed! " .. table.concat(messages, ", "),
 	})
@@ -121,16 +173,40 @@ end
 
 function CodeService.init()
 	Remotes.getEvent("RedeemCode").OnServerEvent:Connect(function(player, code)
-		if type(code) ~= "string" then return end
+		if type(code) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "redeem_code_bad_type", "")
+			return
+		end
+		if not allowRedeemAttempt(player) then
+			NotificationDispatchService.notify(player, {
+				type = "error",
+				message = "Too many code attempts. Wait before trying again.",
+			})
+			return
+		end
+
+		local trimmed = trimWhitespace(code)
+		if trimmed == "" or not isValidCodeShape(trimmed) then
+			NotificationDispatchService.notify(player, {
+				type = "error",
+				message = "Invalid code format.",
+			})
+			return
+		end
+
 		if not ValidationService.checkRemoteRate(player, "RedeemCode") then
+			return
+		end
+		if not ValidationService.canAct(player) then
 			return
 		end
 		if not RemoteCooldown.allow(player, "RedeemCode", Constants.REMOTE_COOLDOWN_DEFAULT) then
 			return
 		end
-		local success, err = CodeService.redeem(player, code)
+
+		local success, err = CodeService.redeem(player, trimmed)
 		if not success then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Code redemption failed",
 			})

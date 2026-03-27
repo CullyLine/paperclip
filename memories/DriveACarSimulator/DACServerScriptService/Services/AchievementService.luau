@@ -8,7 +8,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local AchievementPopupConfig = require(DAC:WaitForChild("Config"):WaitForChild("AchievementPopupConfig"))
+local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
+local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
@@ -20,18 +22,47 @@ local BIG_SPENDER_TARGET = 500_000
 local HATCH_100_TARGET = 100
 local SPEED_DEMON_THRESHOLD = 100
 local DAILY_STREAK_TARGET = 7
+local DAILY_STREAK_30_TARGET = 30
+local RUNS_10_TARGET = 10
+local RUNS_100_TARGET = 100
+local COMBO_INFERNO_THRESHOLD = 20
+local COIN_TYCOON_TARGET = 1_000_000
+local QUEST_VETERAN_TARGET = 10
+local NIGHT_OWL_SESSION_SEC = 60 * 60
+local SECRET_SPEED_THRESHOLD = 500
+local LAP_LEGEND_THRESHOLD = 100
+local REBIRTH_ROYALTY_THRESHOLD = 10
+
+-- Server session join time (unix) for single-session achievements.
+local sessionStartUnix: { [number]: number } = {}
 
 local RARITY_BY_ID: { [string]: string } = {
 	first_drive = "bronze",
 	first_hatch = "bronze",
 	rebirth_one = "bronze",
 	speed_demon = "bronze",
+	runs_10 = "bronze",
 	hatch_100 = "silver",
 	big_spender = "silver",
 	daily_streak_7 = "silver",
+	top_ten = "silver",
+	quest_veteran = "silver",
 	world_tourer = "gold",
 	number_one = "gold",
+	runs_100 = "gold",
+	combo_inferno = "gold",
+	legendary_hatch = "gold",
+	coin_tycoon = "gold",
+	daily_streak_30 = "gold",
+	world_elite = "gold",
 	full_index = "diamond",
+	garage_full = "diamond",
+	egg_hunter = "diamond",
+	night_owl = "silver",
+	secret_speed_demon = "gold",
+	egg_straordinary = "gold",
+	lap_legend = "diamond",
+	rebirth_royalty = "gold",
 }
 
 local function ensureAchievementTables(data: any)
@@ -219,6 +250,22 @@ local function pushProgressWorldTourer(player: Player, data: any)
 	AchievementService.fireProgress(player, "world_tourer", math.min(have, math.max(need, 1)), math.max(need, 1))
 end
 
+local function pushProgressRuns100(player: Player, data: any)
+	local tr = 0
+	if type(data.stats) == "table" and type(data.stats.totalRunsCompleted) == "number" then
+		tr = data.stats.totalRunsCompleted
+	end
+	AchievementService.fireProgress(player, "runs_100", math.min(tr, RUNS_100_TARGET), RUNS_100_TARGET)
+end
+
+local function pushProgressCoinTycoon(player: Player, data: any)
+	local cur = 0
+	if type(data.stats) == "table" and type(data.stats.totalCoinsEarned) == "number" then
+		cur = data.stats.totalCoinsEarned
+	end
+	AchievementService.fireProgress(player, "coin_tycoon", math.min(cur, COIN_TYCOON_TARGET), COIN_TYCOON_TARGET)
+end
+
 function AchievementService.onCoinsSpent(player: Player, data: any)
 	ensureAchievementTables(data)
 	pushProgressBigSpender(player, data)
@@ -227,21 +274,55 @@ function AchievementService.onCoinsSpent(player: Player, data: any)
 	end
 end
 
-function AchievementService.onRunEnded(player: Player, run: { worldId: string, speed: number })
+function AchievementService.noteSessionStart(player: Player)
+	sessionStartUnix[player.UserId] = os.time()
+end
+
+function AchievementService.checkNightOwlSession(player: Player)
+	local t0 = sessionStartUnix[player.UserId]
+	if not t0 then
+		return
+	end
+	if os.time() - t0 >= NIGHT_OWL_SESSION_SEC then
+		AchievementService.tryUnlock(player, "night_owl")
+	end
+end
+
+function AchievementService.onRunEnded(player: Player, run: { worldId: string, speed: number, maxNearMissChain: number?, laps: number? })
 	local data = DataManager.get(player)
 	if not data then
 		return
 	end
 	ensureAchievementTables(data)
 
+	local totalRuns = 0
 	if type(data.stats) == "table" and type(data.stats.totalRunsCompleted) == "number" then
-		if data.stats.totalRunsCompleted >= 1 then
+		totalRuns = data.stats.totalRunsCompleted
+		if totalRuns >= 1 then
 			AchievementService.tryUnlock(player, "first_drive")
 		end
+		if totalRuns >= RUNS_10_TARGET then
+			AchievementService.tryUnlock(player, "runs_10")
+		end
+		if totalRuns >= RUNS_100_TARGET then
+			AchievementService.tryUnlock(player, "runs_100")
+		end
+	end
+
+	local chain = if type(run.maxNearMissChain) == "number" then run.maxNearMissChain else 0
+	if chain >= COMBO_INFERNO_THRESHOLD then
+		AchievementService.tryUnlock(player, "combo_inferno")
 	end
 
 	if run.speed >= SPEED_DEMON_THRESHOLD then
 		AchievementService.tryUnlock(player, "speed_demon")
+	end
+	if run.speed >= SECRET_SPEED_THRESHOLD then
+		AchievementService.tryUnlock(player, "secret_speed_demon")
+	end
+	local lapsInRun = if type(run.laps) == "number" then run.laps else 0
+	if lapsInRun >= LAP_LEGEND_THRESHOLD then
+		AchievementService.tryUnlock(player, "lap_legend")
 	end
 
 	data.worldsWithCompletedRun[run.worldId] = true
@@ -290,6 +371,9 @@ function AchievementService.onRebirth(player: Player)
 	if type(data.rebirths) == "number" and data.rebirths >= 1 then
 		AchievementService.tryUnlock(player, "rebirth_one")
 	end
+	if type(data.rebirths) == "number" and data.rebirths >= REBIRTH_ROYALTY_THRESHOLD then
+		AchievementService.tryUnlock(player, "rebirth_royalty")
+	end
 end
 
 function AchievementService.onDailyClaimed(player: Player)
@@ -303,15 +387,21 @@ function AchievementService.onDailyClaimed(player: Player)
 		if data.dailyReward.streak >= DAILY_STREAK_TARGET then
 			AchievementService.tryUnlock(player, "daily_streak_7")
 		end
+		if data.dailyReward.streak >= DAILY_STREAK_30_TARGET then
+			AchievementService.tryUnlock(player, "daily_streak_30")
+		end
 	end
 end
 
-function AchievementService.onLeaderboardRank(player: Player, newRank: number?)
+function AchievementService.onLeaderboardRank(player: Player, newRank: number?, prevRank: number?)
 	if type(newRank) ~= "number" then
 		return
 	end
 	if newRank == 1 then
 		AchievementService.tryUnlock(player, "number_one")
+	end
+	if newRank <= 10 and newRank >= 1 and (prevRank == nil or prevRank > 10) then
+		AchievementService.tryUnlock(player, "top_ten")
 	end
 end
 
@@ -326,6 +416,102 @@ function AchievementService.syncProgressNudges(player: Player)
 	pushProgressDailyStreak(player, data)
 	pushProgressFullIndex(player, data)
 	pushProgressWorldTourer(player, data)
+	pushProgressRuns100(player, data)
+	pushProgressCoinTycoon(player, data)
+	AchievementService.onGarageMaybeComplete(player)
+
+	if type(data.stats) == "table" and type(data.stats.totalRunsCompleted) == "number" then
+		local tr = data.stats.totalRunsCompleted
+		if tr >= RUNS_10_TARGET then
+			AchievementService.tryUnlock(player, "runs_10")
+		end
+		if tr >= RUNS_100_TARGET then
+			AchievementService.tryUnlock(player, "runs_100")
+		end
+	end
+	if type(data.dailyReward) == "table" and type(data.dailyReward.streak) == "number" then
+		if data.dailyReward.streak >= DAILY_STREAK_30_TARGET then
+			AchievementService.tryUnlock(player, "daily_streak_30")
+		end
+	end
+	if type(data.milestoneCopyClaimed) == "table" then
+		local sorted = WorldConfig.getWorldsSorted()
+		if #sorted > 0 then
+			local lastId = sorted[#sorted].id
+			local wm = (data.milestoneCopyClaimed :: any).worldMastery
+			if type(wm) == "table" and wm[lastId] == true then
+				AchievementService.tryUnlock(player, "world_elite")
+			end
+		end
+	end
+	if type(data.discoveredEasterEggs) == "table" then
+		for _, v in data.discoveredEasterEggs do
+			if v == true then
+				AchievementService.tryUnlock(player, "egg_hunter")
+				break
+			end
+		end
+	end
+	if type(data.stats) == "table" and type(data.stats.questsCompletedTotal) == "number" then
+		if data.stats.questsCompletedTotal >= QUEST_VETERAN_TARGET then
+			AchievementService.tryUnlock(player, "quest_veteran")
+		end
+	end
+	if type(data.stats) == "table" and type(data.stats.totalCoinsEarned) == "number" then
+		if data.stats.totalCoinsEarned >= COIN_TYCOON_TARGET then
+			AchievementService.tryUnlock(player, "coin_tycoon")
+		end
+	end
+	if type(data.rebirths) == "number" and data.rebirths >= REBIRTH_ROYALTY_THRESHOLD then
+		AchievementService.tryUnlock(player, "rebirth_royalty")
+	end
+	AchievementService.checkNightOwlSession(player)
+end
+
+function AchievementService.onTotalCoinsEarned(player: Player, data: any)
+	ensureAchievementTables(data)
+	pushProgressCoinTycoon(player, data)
+	local cur = 0
+	if type(data.stats) == "table" and type(data.stats.totalCoinsEarned) == "number" then
+		cur = data.stats.totalCoinsEarned
+	end
+	if cur >= COIN_TYCOON_TARGET then
+		AchievementService.tryUnlock(player, "coin_tycoon")
+	end
+end
+
+function AchievementService.onQuestCompleted(player: Player, data: any)
+	ensureAchievementTables(data)
+	local n = 0
+	if type(data.stats) == "table" and type(data.stats.questsCompletedTotal) == "number" then
+		n = data.stats.questsCompletedTotal
+	end
+	if n >= QUEST_VETERAN_TARGET then
+		AchievementService.tryUnlock(player, "quest_veteran")
+	end
+end
+
+function AchievementService.onEasterEggFound(player: Player)
+	AchievementService.tryUnlock(player, "egg_hunter")
+end
+
+function AchievementService.onGarageMaybeComplete(player: Player)
+	local data = DataManager.get(player)
+	if not data then
+		return
+	end
+	ensureAchievementTables(data)
+	local need = 0
+	for _ in CarConfig.Cars do
+		need += 1
+	end
+	local have = 0
+	for _ in data.cars do
+		have += 1
+	end
+	if need > 0 and have >= need then
+		AchievementService.tryUnlock(player, "garage_full")
+	end
 end
 
 function AchievementService.buildSnapshot(player: Player): any
@@ -359,7 +545,15 @@ function AchievementService.buildSnapshot(player: Player): any
 end
 
 function AchievementService.init()
+	local Players = game:GetService("Players")
+	Players.PlayerRemoving:Connect(function(player: Player)
+		sessionStartUnix[player.UserId] = nil
+	end)
+
 	Remotes.getFunction("GetAchievementData").OnServerInvoke = function(player: Player)
+		if not ValidationService.checkRemoteRate(player, "GetAchievementData") then
+			return nil
+		end
 		return AchievementService.buildSnapshot(player)
 	end
 

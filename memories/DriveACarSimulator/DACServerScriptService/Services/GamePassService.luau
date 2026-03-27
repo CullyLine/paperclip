@@ -5,7 +5,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Constants = require(DAC:WaitForChild("Constants"))
 local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePassConfig"))
 
@@ -21,21 +23,21 @@ local playerPasses: { [number]: { [string]: boolean } } = {}
 -- nil = use real ownership; true/false = admin testing override (VIP only)
 local vipAdminOverride: { [number]: boolean? } = {}
 
-function GamePassService.hasPass(player: Player, passId: string): boolean
-	if passId == "vip" then
+function GamePassService.hasPass(player: Player, passKey: string): boolean
+	if passKey == "vip" then
 		local o = vipAdminOverride[player.UserId]
 		if o ~= nil then
 			return o
 		end
 	end
 	local passes = playerPasses[player.UserId]
-	return passes ~= nil and passes[passId] == true
+	return passes ~= nil and passes[passKey] == true
 end
 
 function GamePassService.getPassFlagsTable(player: Player): { [string]: boolean }
 	local t: { [string]: boolean } = {}
-	for passId in GamePassConfig.Passes do
-		t[passId] = GamePassService.hasPass(player, passId)
+	for passKey in GamePassConfig.Passes do
+		t[passKey] = GamePassService.hasPass(player, passKey)
 	end
 	return t
 end
@@ -72,13 +74,13 @@ end
 function GamePassService.checkAllPasses(player: Player)
 	playerPasses[player.UserId] = {}
 
-	for passId, passDef in GamePassConfig.Passes do
+	for passKey, passDef in GamePassConfig.Passes do
 		if passDef.gamePassId > 0 then
 			local success, owns = pcall(function()
 				return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passDef.gamePassId)
 			end)
 			if success and owns then
-				playerPasses[player.UserId][passId] = true
+				playerPasses[player.UserId][passKey] = true
 			end
 		end
 	end
@@ -97,15 +99,19 @@ end
 function GamePassService.onGamePassPurchased(player: Player, gamePassId: number, wasPurchased: boolean)
 	if not wasPurchased then return end
 
-	for passId, passDef in GamePassConfig.Passes do
+	for passKey, passDef in GamePassConfig.Passes do
 		if passDef.gamePassId == gamePassId then
 			if not playerPasses[player.UserId] then
 				playerPasses[player.UserId] = {}
 			end
-			playerPasses[player.UserId][passId] = true
+			-- Idempotent: duplicate PromptGamePassPurchaseFinished must not re-notify / re-save / re-fire PurchaseComplete.
+			if playerPasses[player.UserId][passKey] == true then
+				return
+			end
+			playerPasses[player.UserId][passKey] = true
 
 			-- Apply immediate effects
-			if passId == "extra_pet_slots" then
+			if passKey == "extra_pet_slots" then
 				local data = DataManager.get(player)
 				if data then
 					data.maxPetSlots = Constants.MAX_PET_SLOTS_GAMEPASS
@@ -120,7 +126,7 @@ function GamePassService.onGamePassPurchased(player: Player, gamePassId: number,
 				MilestoneCeremonyService.tryFirstTime(player, pdata, "FirstGamePassPurchase")
 			end
 
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "success",
 				message = `Purchased {passDef.name}!`,
 			})
@@ -137,16 +143,17 @@ function GamePassService.onGamePassPurchased(player: Player, gamePassId: number,
 				else
 					table.insert(benefits, "Permanent unlock")
 				end
-				Remotes.getEvent("PurchaseComplete"):FireClient(player, {
-					productType = "gamepass",
-					productKey = passId,
-					displayName = tostring(passDef.name),
-					iconId = iconId,
-					benefits = benefits,
-					robuxSpent = robuxSpent,
-					totalRobuxSpent = if type(pdataMoney.totalRobuxSpent) == "number" then pdataMoney.totalRobuxSpent else 0,
-				})
-				DataManager.save(player)
+				if DataManager.saveImmediate(player) then
+					Remotes.getEvent("PurchaseComplete"):FireClient(player, {
+						productType = "gamepass",
+						productKey = passKey,
+						displayName = tostring(passDef.name),
+						iconId = iconId,
+						benefits = benefits,
+						robuxSpent = robuxSpent,
+						totalRobuxSpent = if type(pdataMoney.totalRobuxSpent) == "number" then pdataMoney.totalRobuxSpent else 0,
+					})
+				end
 			end
 			break
 		end
@@ -163,24 +170,39 @@ function GamePassService.init()
 		return GamePassService.getPassFlagsTable(player)
 	end
 
-	Remotes.getEvent("PurchaseGamePass").OnServerEvent:Connect(function(player, passId)
-		if type(passId) ~= "string" then
-			return
-		end
+	Remotes.getEvent("PurchaseGamePass").OnServerEvent:Connect(function(player, passKey)
 		if not ValidationService.checkRemoteRate(player, "PurchaseGamePass") then
 			return
 		end
-		if not RemoteCooldown.allow(player, "PurchaseGamePass", 2) then
+		if not ValidationService.canAct(player) then
 			return
 		end
-		local passDef = GamePassConfig.Passes[passId]
+		if type(passKey) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "gamepass_bad_id_type", "")
+			return
+		end
+		if passKey == "" or #passKey > ValidationService.MAX_REMOTE_STRING_ID_LEN then
+			ValidationService.logAnomalyOncePerSession(player, "gamepass_bad_id_len", "")
+			return
+		end
+		-- Shared with DevProductService: one throttle for all Robux prompt requests (POLA-655).
+		if not RemoteCooldown.allow(player, "IapMarketplacePrompt", 2) then
+			local msg = MicrocopyConfig.pickVariant(MicrocopyConfig.SoftFailCooldownActive):gsub("{ACTION}", "Robux checkout")
+			NotificationDispatchService.notify(player, {
+				type = "info",
+				message = msg,
+			})
+			return
+		end
+		local passDef = GamePassConfig.Passes[passKey]
 		if not passDef then
+			ValidationService.logAnomalyOncePerSession(player, "gamepass_unknown_id", passKey)
 			return
 		end
 		if passDef.gamePassId == 0 then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
-				message = "Game pass not linked in Studio yet (ID 0).",
+				message = "That pass isn’t hooked up in this build yet — check back after the next update!",
 			})
 			return
 		end

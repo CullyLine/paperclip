@@ -452,8 +452,8 @@
   t=0.00s  Screen flash + VFX fanfare (existing)
   t=0.00s  Dim overlay fades in FAST (0.20s, deeper than before)
   t=0.00s  Slot-machine center glow hint appears + pulsing
-  t=0.00s  "payout_anticipation_hum" sound begins
-  t=0.35s  Center glow destroyed, hum cuts off
+  t=0.00s  SHIPPED: anticipation audio = runEndFanfare + dim/glow (payout_anticipation_hum not registered in SoundController yet).
+  t=0.35s  Glow destroyed; first payout OneShot is payout_card_pop (see PayoutPanel.show); hum cut-off N/A until hum ships.
   t=0.35s  Card anticipation breath starts (silhouette, 0.18s)
   t=0.53s  Card pop sound cue ("payout_card_pop") — silence→pop transition
   t=0.53s  Card pop-in starts (0.40s, Back Out)
@@ -499,8 +499,8 @@
 ================================================================================
   New sound IDs for SoundConfig / SoundController:
 
-  payout_anticipation_hum  — deep sine-wave hum + tremolo (0.40s)
-                             plays during slot-machine pause, cut on pop
+  payout_anticipation_hum  — DEFERRED (not in SoundController yet); optional future slot-machine bed under fanfare.
+                             When added: play from dim start; duck/cut on card_pop.
   payout_card_pop          — punchy whoosh + sub-bass thump (0.3s)
   payout_badge_tick        — short metallic clink (0.08s), pitch varies
   payout_run_of_day        — triumphant brass stab + shimmer (0.6s)

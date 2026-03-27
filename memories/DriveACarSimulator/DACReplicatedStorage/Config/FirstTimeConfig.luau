@@ -14,12 +14,13 @@ local FirstTimeConfig = {}
 -- 5 variants per milestone. Shown once per player lifetime.
 --------------------------------------------------------------------------
 
+-- Fires on first *store* car purchase (starter is free — you already had one car).
 FirstTimeConfig.FirstCarPurchased = {
-	"YOUR FIRST RIDE! The journey begins!",
-	"GARAGE UNLOCKED! Every legend starts with one car!",
-	"KEYS IN HAND! The open road is calling!",
-	"FIRST WHEELS! From here, it's all uphill — in speed!",
-	"ENGINE ON! You just joined the fastest club on the planet!",
+	"NEW RIDE ACQUIRED! Your garage just levelled up!",
+	"FLEET EXPANDING! Another car means more builds to tune!",
+	"KEYS IN HAND! You earned this one — go break records!",
+	"GARAGE GOALS! First purchase down — the collection has begun!",
+	"ENGINE ON! One more car in the stable — time to flex!",
 }
 
 FirstTimeConfig.FirstPetHatched = {
@@ -30,12 +31,13 @@ FirstTimeConfig.FirstPetHatched = {
 	"BONDED! {PetName} will never leave your side. Let's GO!",
 }
 
+-- Matches RebirthConfig.ResetOnRebirth: coins + eggs + per-car levels reset; cars & pets kept.
 FirstTimeConfig.FirstRebirth = {
-	"REBORN! Everything resets, but you're STRONGER!",
-	"FIRST REBIRTH! You just unlocked a whole new level of power!",
-	"ASCENSION BEGINS! The grind resets — your strength DOESN'T!",
-	"REBIRTH COMPLETE! Welcome to the elite. It only gets faster!",
-	"RESET. RISE. You just did what most players never dare!",
+	"REBORN! Coins, egg stash, and car upgrades reset — your permanent rebirth stats just jumped!",
+	"FIRST REBIRTH! Garage & pets stay; coins, eggs, and per-car upgrades reset — Gas, Power, and Speed bonuses are forever!",
+	"ASCENSION BEGINS! You traded a coin stack for stats that never go away!",
+	"REBIRTH COMPLETE! Welcome to the elite — every future rebirth stacks more permanent power!",
+	"RESET. RISE. You kept your garage and pets — egg inventory and per-car levels refreshed — plus permanent speed juice!",
 }
 
 FirstTimeConfig.FirstWorldUnlocked = {
@@ -134,21 +136,21 @@ FirstTimeConfig.SpendingMilestones = {
 		},
 	},
 	[500] = {
-		tierName = "Whale",
+		tierName = "Mega",
 		title = {
-			"WHALE STATUS!",
-			"MAKING WAVES!",
+			"MEGA STATUS!",
 			"BIG LEAGUES!",
+			"FRONT ROW!",
 		},
 		subtitle = {
 			"You just became the player everyone talks about!",
-			"The ocean is YOURS — everyone else is swimming in your wake!",
+			"The track is YOURS — everyone else is eating your dust!",
 			"500 deep and THRIVING. Absolute power move!",
 		},
 		description = {
-			"Whale tier is elite territory — your collection proves it!",
+			"Mega tier is elite territory — your collection proves it!",
 			"At this level, the game basically works for YOU. Enjoy the throne!",
-			"Fewer than 5% of players ever reach Whale status. You're built different!",
+			"Fewer than 5% of players ever reach Mega status. You're built different!",
 		},
 	},
 	[1000] = {

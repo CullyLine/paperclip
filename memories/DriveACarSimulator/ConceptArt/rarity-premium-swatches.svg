@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="200" viewBox="0 0 720 200">
+  <title>DAC  Rarity &amp; premium swatches (POLA-629)</title>
+  <rect width="720" height="200" fill="#F5F0FA"/>
+  <text x="16" y="28" font-family="Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1E1E1E">Gameplay rarity (fill)</text>
+  <g font-family="Segoe UI, sans-serif" font-size="11" fill="#1E1E1E">
+    <rect x="16" y="44" width="100" height="56" fill="#B4B4B4" stroke="#2A2A40" stroke-width="2" rx="8"/>
+    <text x="36" y="118">common</text>
+    <rect x="124" y="44" width="100" height="56" fill="#50C850" stroke="#1E5A1E" stroke-width="2" rx="8"/>
+    <text x="136" y="118">uncommon</text>
+    <rect x="232" y="44" width="100" height="56" fill="#3C82FF" stroke="#1A2A60" stroke-width="2" rx="8"/>
+    <text x="258" y="118">rare</text>
+    <rect x="340" y="44" width="100" height="56" fill="#B43CFF" stroke="#3A0F55" stroke-width="2" rx="8"/>
+    <text x="364" y="118">epic</text>
+    <rect x="448" y="44" width="100" height="56" fill="#FFC832" stroke="#5C3A00" stroke-width="2" rx="8"/>
+    <text x="458" y="118">legendary</text>
+    <rect x="556" y="44" width="100" height="56" fill="#FF3250" stroke="#5A1020" stroke-width="2" rx="8"/>
+    <text x="574" y="118">mythic</text>
+  </g>
+  <text x="16" y="152" font-family="Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1E1E1E">Monetization (paid strip accent)</text>
+  <rect x="16" y="160" width="200" height="32" fill="#252030" stroke="#FFC83C" stroke-width="2.5" rx="8"/>
+  <text x="24" y="180" font-family="Segoe UI, sans-serif" font-size="11" fill="#FFD54F">Gold stroke on dark  Robux / pass upsell</text>
+</svg>

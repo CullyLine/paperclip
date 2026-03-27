@@ -14,11 +14,11 @@ local TweenService = game:GetService("TweenService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
-local Constants = require(DAC:WaitForChild("Constants"))
 local SocialFeedConfig = require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
 local BattlePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("BattlePassConfig"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local DailyRewardConfig = require(DAC:WaitForChild("Config"):WaitForChild("DailyRewardConfig"))
+local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 
 local DrivingController = require(script.Parent:WaitForChild("DrivingController"))
@@ -107,11 +107,10 @@ local function buildContextLines(data: any): { string }
 	local dr = data.dailyReward
 	if type(dr) == "table" then
 		local lastClaim = type(dr.lastClaim) == "number" and dr.lastClaim or 0
-		local elapsed = os.time() - lastClaim
-		if elapsed >= Constants.DAILY_REWARD_COOLDOWN then
+		if DailyRewardConfig.canClaimNow(lastClaim) then
 			table.insert(lines, "Daily reward: ready to claim!")
 		else
-			local left = Constants.DAILY_REWARD_COOLDOWN - elapsed
+			local left = DailyRewardConfig.secondsUntilNextUtcClaimWindow(lastClaim)
 			table.insert(lines, `Next daily reward in {formatDuration(left)}`)
 		end
 	end
@@ -120,15 +119,18 @@ local function buildContextLines(data: any): { string }
 	if type(bp) == "table" and type(bp.xp) == "number" then
 		local tier, need, _cap = xpIntoCurrentTier(bp.xp)
 		if need > 0 then
-			table.insert(lines, `Battle Pass: {need} XP to tier {tier}`)
+			table.insert(
+				lines,
+				MicrocopyConfig.RetentionBattlePassXpToFinishTier:gsub("{XP}", tostring(need)):gsub("{TIER}", tostring(tier))
+			)
 		else
-			table.insert(lines, "Battle Pass: max tier reached this season")
+			table.insert(lines, MicrocopyConfig.RetentionBattlePassMaxTier)
 		end
 	end
 
 	local pity = getEggPityStreak()
 	if type(pity) == "number" and pity > 0 then
-		table.insert(lines, `Egg pity: {pity} hatch(es) since last rare+`)
+		table.insert(lines, `No Rare+ in last {pity} hatch(es) — keep cracking eggs!`)
 	end
 
 	return lines
@@ -324,7 +326,7 @@ function RetentionController.init()
 	sg.Name = "DACRetentionPopup"
 	sg.ResetOnSpawn = false
 	sg.IgnoreGuiInset = true
-	sg.DisplayOrder = 550
+	sg.DisplayOrder = UILayerStack.screenGui.retentionModal
 	sg.Enabled = false
 	sg.Parent = playerGui
 	gui = sg
@@ -368,7 +370,7 @@ function RetentionController.init()
 	header.Font = Enum.Font.GothamBold
 	header.TextSize = 22
 	header.TextColor3 = Color3.fromRGB(30, 30, 30)
-	header.Text = "Don't go yet!"
+	header.Text = MicrocopyConfig.pickVariant(MicrocopyConfig.RetentionIdleHeader)
 	header.ZIndex = 3
 	header.Parent = card
 
@@ -486,6 +488,12 @@ function RetentionController.init()
 			pcall(streakTick)
 		end
 	end)
+end
+
+function RetentionController.tearDownForLifecycle()
+	if gui then
+		gui.Enabled = false
+	end
 end
 
 return RetentionController

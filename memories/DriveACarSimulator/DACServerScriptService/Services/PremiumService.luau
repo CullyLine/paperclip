@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 
 local PremiumService = {}
 
@@ -32,7 +33,7 @@ function PremiumService.init()
 	MarketplaceService.PromptPremiumPurchaseFinished:Connect(function(player)
 		premiumPlayers[player.UserId] = player.MembershipType == Enum.MembershipType.Premium
 		if PremiumService.isPremium(player) then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "premium_welcome",
 				message = "Welcome to Premium! +50% coin earnings and daily premium gifts!",
 			})

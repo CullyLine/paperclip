@@ -9,15 +9,18 @@ local TweenService = game:GetService("TweenService")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Utils = require(DAC:WaitForChild("Utils"))
 local RebirthConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthConfig"))
-local RebirthMilestoneConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthMilestoneConfig"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local SocialFeedConfig = require(DAC:WaitForChild("Config"):WaitForChild("SocialFeedConfig"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local RemoteFailSafe = require(DAC:WaitForChild("RemoteFailSafe"))
+local RebirthClientState = require(DAC:WaitForChild("RebirthClientState"))
 local MenuHub = require(script.Parent:WaitForChild("MenuHub"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
-local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
+local ClientRemoteDebounce = require(DAC:WaitForChild("ClientRemoteDebounce"))
 
 local RebirthPanel = {}
+
+local lastRebirthFire = { 0 }
 
 function RebirthPanel.init()
 	local sg = MenuHub.getScreenGui()
@@ -68,11 +71,11 @@ function RebirthPanel.init()
 		if root.Visible then tryStartTeaserCycle() else stopTeaserCycle() end
 	end)
 
-	local function playRebirthCelebrationGlobal(newCount: number)
-		SoundFacade.playOneShot("rebirth_confetti")
-		local milestone = RebirthMilestoneConfig.getHighestMilestoneCrossed(prevRebirths or 0, newCount)
-		VFXFacade.rebirthFlash(newCount, milestone)
-	end
+	-- Global VFX + audio payoff: VFXController.onPlayerDataUpdate → rebirthFlash (deduped).
+	-- Panel-only: staged stat reveal + count-up when Rebirth menu is open.
+
+	local statPreviewScale = statPreview:FindFirstChildOfClass("UIScale") :: UIScale?
+	local CEREMONY_HIDE_SEC = 5.5
 
 	local function showRebirthCelebrationUI(newCount: number)
 		celebrate.Visible = true
@@ -84,11 +87,61 @@ function RebirthPanel.init()
 		if RebirthConfig.ResetOnRebirth.eggs then table.insert(resetBits, "eggs") end
 		if RebirthConfig.ResetOnRebirth.carUpgrades then table.insert(resetBits, "car upgrade levels") end
 		local resetStr = if #resetBits > 0 then table.concat(resetBits, ", ") else "\u{2014}"
-		statPreview.Text = "Gained: +" .. tostring(RebirthConfig.Rewards.gasBoost) .. " Gas, +" .. tostring(RebirthConfig.Rewards.powerBoost) .. " Power, +" .. tostring(RebirthConfig.Rewards.speedBoost) .. " Speed, +" .. tostring(RebirthConfig.Rewards.crystals) .. " Crystals.\nReset: " .. resetStr .. "."
+
+		local rGas = RebirthConfig.Rewards.gasBoost
+		local rPow = RebirthConfig.Rewards.powerBoost
+		local rSpd = RebirthConfig.Rewards.speedBoost
+
+		statPreview.TextTransparency = 1
+		if statPreviewScale then
+			statPreviewScale.Scale = 0.92
+		end
+		statPreview.Text = "Gained: +0 Gas, +0 Power, +0 Speed.\nReset: " .. resetStr .. "."
+
 		celebrateScale.Scale = 0.2
-		TweenService:Create(celebrateScale, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-		task.delay(5, function()
-			if celebrate.Parent then celebrate.Visible = false; statPreview.Visible = false end
+		TweenService:Create(celebrateScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+
+		task.delay(0.22, function()
+			if not statPreview.Parent then
+				return
+			end
+			local steps = 7
+			for s = 0, steps do
+				if not statPreview.Parent then
+					return
+				end
+				local t = s / steps
+				local g = math.floor(rGas * t + 0.5)
+				local p = math.floor(rPow * t + 0.5)
+				local sp = math.floor(rSpd * t + 0.5)
+				statPreview.Text = "Gained: +"
+					.. tostring(g)
+					.. " Gas, +"
+					.. tostring(p)
+					.. " Power, +"
+					.. tostring(sp)
+					.. " Speed.\nReset: "
+					.. resetStr
+					.. "."
+				statPreview.TextTransparency = 1 - t
+				if statPreviewScale then
+					statPreviewScale.Scale = 0.92 + 0.08 * t
+				end
+				task.wait(0.038)
+			end
+			if statPreview.Parent then
+				statPreview.TextTransparency = 0
+				if statPreviewScale then
+					TweenService:Create(statPreviewScale, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+				end
+			end
+		end)
+
+		task.delay(CEREMONY_HIDE_SEC, function()
+			if celebrate.Parent then
+				celebrate.Visible = false
+				statPreview.Visible = false
+			end
 		end)
 	end
 
@@ -96,14 +149,37 @@ function RebirthPanel.init()
 		local data = Remotes.getFunction("GetPlayerData"):InvokeServer()
 		if not data then return end
 		local r = math.floor(tonumber(data.rebirths) or 0)
+		RebirthClientState.clearIfRebirthAdvanced(r)
 		if prevRebirths ~= nil and r > prevRebirths then
-			playRebirthCelebrationGlobal(r)
-			if root.Visible then showRebirthCelebrationUI(r) end
+			if root.Visible then
+				showRebirthCelebrationUI(r)
+			end
 		end
 		prevRebirths = r
 		lastRebirthForTeaser = r
 		local cost = Utils.calculateRebirthCost(data.rebirths, RebirthConfig.BaseCost, RebirthConfig.CostMultiplier)
-		info.Text = "Rebirths: " .. tostring(data.rebirths) .. "\nCost: " .. Utils.formatNumber(cost) .. " coins (must have at least this many; coins reset on rebirth)\n\nRewards: +" .. tostring(RebirthConfig.Rewards.gasBoost) .. " Gas, +" .. tostring(RebirthConfig.Rewards.powerBoost) .. " Power, +" .. tostring(RebirthConfig.Rewards.speedBoost) .. " Speed, +" .. tostring(RebirthConfig.Rewards.crystals) .. " Crystals\n\nWARNING: Resets coins, eggs, and car upgrade levels per config."
+		local rGas = RebirthConfig.Rewards.gasBoost
+		local rPow = RebirthConfig.Rewards.powerBoost
+		local rSpd = RebirthConfig.Rewards.speedBoost
+		local rebirthN = math.floor(tonumber(data.rebirths) or 0)
+		local firstTimeHint = if rebirthN == 0
+			then "First rebirth: spend your coin bank once to unlock permanent bonuses.\n\n"
+			else ""
+		info.Text = "Rebirths: "
+			.. tostring(rebirthN)
+			.. "\nCost: "
+			.. Utils.formatNumber(cost)
+			.. " coins (need at least this many; your coins go to 0 after rebirth)\n\n"
+			.. firstTimeHint
+			.. "Each rebirth: +"
+			.. tostring(rGas)
+			.. " Gas, +"
+			.. tostring(rPow)
+			.. " Power, +"
+			.. tostring(rSpd)
+			.. " Speed — permanent (stack forever)\n\n"
+			.. "Resets: coins, egg inventory, all car upgrade levels\n"
+			.. "Keeps: owned cars, pets, other world currencies"
 		local coins = math.floor(tonumber(data.coins) or 0)
 		local pctToward = if cost > 0 then math.clamp(coins / cost, 0, 1) else 0
 		local nearRebirth = cost > 0 and coins < cost and coins >= cost * 0.8
@@ -119,16 +195,30 @@ function RebirthPanel.init()
 	end
 
 	goBtn.MouseButton1Click:Connect(function()
-		SoundFacade.playOneShot("rebirth")
-		Remotes.getEvent("Rebirth"):FireServer()
-		task.wait(0.1)
-		refresh()
+		if not ClientRemoteDebounce.allow(lastRebirthFire) then
+			return
+		end
+		local exp = if prevRebirths ~= nil then prevRebirths else 0
+		if not RebirthClientState.begin(exp) then
+			return
+		end
+		-- Staged ceremony: confirm / anticipation (riser), then server request after ~0.3s (matches debounce window).
+		SoundFacade.playOneShot("rebirth_riser")
+		task.delay(0.3, function()
+			if not goBtn.Parent then
+				return
+			end
+			if not RemoteFailSafe.fireEvent("REBIRTH", "Rebirth", exp) then
+				RebirthClientState.forceRelease()
+			end
+		end)
 	end)
 
 	Remotes.getEvent("DataUpdate").OnClientEvent:Connect(function(_data: any)
 		refresh()
 	end)
 
+	RebirthClientState.registerPrimaryButton(goBtn)
 	refresh()
 end
 

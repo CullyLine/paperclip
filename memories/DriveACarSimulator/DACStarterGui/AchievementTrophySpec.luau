@@ -786,8 +786,8 @@
   ACHIEVEMENT 3 — EGGS (quantity): "HATCH MACHINE!"
 ────────────────────────────────────────────────────────────────────────────────
   ID                 : hatch_100
-  Title              : HATCH MACHINE!
-  Description        : Hatch 100 pets. The eggs never stop!
+  Title              : HATCH CENTURY!
+  Description        : Hatch 100 eggs. Keep cracking!
   Icon               : 🥚
   Rarity             : Silver
   Unlock Condition   : totalPetsHatched >= 100
@@ -878,7 +878,7 @@
 ────────────────────────────────────────────────────────────────────────────────
   ID                 : full_index
   Title              : COMPLETIONIST!
-  Description        : Collect 100% of all pets. Every. Single. One!
+  Description        : Discover every pet in the index. Every. Single. One!
   Icon               : 📖
   Rarity             : Diamond
   Unlock Condition   : uniquePetsOwned >= totalPetsInGame

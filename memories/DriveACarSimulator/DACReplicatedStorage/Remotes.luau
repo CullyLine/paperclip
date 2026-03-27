@@ -29,9 +29,12 @@ local REMOTE_EVENTS = {
 
 	"UnlockWorld",
 	"ChangeWorld",
+	"ReturnToLobby",
 
 	"ClaimDailyReward",
 	"ClaimBattlePassTier",
+	-- Server ack for tier claim (success/failure) so client can clear pending UI (POLA-527)
+	"BattlePassClaimResult",
 	"RedeemCode",
 
 	"PurchaseGamePass",
@@ -78,6 +81,16 @@ local REMOTE_EVENTS = {
 	"MarkAchievementsSeen",
 
 	"AdminCommand",
+
+	-- Group rewards: claim fanfare (server → client), dismiss join prompt (client → server)
+	"GroupRewardClaimed",
+	"DismissGroupJoinPrompt",
+
+	-- Friend play bonus multiplier (server → client HUD)
+	"FriendBonusUpdate",
+
+	-- Cross-player pet visibility (server → all clients)
+	"PetEquipSync",
 }
 
 local REMOTE_FUNCTIONS = {
@@ -87,6 +100,9 @@ local REMOTE_FUNCTIONS = {
 	"GetQuests",
 	"GetAchievementData",
 	"AdminAuth",
+	"FirstSessionOnboarding",
+	-- Driving: lane-center snap (POLA-468/628); server authorizes cooldown + authoritative CFrame snap
+	"RequestVehicleReset",
 }
 
 local remotesFolder: Folder? = nil

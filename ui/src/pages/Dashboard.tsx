@@ -68,8 +68,9 @@ export function Dashboard() {
 
   const runAll = useMutation({
     mutationFn: async () => {
+      const goal = runGoalText.trim() || undefined;
       await Promise.allSettled(
-        liveAgents.map((a) => agentsApi.run(a.id, selectedCompanyId ?? undefined)),
+        liveAgents.map((a) => agentsApi.run(a.id, selectedCompanyId ?? undefined, goal)),
       );
     },
     onSettled: invalidateAgents,

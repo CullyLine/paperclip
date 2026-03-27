@@ -33,6 +33,386 @@
       "$className": "StarterGui",
       "DAC": {
         "$path": "DACStarterGui"
+      },
+      "DACGroupJoinBanner": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ResetOnSpawn": false,
+          "IgnoreGuiInset": true,
+          "DisplayOrder": 32,
+          "ZIndexBehavior": "Sibling"
+        },
+        "Bar": {
+          "$className": "Frame",
+          "$properties": {
+            "AnchorPoint": [0.5, 1],
+            "BackgroundColor3": [1, 0.878, 0.918],
+            "BorderSizePixel": 0,
+            "Position": { "UDim2": [[0.5, 0], [1, -16]] },
+            "Size": { "UDim2": [[0.5, 0], [0, 96]] }
+          },
+          "BarCorner": {
+            "$className": "UICorner",
+            "$properties": {
+              "CornerRadius": { "UDim": [0, 14] }
+            }
+          },
+          "BarStroke": {
+            "$className": "UIStroke",
+            "$properties": {
+              "Thickness": 2,
+              "Color": [0.165, 0.165, 0.25]
+            }
+          },
+          "Headline": {
+            "$className": "TextLabel",
+            "$properties": {
+              "BackgroundTransparency": 1,
+              "Position": { "UDim2": [[0.04, 0], [0.06, 0]] },
+              "Size": { "UDim2": [[0.72, 0], [0, 26]] },
+              "Font": "GothamBlack",
+              "Text": "Join our group!",
+              "TextColor3": [0.118, 0.118, 0.118],
+              "TextSize": 18,
+              "TextXAlignment": "Left",
+              "TextWrapped": true
+            }
+          },
+          "Sub": {
+            "$className": "TextLabel",
+            "$properties": {
+              "BackgroundTransparency": 1,
+              "Position": { "UDim2": [[0.04, 0], [0.32, 0]] },
+              "Size": { "UDim2": [[0.72, 0], [0, 36]] },
+              "Font": "Gotham",
+              "Text": "",
+              "TextColor3": [0.25, 0.25, 0.3],
+              "TextSize": 13,
+              "TextWrapped": true,
+              "TextXAlignment": "Left"
+            }
+          },
+          "JoinBtn": {
+            "$className": "TextButton",
+            "$properties": {
+              "AnchorPoint": [0, 1],
+              "Position": { "UDim2": [[0.04, 0], [1, -10]] },
+              "Size": { "UDim2": [[0.4, 0], [0, 34]] },
+              "BackgroundColor3": [0.118, 0.8, 0.443],
+              "BorderSizePixel": 0,
+              "Font": "GothamBold",
+              "Text": "Join group",
+              "TextColor3": [1, 1, 1],
+              "TextSize": 16
+            },
+            "JoinCorner": {
+              "$className": "UICorner",
+              "$properties": {
+                "CornerRadius": { "UDim": [0, 8] }
+              }
+            }
+          },
+          "CloseBtn": {
+            "$className": "TextButton",
+            "$properties": {
+              "AnchorPoint": [1, 0],
+              "Position": { "UDim2": [[1, -8], [0, 8]] },
+              "Size": { "UDim2": [[0, 32], [0, 32]] },
+              "BackgroundColor3": [1, 0.133, 0.133],
+              "BorderSizePixel": 0,
+              "Font": "GothamBold",
+              "Text": "✕",
+              "TextColor3": [1, 1, 1],
+              "TextSize": 18
+            },
+            "CloseCorner": {
+              "$className": "UICorner",
+              "$properties": {
+                "CornerRadius": { "UDim": [0, 8] }
+              }
+            }
+          }
+        }
+      },
+      "DACFriendBonusHUD": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": true,
+          "ResetOnSpawn": false,
+          "IgnoreGuiInset": true,
+          "DisplayOrder": 28,
+          "ZIndexBehavior": "Sibling"
+        },
+        "Root": {
+          "$className": "Frame",
+          "$properties": {
+            "AnchorPoint": [0, 0],
+            "BackgroundColor3": [0.22, 0.32, 0.48],
+            "BorderSizePixel": 0,
+            "Position": { "UDim2": [[0, 0], [0, 0]] },
+            "Size": { "UDim2": [[0, 280], [0, 44]] },
+            "Visible": false
+          },
+          "RootCorner": {
+            "$className": "UICorner",
+            "$properties": {
+              "CornerRadius": { "UDim": [0, 8] }
+            }
+          },
+          "RootStroke": {
+            "$className": "UIStroke",
+            "$properties": {
+              "Thickness": 2,
+              "Color": [0.45, 0.75, 1]
+            }
+          },
+          "Pad": {
+            "$className": "UIPadding",
+            "$properties": {
+              "PaddingLeft": { "UDim": [0, 10] },
+              "PaddingRight": { "UDim": [0, 10] },
+              "PaddingTop": { "UDim": [0, 4] },
+              "PaddingBottom": { "UDim": [0, 4] }
+            }
+          },
+          "Label": {
+            "$className": "TextLabel",
+            "$properties": {
+              "BackgroundTransparency": 1,
+              "Font": "GothamBold",
+              "Text": "Friends Bonus: +10%",
+              "TextColor3": [0.96, 0.98, 1],
+              "TextSize": 15,
+              "Size": { "UDim2": [[1, 0], [1, 0]] },
+              "TextXAlignment": "Center"
+            }
+          }
+        }
+      },
+      "DACTutorialOverlay": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ResetOnSpawn": false,
+          "IgnoreGuiInset": true,
+          "DisplayOrder": 700,
+          "ZIndexBehavior": "Sibling"
+        },
+        "Root": {
+          "$className": "Frame",
+          "$properties": {
+            "Size": { "UDim2": [[1, 0], [1, 0]] },
+            "BackgroundTransparency": 1,
+            "BorderSizePixel": 0
+          },
+          "Dimmer": {
+            "$className": "Frame",
+            "$properties": {
+              "Size": { "UDim2": [[1, 0], [1, 0]] },
+              "BackgroundColor3": [0.031, 0.039, 0.086],
+              "BackgroundTransparency": 0.4,
+              "BorderSizePixel": 0,
+              "ZIndex": 1
+            }
+          },
+          "Bubble": {
+            "$className": "Frame",
+            "$properties": {
+              "AnchorPoint": [0.5, 0.5],
+              "Position": { "UDim2": [[0.5, 0], [0.42, 0]] },
+              "Size": { "UDim2": [[0, 420], [0, 220]] },
+              "BackgroundColor3": [1, 1, 1],
+              "BorderSizePixel": 0,
+              "ZIndex": 2
+            },
+            "UIScale": {
+              "$className": "UIScale",
+              "$properties": { "Scale": 1 }
+            },
+            "BubbleCorner": {
+              "$className": "UICorner",
+              "$properties": { "CornerRadius": { "UDim": [0, 14] } }
+            },
+            "BubbleStroke": {
+              "$className": "UIStroke",
+              "$properties": {
+                "Thickness": 2,
+                "Color": [0.165, 0.165, 0.25]
+              }
+            },
+            "Title": {
+              "$className": "TextLabel",
+              "$properties": {
+                "BackgroundTransparency": 1,
+                "Position": { "UDim2": [[0, 16], [0, 16]] },
+                "Size": { "UDim2": [[1, -32], [0, 36]] },
+                "Font": "GothamBlack",
+                "Text": "",
+                "TextColor3": [0.118, 0.118, 0.118],
+                "TextSize": 24,
+                "TextWrapped": true,
+                "TextXAlignment": "Left",
+                "TextYAlignment": "Top"
+              }
+            },
+            "Body": {
+              "$className": "TextLabel",
+              "$properties": {
+                "BackgroundTransparency": 1,
+                "Position": { "UDim2": [[0, 16], [0, 56]] },
+                "Size": { "UDim2": [[1, -32], [0, 140]] },
+                "Font": "Gotham",
+                "Text": "",
+                "TextColor3": [0.235, 0.235, 0.314],
+                "TextSize": 17,
+                "TextWrapped": true,
+                "TextXAlignment": "Left",
+                "TextYAlignment": "Top"
+              }
+            }
+          },
+          "SkipTutorial": {
+            "$className": "TextButton",
+            "$properties": {
+              "AnchorPoint": [0.5, 1],
+              "Position": { "UDim2": [[0.5, 0], [1, -24]] },
+              "Size": { "UDim2": [[0, 200], [0, 44]] },
+              "BackgroundColor3": [0.95, 0.95, 0.98],
+              "BorderSizePixel": 0,
+              "Font": "GothamBold",
+              "Text": "Skip",
+              "TextColor3": [0.2, 0.2, 0.3],
+              "TextSize": 17,
+              "ZIndex": 2
+            },
+            "SkipCorner": {
+              "$className": "UICorner",
+              "$properties": { "CornerRadius": { "UDim": [0, 8] } }
+            },
+            "SkipStroke": {
+              "$className": "UIStroke",
+              "$properties": {
+                "Thickness": 2,
+                "Color": [0.165, 0.165, 0.25]
+              }
+            }
+          },
+          "SkipConfirm": {
+            "$className": "Frame",
+            "$properties": {
+              "Size": { "UDim2": [[1, 0], [1, 0]] },
+              "BackgroundTransparency": 1,
+              "Visible": false,
+              "ZIndex": 10
+            },
+            "ConfirmDimmer": {
+              "$className": "Frame",
+              "$properties": {
+                "Size": { "UDim2": [[1, 0], [1, 0]] },
+                "BackgroundColor3": [0, 0, 0],
+                "BackgroundTransparency": 0.45,
+                "BorderSizePixel": 0,
+                "ZIndex": 1
+              }
+            },
+            "Panel": {
+              "$className": "Frame",
+              "$properties": {
+                "AnchorPoint": [0.5, 0.5],
+                "Position": { "UDim2": [[0.5, 0], [0.5, 0]] },
+                "Size": { "UDim2": [[0, 440], [0, 260]] },
+                "BackgroundColor3": [1, 0.839, 0.933],
+                "BorderSizePixel": 0,
+                "ZIndex": 2
+              },
+              "PanelCorner": {
+                "$className": "UICorner",
+                "$properties": { "CornerRadius": { "UDim": [0, 14] } }
+              },
+              "PanelStroke": {
+                "$className": "UIStroke",
+                "$properties": {
+                  "Thickness": 3,
+                  "Color": [0.165, 0.165, 0.25]
+                }
+              },
+              "ConfirmTitle": {
+                "$className": "TextLabel",
+                "$properties": {
+                  "BackgroundTransparency": 1,
+                  "Position": { "UDim2": [[0, 18], [0, 18]] },
+                  "Size": { "UDim2": [[1, -36], [0, 40]] },
+                  "Font": "GothamBlack",
+                  "Text": "",
+                  "TextColor3": [1, 1, 1],
+                  "TextSize": 22,
+                  "TextWrapped": true,
+                  "TextXAlignment": "Left",
+                  "TextYAlignment": "Top"
+                },
+                "TitleStroke": {
+                  "$className": "UIStroke",
+                  "$properties": {
+                    "Thickness": 2,
+                    "Color": [0, 0, 0]
+                  }
+                }
+              },
+              "ConfirmBody": {
+                "$className": "TextLabel",
+                "$properties": {
+                  "BackgroundTransparency": 1,
+                  "Position": { "UDim2": [[0, 18], [0, 64]] },
+                  "Size": { "UDim2": [[1, -36], [0, 110]] },
+                  "Font": "Gotham",
+                  "Text": "",
+                  "TextColor3": [0.118, 0.118, 0.118],
+                  "TextSize": 16,
+                  "TextWrapped": true,
+                  "TextXAlignment": "Left",
+                  "TextYAlignment": "Top"
+                }
+              },
+              "KeepLearning": {
+                "$className": "TextButton",
+                "$properties": {
+                  "AnchorPoint": [0, 1],
+                  "Position": { "UDim2": [[0.06, 0], [1, -18]] },
+                  "Size": { "UDim2": [[0.42, 0], [0, 44]] },
+                  "BackgroundColor3": [0.18, 0.8, 0.443],
+                  "BorderSizePixel": 0,
+                  "Font": "GothamBold",
+                  "Text": "Keep learning",
+                  "TextColor3": [1, 1, 1],
+                  "TextSize": 16
+                },
+                "KeepCorner": {
+                  "$className": "UICorner",
+                  "$properties": { "CornerRadius": { "UDim": [0, 8] } }
+                }
+              },
+              "SkipAnyway": {
+                "$className": "TextButton",
+                "$properties": {
+                  "AnchorPoint": [1, 1],
+                  "Position": { "UDim2": [[0.94, 0], [1, -18]] },
+                  "Size": { "UDim2": [[0.42, 0], [0, 44]] },
+                  "BackgroundColor3": [1, 0.267, 0.267],
+                  "BorderSizePixel": 0,
+                  "Font": "GothamBold",
+                  "Text": "Skip anyway",
+                  "TextColor3": [1, 1, 1],
+                  "TextSize": 16
+                },
+                "SkipAnywayCorner": {
+                  "$className": "UICorner",
+                  "$properties": { "CornerRadius": { "UDim": [0, 8] } }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -10,6 +10,8 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
+local PZ = UILayerStack.zPurchaseThankYou
 local Constants = require(DAC:WaitForChild("Constants"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
@@ -17,6 +19,9 @@ local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local DrivingController = require(script.Parent:WaitForChild("DrivingController"))
 
 local PurchaseThankYouController = {}
+
+-- Idempotent init: hot reload must not stack PurchaseComplete listeners.
+local purchaseThankYouInitDone = false
 
 local player = Players.LocalPlayer
 
@@ -26,7 +31,7 @@ local showing = false
 
 local function tierFromTotal(total: number): string
 	if total >= 2000 then
-		return "whale"
+		return "mega"
 	elseif total >= 500 then
 		return "vip"
 	elseif total >= 100 then
@@ -36,8 +41,8 @@ local function tierFromTotal(total: number): string
 end
 
 local function playRevealSound(tier: string)
-	if tier == "whale" then
-		SoundFacade.playOneShot("purchase_thankyou_reveal_whale")
+	if tier == "mega" then
+		SoundFacade.playOneShot("purchase_thankyou_reveal_mega")
 	elseif tier == "vip" then
 		SoundFacade.playOneShot("purchase_thankyou_reveal_vip")
 	else
@@ -57,7 +62,7 @@ end
 local function showThankYou(payload: any, onDone: () -> ())
 	local sg = Instance.new("ScreenGui")
 	sg.Name = "DACPurchaseThankYou"
-	sg.DisplayOrder = 999
+	sg.DisplayOrder = UILayerStack.screenGui.purchaseThankYou
 	sg.IgnoreGuiInset = true
 	sg.ResetOnSpawn = false
 	sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -73,14 +78,14 @@ local function showThankYou(payload: any, onDone: () -> ())
 	backdrop.BackgroundTransparency = 1
 	backdrop.Text = ""
 	backdrop.AutoButtonColor = false
-	backdrop.ZIndex = 950
+	backdrop.ZIndex = PZ.backdrop
 	backdrop.Parent = sg
 
 	local vignette = Instance.new("Frame")
 	vignette.Size = UDim2.fromScale(1, 1)
 	vignette.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	vignette.BackgroundTransparency = 1
-	vignette.ZIndex = 951
+	vignette.ZIndex = PZ.vignette
 	vignette.Parent = sg
 	local vigGrad = Instance.new("UIGradient")
 	vigGrad.Rotation = 90
@@ -97,7 +102,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	card.Size = UDim2.fromOffset(400, 340)
 	card.BackgroundColor3 = Color3.fromRGB(255, 214, 238)
 	card.BackgroundTransparency = 0.02
-	card.ZIndex = 960
+	card.ZIndex = PZ.card
 	card.Parent = sg
 	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
 	local stroke = Instance.new("UIStroke", card)
@@ -112,7 +117,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	headline.TextSize = 18
 	headline.TextColor3 = Color3.fromRGB(30, 30, 30)
 	headline.TextTransparency = 1
-	headline.ZIndex = 965
+	headline.ZIndex = PZ.headline
 	headline.Parent = card
 
 	local subline = Instance.new("TextLabel")
@@ -121,7 +126,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	subline.TextSize = 12
 	subline.TextColor3 = Color3.fromRGB(80, 80, 90)
 	subline.TextTransparency = 1
-	subline.ZIndex = 965
+	subline.ZIndex = PZ.subline
 	subline.Parent = card
 
 	local productType = type(payload.productType) == "string" and payload.productType or "devproduct"
@@ -143,12 +148,12 @@ local function showThankYou(payload: any, onDone: () -> ())
 	subline.TextXAlignment = Enum.TextXAlignment.Center
 
 	local glow = Instance.new("Frame")
-	glow.Size = UDim2.fromOffset(if tier == "vip" or tier == "whale" then 140 else 120, if tier == "vip" or tier == "whale" then 140 else 120)
+	glow.Size = UDim2.fromOffset(if tier == "vip" or tier == "mega" then 140 else 120, if tier == "vip" or tier == "mega" then 140 else 120)
 	glow.AnchorPoint = Vector2.new(0.5, 0.5)
 	glow.Position = UDim2.new(0.5, 0, 0, 125)
 	glow.BackgroundColor3 = gold
 	glow.BackgroundTransparency = 1
-	glow.ZIndex = 973
+	glow.ZIndex = PZ.glow
 	glow.Parent = card
 	Instance.new("UICorner", glow).CornerRadius = UDim.new(0.5, 0)
 
@@ -157,7 +162,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	spot.AnchorPoint = Vector2.new(0.5, 0.5)
 	spot.Position = UDim2.new(0.5, 0, 0, 125)
 	spot.BackgroundColor3 = Color3.fromRGB(240, 195, 220)
-	spot.ZIndex = 975
+	spot.ZIndex = PZ.spot
 	spot.Parent = card
 	Instance.new("UICorner", spot).CornerRadius = UDim.new(0, 14)
 	local spotStroke = Instance.new("UIStroke", spot)
@@ -172,7 +177,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	icon.Position = UDim2.fromScale(0.5, 0.5)
 	icon.Image = type(payload.iconId) == "string" and payload.iconId or "rbxassetid://0"
 	icon.ImageTransparency = 1
-	icon.ZIndex = 976
+	icon.ZIndex = PZ.icon
 	icon.Parent = spot
 
 	if productType == "gamepass" then
@@ -181,7 +186,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 		b.AnchorPoint = Vector2.new(0.5, 0)
 		b.Position = UDim2.new(0.5, 0, 1, 4)
 		b.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-		b.ZIndex = 976
+		b.ZIndex = PZ.iconBurst
 		b.Parent = spot
 		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
 		local bl = Instance.new("TextLabel")
@@ -191,7 +196,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 		bl.TextSize = 8
 		bl.TextColor3 = Color3.new(1, 1, 1)
 		bl.Text = "PERMANENT"
-		bl.ZIndex = 977
+		bl.ZIndex = PZ.iconBurstLabel
 		bl.Parent = b
 	end
 
@@ -206,7 +211,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	itemName.AnchorPoint = Vector2.new(0.5, 0)
 	itemName.Size = UDim2.new(1, -32, 0, 22)
 	itemName.TextXAlignment = Enum.TextXAlignment.Center
-	itemName.ZIndex = 965
+	itemName.ZIndex = PZ.itemName
 	itemName.Parent = card
 
 	local benefitsHolder = Instance.new("Frame")
@@ -214,7 +219,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	benefitsHolder.Position = UDim2.new(0.5, 0, 0, 205)
 	benefitsHolder.AnchorPoint = Vector2.new(0.5, 0)
 	benefitsHolder.Size = UDim2.new(0.85, 0, 0, 70)
-	benefitsHolder.ZIndex = 965
+	benefitsHolder.ZIndex = PZ.benefitsHolder
 	benefitsHolder.Parent = card
 	local list = Instance.new("UIListLayout")
 	list.Padding = UDim.new(0, 4)
@@ -223,7 +228,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 
 	local currencyCounter: TextLabel? = nil
 	local cg = payload.currencyGrant
-	if type(cg) == "table" and type(cg.currency) == "string" and (cg.currency == "coins" or cg.currency == "gems" or cg.currency == "crystals" or cg.currency == "skulls") then
+	if type(cg) == "table" and type(cg.currency) == "string" and Constants.CURRENCY_DISPLAY[cg.currency] ~= nil then
 		local amt = math.floor(tonumber(cg.amount) or 0)
 		if amt > 0 then
 			benefitsHolder.Visible = false
@@ -239,7 +244,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 			c.AnchorPoint = Vector2.new(0.5, 0)
 			c.Size = UDim2.new(1, -32, 0, 36)
 			c.TextXAlignment = Enum.TextXAlignment.Center
-			c.ZIndex = 965
+			c.ZIndex = PZ.benefitRow
 			c.Parent = card
 			currencyCounter = c
 			task.spawn(function()
@@ -285,7 +290,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	divider.Size = UDim2.new(0.7, 0, 0, 1)
 	divider.Position = UDim2.new(0.5, 0, 0, 190)
 	divider.AnchorPoint = Vector2.new(0.5, 0)
-	divider.ZIndex = 965
+	divider.ZIndex = PZ.divider
 	divider.Parent = card
 
 	local enjoy = Instance.new("TextButton")
@@ -301,7 +306,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 	enjoy.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
 	enjoy.BackgroundTransparency = 1
 	enjoy.TextTransparency = 1
-	enjoy.ZIndex = 965
+	enjoy.ZIndex = PZ.enjoy
 	enjoy.Parent = card
 	Instance.new("UICorner", enjoy).CornerRadius = UDim.new(0, 10)
 
@@ -380,7 +385,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 			local dot = Instance.new("Frame")
 			dot.Size = UDim2.fromOffset(math.random(2, 4), math.random(2, 4))
 			dot.Position = UDim2.new(math.random(), 0, 0, -8)
-			if tier == "whale" then
+			if tier == "mega" then
 				dot.BackgroundColor3 = Color3.fromHSV(math.random(), 0.3, 1)
 			elseif tier == "supporter" and math.random(1, 5) == 1 then
 				dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -392,7 +397,7 @@ local function showThankYou(payload: any, onDone: () -> ())
 				)
 			end
 			dot.BackgroundTransparency = 0.2
-			dot.ZIndex = 970
+			dot.ZIndex = PZ.dot
 			dot.Parent = sg
 			local vy = math.random(60, 120)
 			local vx = math.random(-15, 15)
@@ -478,19 +483,19 @@ local function showThankYou(payload: any, onDone: () -> ())
 		}):Play()
 	end)
 
-	if tier == "vip" or tier == "whale" then
+	if tier == "vip" or tier == "mega" then
 		task.spawn(function()
 			local baseStroke = Color3.fromRGB(42, 42, 64)
 			local accentStroke = Color3.fromRGB(80, 60, 120)
 			while sg.Parent do
-				local t = os.clock() * (if tier == "whale" then 0.33 else 0.5)
+				local t = os.clock() * (if tier == "mega" then 0.33 else 0.5)
 				stroke.Color = baseStroke:Lerp(accentStroke, (math.sin(t) + 1) * 0.5)
 				task.wait(0.05)
 			end
 		end)
 	end
 
-	if tier == "whale" then
+	if tier == "mega" then
 		task.spawn(function()
 			while sg.Parent do
 				glow.BackgroundColor3 = Color3.fromHSV((os.clock() * 0.3) % 1, 0.25, 1)
@@ -590,7 +595,26 @@ function PurchaseThankYouController.onRunEnded()
 	tryShowNext()
 end
 
+function PurchaseThankYouController.tearDownForLifecycle()
+	table.clear(queue)
+	showing = false
+	local pg = player:FindFirstChild("PlayerGui") :: PlayerGui?
+	if not pg then
+		return
+	end
+	for _, ch in pg:GetChildren() do
+		if ch.Name == "DACPurchaseThankYou" and ch:IsA("ScreenGui") then
+			ch:Destroy()
+		end
+	end
+end
+
 function PurchaseThankYouController.init()
+	if purchaseThankYouInitDone then
+		return
+	end
+	purchaseThankYouInitDone = true
+
 	Remotes.getEvent("PurchaseComplete").OnClientEvent:Connect(function(payload: any)
 		PurchaseThankYouController.enqueue(payload)
 	end)

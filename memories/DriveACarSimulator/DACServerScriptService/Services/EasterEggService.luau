@@ -9,8 +9,10 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
+local Constants = require(DAC:WaitForChild("Constants"))
 local EasterEggConfig = require(DAC:WaitForChild("Config"):WaitForChild("EasterEggConfig"))
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 
 type EggPlacement = typeof(EasterEggConfig.Placements[1])
@@ -381,7 +383,8 @@ local function tickDiscovery(_dt: number)
 			end
 			if (pos - egg.position).Magnitude <= egg.radius then
 				disc[egg.id] = true
-				DataManager.save(player)
+				AchievementService.onEasterEggFound(player)
+				DataManager.scheduleSave(player)
 				Remotes.getEvent("EasterEggDiscovered"):FireClient(player, {
 					id = egg.id,
 					hint = egg.hint,
@@ -445,7 +448,7 @@ function EasterEggService.init()
 		-- Common in Studio before world models are placed; keep log level low.
 		local msg = `[EasterEggService] Missing world models: {table.concat(skippedNoWorld, ", ")}`
 		if RunService:IsStudio() then
-			print(msg .. " (ok until Workspace.Worlds is populated)")
+			Constants.bootLog(msg .. " (ok until Workspace.Worlds is populated)")
 		else
 			warn(msg)
 		end

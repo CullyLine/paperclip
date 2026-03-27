@@ -615,7 +615,7 @@
     First Timer (50)   : Color3.fromRGB(120, 200, 160)
     Investor   (100)   : Color3.fromRGB(100, 180, 255)
     VIP        (250)   : Color3.fromRGB(200, 140, 255)
-    Whale      (500)   : Color3.fromRGB(255, 180,  60)
+    Mega       (500)   : Color3.fromRGB(255, 180,  60)
     Legend    (1000)    : Color3.fromRGB(255, 200,  50)
     Tycoon   (2500)    : Color3.fromRGB(255, 140,  40)
     Mythic   (5000)    : animated rainbow
@@ -629,13 +629,13 @@
     ZIndex             : 830
 
     Label inside:
-      Text             : payload.tierName  (e.g. "WHALE")
+      Text             : payload.tierName  (e.g. "MEGA")
       Font             : GothamBlack
       TextSize         : 12
       TextColor3       : contrast color
 
   ── Title (from payload) ──
-    Text               : payload.title  (e.g. "WHALE STATUS!")
+    Text               : payload.title  (e.g. "MEGA STATUS!")
     Font               : GothamBlack
     TextSize           : 24
     TextColor3         : tier color

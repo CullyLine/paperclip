@@ -2881,6 +2881,14 @@ export function heartbeatService(db: Db) {
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
 
+    const agentMeta = (agent.metadata ?? {}) as Record<string, unknown>;
+    const runGoal = typeof agentMeta.runGoal === "string" && agentMeta.runGoal.trim().length > 0
+      ? agentMeta.runGoal.trim()
+      : null;
+    if (runGoal) {
+      enrichedContextSnapshot.runGoal = runGoal;
+    }
+
     if (issueId && !enrichedContextSnapshot.preRenderedTaskContext) {
       let priorKnowledgeState: Record<string, unknown> | null = null;
       if (taskKey) {

@@ -2,6 +2,12 @@
 
 local EggConfig = {}
 
+--[[
+	Optional shop spotlight: one egg id gets a static "BEST" badge + low-frequency pulse in Egg Shop.
+	If nil, the client picks the first egg in the player's current world section.
+]]
+EggConfig.SpotlightEggId = "grass_egg"
+
 EggConfig.Eggs = {
 	basic_egg = {
 		id = "basic_egg",
@@ -9,7 +15,7 @@ EggConfig.Eggs = {
 		modelName = "Basic",
 		price = 1_500,
 		currency = "coins",
-		worldId = "grasslands",
+		worldId = "forest",
 		drops = {
 			{ petId = "tabby_cat", rarity = "common", weight = 40 },
 			{ petId = "puppy", rarity = "common", weight = 35 },
@@ -24,7 +30,7 @@ EggConfig.Eggs = {
 		modelName = "Grass",
 		price = 2_500,
 		currency = "coins",
-		worldId = "grasslands",
+		worldId = "forest",
 		drops = {
 			{ petId = "puppy", rarity = "common", weight = 30 },
 			{ petId = "fox", rarity = "uncommon", weight = 30 },
@@ -40,7 +46,7 @@ EggConfig.Eggs = {
 		name = "Desert Egg",
 		modelName = "Desert",
 		price = 50_000,
-		currency = "coins",
+		currency = "sandGranules",
 		worldId = "desert",
 		drops = {
 			{ petId = "fox", rarity = "uncommon", weight = 30 },
@@ -56,7 +62,7 @@ EggConfig.Eggs = {
 		name = "Scorching Egg",
 		modelName = "Scorching",
 		price = 2_000,
-		currency = "gems",
+		currency = "sandGranules",
 		worldId = "desert",
 		drops = {
 			{ petId = "eagle", rarity = "rare", weight = 35 },
@@ -72,8 +78,8 @@ EggConfig.Eggs = {
 		name = "Frozen Egg",
 		modelName = "Frozen",
 		price = 10_000,
-		currency = "gems",
-		worldId = "frozen",
+		currency = "icycles",
+		worldId = "ice",
 		drops = {
 			{ petId = "wolf", rarity = "rare", weight = 25 },
 			{ petId = "eagle", rarity = "rare", weight = 20 },
@@ -90,8 +96,8 @@ EggConfig.Eggs = {
 		name = "Neon Egg",
 		modelName = "Neon",
 		price = 5_000,
-		currency = "crystals",
-		worldId = "neon",
+		currency = "magmaCores",
+		worldId = "volcano",
 		drops = {
 			{ petId = "phoenix_chick", rarity = "epic", weight = 35 },
 			{ petId = "golden_dragon", rarity = "legendary", weight = 30 },

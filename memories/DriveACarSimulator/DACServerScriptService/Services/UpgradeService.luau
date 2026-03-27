@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local UpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
 
@@ -10,7 +11,7 @@ local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
-local QuestService = require(script.Parent:WaitForChild("QuestService"))
+-- local QuestService = require(script.Parent:WaitForChild("QuestService"))
 local Constants = require(DAC:WaitForChild("Constants"))
 
 local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
@@ -40,7 +41,7 @@ function UpgradeService.upgrade(player: Player, carId: string, stat: string): (b
 
 	ownedCar[levelKey] = currentLevel + 1
 
-	QuestService.onUpgrade(player)
+	-- QuestService.onUpgrade(player)
 	TutorialService.onUpgrade(player, stat)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
@@ -49,8 +50,27 @@ end
 
 function UpgradeService.init()
 	Remotes.getEvent("UpgradeStat").OnServerEvent:Connect(function(player, carId, stat)
-		if type(carId) ~= "string" or type(stat) ~= "string" then return end
 		if not ValidationService.checkRemoteRate(player, "UpgradeStat") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		local maxId = ValidationService.MAX_REMOTE_STRING_ID_LEN
+		if not ValidationService.isBoundedStringId(carId, maxId) or type(stat) ~= "string" then
+			if type(carId) ~= "string" or type(stat) ~= "string" then
+				ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_arg_types", "")
+			else
+				ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_car_id_len", "")
+			end
+			return
+		end
+		if #stat == 0 or #stat > 24 then
+			ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_stat_len", "")
+			return
+		end
+		if UpgradeConfig.Stats[stat] == nil then
+			ValidationService.logAnomalyOncePerSession(player, "upgrade_unknown_stat", stat)
 			return
 		end
 		if not RemoteCooldown.allow(player, "UpgradeStat", Constants.REMOTE_COOLDOWN_DEFAULT) then
@@ -58,7 +78,7 @@ function UpgradeService.init()
 		end
 		local success, err = UpgradeService.upgrade(player, carId, stat)
 		if not success then
-			Remotes.getEvent("Notification"):FireClient(player, {
+			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Upgrade failed",
 			})

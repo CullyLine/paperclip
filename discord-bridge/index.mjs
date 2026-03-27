@@ -130,11 +130,6 @@ client.once(Events.ClientReady, async (c) => {
     adminChannel = await client.channels.fetch(ADMIN_CHANNEL_ID);
     console.log(`[discord] Admin channel: #${adminChannel.name}`);
     await sendAdminPanel();
-    const sgOnBoot = await getCeoSelfGovData();
-    if (sgOnBoot?.expiresAt && new Date(sgOnBoot.expiresAt).getTime() > Date.now()) {
-      console.log("[sg] Self-governing already active on boot — starting watcher");
-      startSgWatcher();
-    }
   } catch (err) {
     console.error(`[discord] Could not access admin channel ${ADMIN_CHANNEL_ID}: ${err.message}`);
     console.error("[discord] Make sure the bot has been invited to your server and can see that channel.");
@@ -351,25 +346,62 @@ function buildStatusLines(agents) {
   return agents.map(a => `${icons[a.status] || "⚪"} **${a.name}** — ${a.status}`).join("\n");
 }
 
-const CEO_ID = "3fb10555-e10d-4f07-bf53-ce650210ce0a";
 const OWNER_DISCORD_ID = "165611171016081408";
-let sgWatchInterval = null;
-let lastKnownSgActive = false;
 
-async function getCeoSelfGovData() {
-  try {
-    const ceo = await apiFetch(`/agents/${CEO_ID}`);
-    return ceo?.metadata?.selfGoverning ?? null;
-  } catch { return null; }
+async function getCurrentGoal() {
+  await refreshCaches();
+  const agents = [...agentCache.values()].filter(a => a.status !== "terminated");
+  for (const a of agents) {
+    const goal = a.metadata?.runGoal;
+    if (typeof goal === "string" && goal.trim().length > 0) return goal.trim();
+  }
+  return null;
 }
 
-function formatRemaining(expiresAt) {
-  const ms = Math.max(0, new Date(expiresAt).getTime() - Date.now());
-  if (ms <= 0) return "Expired";
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+async function setGoalForAllAgents(goalText, triggeredBy) {
+  lastCacheRefresh = 0;
+  await refreshCaches();
+  const agents = [...agentCache.values()].filter(a => a.status !== "terminated");
+  let count = 0;
+  for (const agent of agents) {
+    try {
+      await fetch(`${API_URL}/api/agents/${agent.id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runGoal: goalText }),
+      });
+      count++;
+    } catch (err) {
+      console.error(`[goal] Failed to set goal for ${agent.name}:`, err.message);
+    }
+  }
+  lastCacheRefresh = 0;
+  console.log(`[goal] Set "${goalText}" on ${count} agent(s), by ${triggeredBy}`);
+  return count;
+}
+
+async function clearGoalForAllAgents(triggeredBy) {
+  lastCacheRefresh = 0;
+  await refreshCaches();
+  const agents = [...agentCache.values()].filter(a => a.status !== "terminated");
+  let count = 0;
+  for (const agent of agents) {
+    try {
+      const meta = agent.metadata || {};
+      delete meta.runGoal;
+      await fetch(`${API_URL}/api/agents/${agent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: meta }),
+      });
+      count++;
+    } catch (err) {
+      console.error(`[goal] Failed to clear goal for ${agent.name}:`, err.message);
+    }
+  }
+  lastCacheRefresh = 0;
+  console.log(`[goal] Cleared goal on ${count} agent(s), by ${triggeredBy}`);
+  return count;
 }
 
 let adminPanelMessage = null;
@@ -378,8 +410,7 @@ async function sendAdminPanel() {
   if (!adminChannel) return;
   const { agents, running, paused, idle } = await getAgentStatuses();
   const allPaused = agents.every(a => a.status === "paused");
-  const sg = await getCeoSelfGovData();
-  const sgActive = sg?.expiresAt && new Date(sg.expiresAt).getTime() > Date.now();
+  const currentGoal = await getCurrentGoal();
 
   const embed = new EmbedBuilder()
     .setColor(allPaused ? 0xef4444 : 0x22c55e)
@@ -390,25 +421,21 @@ async function sendAdminPanel() {
       { name: "Idle", value: `${idle.length}`, inline: true },
       { name: "Paused", value: `${paused.length}`, inline: true },
     )
-    .setFooter({ text: "STOP · START · WAKE · STATUS · GOVERN <hours> <goal>" })
+    .setFooter({ text: "SLEEP · REBOOT · STATUS · GOAL <text>" })
     .setTimestamp();
 
   const agentRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("admin:pause_all")
-      .setLabel("⏸ Pause All")
+      .setCustomId("admin:sleep_all")
+      .setLabel("😴 Sleep All")
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
-      .setCustomId("admin:resume_all")
-      .setLabel("▶ Resume All")
+      .setCustomId("admin:reboot_all")
+      .setLabel("🔄 Reboot All")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId("admin:wake_ceo")
-      .setLabel("⚡ Wake CEO")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
       .setCustomId("admin:refresh")
-      .setLabel("🔄 Refresh")
+      .setLabel("📊 Refresh")
       .setStyle(ButtonStyle.Secondary),
   );
 
@@ -417,55 +444,46 @@ async function sendAdminPanel() {
     .setTitle("📖 Quick Reference")
     .setDescription(
       "**Buttons**\n" +
-      "⏸ **Pause All** — Pause every active agent\n" +
-      "▶ **Resume All** — Resume all paused agents\n" +
-      "⚡ **Wake CEO** — Trigger the CEO's next heartbeat now\n" +
-      "🔄 **Refresh** — Update statuses & timer\n" +
-      "👑 **Start/Stop Self-Governing** — CEO works autonomously\n\n" +
+      "😴 **Sleep All** — Pause every agent\n" +
+      "🔄 **Reboot All** — Resume + reboot all agents with fresh context\n" +
+      "📊 **Refresh** — Update statuses\n" +
+      "🎯 **Set / Clear Goal** — Set the goal all agents work toward\n\n" +
       "**Text Commands**\n" +
-      "`STOP` — Pause all agents\n" +
-      "`START` — Resume all agents\n" +
-      "`WAKE` — Trigger CEO heartbeat\n" +
+      "`SLEEP` / `STOP` — Sleep all agents\n" +
+      "`REBOOT` / `START` — Reboot all agents\n" +
       "`STATUS` — Refresh the panel\n" +
-      "`GOVERN 6 Complete M2` — Self-govern for 6h with a goal\n" +
-      "`STOPGOV` — Stop self-governing mode"
+      "`GOAL Fix all bugs and polish the game` — Set goal for all agents\n" +
+      "`CLEARGOAL` — Clear the current goal"
     );
 
   const embeds = [helpEmbed, embed];
   const components = [agentRow];
 
-  // Self-Governing panel
-  const sgEmbed = new EmbedBuilder()
-    .setColor(sgActive ? 0x10b981 : 0x6b7280)
-    .setTitle("👑 Self-Governing Mode");
+  // Goal panel
+  const goalEmbed = new EmbedBuilder()
+    .setColor(currentGoal ? 0x8b5cf6 : 0x6b7280)
+    .setTitle("🎯 Team Goal");
 
-  if (sgActive) {
-    let desc = `**Status:** Active\n**Time remaining:** ${formatRemaining(sg.expiresAt)}`;
-    if (sg.condition) desc += `\n**Goal:** ${sg.condition}`;
-    sgEmbed.setDescription(desc);
+  if (currentGoal) {
+    goalEmbed.setDescription(currentGoal);
   } else {
-    sgEmbed.setDescription("**Status:** Inactive\n\nUse the buttons below or type:\n`GOVERN 6 Complete M2 milestone`");
+    goalEmbed.setDescription("*No goal set*\n\nUse the button below or type:\n`GOAL Fix all bugs and polish the game`");
   }
 
-  const sgRow = new ActionRowBuilder();
-  if (sgActive) {
-    sgRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("sg:stop")
-        .setLabel("⏹ Stop Self-Governing")
-        .setStyle(ButtonStyle.Danger),
-    );
-  } else {
-    sgRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId("sg:start_modal")
-        .setLabel("👑 Start Self-Governing")
-        .setStyle(ButtonStyle.Success),
-    );
-  }
+  const goalRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("goal:set_modal")
+      .setLabel("🎯 Set Goal")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("goal:clear")
+      .setLabel("✖ Clear Goal")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!currentGoal),
+  );
 
-  embeds.push(sgEmbed);
-  components.push(sgRow);
+  embeds.push(goalEmbed);
+  components.push(goalRow);
 
   const payload = { embeds, components };
 
@@ -481,83 +499,6 @@ async function sendAdminPanel() {
   adminPanelMessage = await adminChannel.send(payload);
 }
 
-async function getOpenWorkCount() {
-  try {
-    const issues = await apiFetch(
-      `/companies/${COMPANY_ID}/issues?status=todo,in_progress,in_review,blocked`
-    );
-    return Array.isArray(issues) ? issues.length : 0;
-  } catch { return -1; }
-}
-
-let windDownInterval = null;
-
-function startWindDown(reason) {
-  if (windDownInterval) return;
-  console.log("[sg] Goal met — watching for agents to finish remaining work before pausing");
-
-  windDownInterval = setInterval(async () => {
-    const openWork = await getOpenWorkCount();
-    if (openWork < 0) return;
-
-    if (openWork === 0) {
-      clearInterval(windDownInterval);
-      windDownInterval = null;
-
-      const count = await pauseAllAgents("Self-Governing wind-down");
-      if (adminChannel) {
-        await adminChannel.send(
-          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}\n` +
-          `All work complete — **${count} agent(s) paused** automatically.`
-        );
-        await sendAdminPanel();
-      }
-      console.log(`[sg] All work done, paused ${count} agents`);
-    } else {
-      console.log(`[sg] Wind-down: ${openWork} open issue(s) remaining, waiting...`);
-    }
-  }, 30_000);
-}
-
-function startSgWatcher() {
-  if (sgWatchInterval) return;
-  lastKnownSgActive = true;
-  sgWatchInterval = setInterval(async () => {
-    const sg = await getCeoSelfGovData();
-    const isActive = sg?.expiresAt && new Date(sg.expiresAt).getTime() > Date.now();
-
-    if (lastKnownSgActive && !isActive) {
-      lastKnownSgActive = false;
-      clearInterval(sgWatchInterval);
-      sgWatchInterval = null;
-
-      const expired = sg?.expiresAt && new Date(sg.expiresAt).getTime() <= Date.now();
-      const reason = expired ? "Timer expired" : "Goal condition met";
-
-      if (adminChannel) {
-        await adminChannel.send(
-          `<@${OWNER_DISCORD_ID}> 👑 **Self-Governing Mode ended** — ${reason}\n` +
-          `Checking for remaining work before pausing agents...`
-        );
-        await sendAdminPanel();
-      }
-
-      startWindDown(reason);
-    }
-  }, 30_000);
-}
-
-function stopSgWatcher() {
-  if (sgWatchInterval) {
-    clearInterval(sgWatchInterval);
-    sgWatchInterval = null;
-  }
-  if (windDownInterval) {
-    clearInterval(windDownInterval);
-    windDownInterval = null;
-  }
-  lastKnownSgActive = false;
-}
 
 async function pauseAllAgents(triggeredBy) {
   lastCacheRefresh = 0;
@@ -580,66 +521,36 @@ async function pauseAllAgents(triggeredBy) {
   return count;
 }
 
-async function resumeAllAgents(triggeredBy) {
+async function sleepAllAgents(triggeredBy) {
+  const count = await pauseAllAgents(triggeredBy);
+  return count;
+}
+
+async function rebootAllAgents(triggeredBy) {
   lastCacheRefresh = 0;
   await refreshCaches();
-  const agents = [...agentCache.values()].filter(a => a.status === "paused");
+  const agents = [...agentCache.values()].filter(a => a.status !== "terminated");
   let count = 0;
   for (const agent of agents) {
     try {
-      await fetch(`${API_URL}/api/agents/${agent.id}/resume`, {
+      if (agent.status === "paused") {
+        await fetch(`${API_URL}/api/agents/${agent.id}/resume`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      await fetch(`${API_URL}/api/agents/${agent.id}/reboot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
       count++;
     } catch (err) {
-      console.error(`[admin] Failed to resume ${agent.name}:`, err.message);
+      console.error(`[admin] Failed to reboot ${agent.name}:`, err.message);
     }
   }
   lastCacheRefresh = 0;
+  console.log(`[admin] Rebooted ${count} agent(s), by ${triggeredBy}`);
   return count;
-}
-
-async function startSelfGoverning(hours, condition, triggeredBy) {
-  try {
-    const ceo = await apiFetch(`/agents/${CEO_ID}`);
-    const meta = ceo.metadata || {};
-    const sgPayload = { expiresAt: new Date(Date.now() + hours * 3600000).toISOString() };
-    if (condition?.trim()) sgPayload.condition = condition.trim();
-    meta.selfGoverning = sgPayload;
-
-    await fetch(`${API_URL}/api/agents/${CEO_ID}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ metadata: meta }),
-    });
-    console.log(`[sg] Started: ${hours}h, condition="${condition || "none"}", by ${triggeredBy}`);
-    startSgWatcher();
-    return sgPayload;
-  } catch (err) {
-    console.error("[sg] Failed to start:", err.message);
-    return null;
-  }
-}
-
-async function stopSelfGoverning(triggeredBy) {
-  try {
-    const ceo = await apiFetch(`/agents/${CEO_ID}`);
-    const meta = ceo.metadata || {};
-    delete meta.selfGoverning;
-
-    await fetch(`${API_URL}/api/agents/${CEO_ID}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ metadata: meta }),
-    });
-    console.log(`[sg] Stopped by ${triggeredBy}`);
-    stopSgWatcher();
-    return true;
-  } catch (err) {
-    console.error("[sg] Failed to stop:", err.message);
-    return false;
-  }
 }
 
 // Text commands in admin channel
@@ -650,75 +561,44 @@ client.on(Events.MessageCreate, async (message) => {
   const text = message.content.trim();
   const cmd = text.toUpperCase();
 
-  if (cmd === "STOP") {
-    const count = await pauseAllAgents(message.author.tag);
-    await message.reply(`⏸ Paused ${count} agent(s).`);
+  if (cmd === "SLEEP" || cmd === "STOP") {
+    const count = await sleepAllAgents(message.author.tag);
+    await message.reply(`😴 Sleeping — paused ${count} agent(s).`);
     await sendAdminPanel();
-  } else if (cmd === "START") {
-    const count = await resumeAllAgents(message.author.tag);
-    await message.reply(`▶ Resumed ${count} agent(s).`);
+  } else if (cmd === "REBOOT" || cmd === "START") {
+    const count = await rebootAllAgents(message.author.tag);
+    await message.reply(`🔄 Rebooting ${count} agent(s) with fresh context.`);
     await sendAdminPanel();
   } else if (cmd === "STATUS") {
     await sendAdminPanel();
-  } else if (cmd.startsWith("GOVERN")) {
-    // GOVERN <hours> <optional goal text>
-    const parts = text.slice(6).trim();
-    const match = parts.match(/^(\d+)\s*(.*)?$/);
-    if (!match) {
-      await message.reply("Usage: `GOVERN <hours> <optional goal>`\nExample: `GOVERN 6 Complete M2 milestone`");
+  } else if (cmd.startsWith("GOAL ")) {
+    const goalText = text.slice(5).trim();
+    if (!goalText) {
+      await message.reply("Usage: `GOAL <description>`\nExample: `GOAL Fix all bugs and polish the game`");
       return;
     }
-    const hours = parseInt(match[1], 10);
-    const condition = match[2]?.trim() || null;
-    const result = await startSelfGoverning(hours, condition, message.author.tag);
-    if (result) {
-      let reply = `👑 Self-Governing started for **${hours}h** (until ${new Date(result.expiresAt).toLocaleTimeString()})`;
-      if (condition) reply += `\n**Goal:** ${condition}`;
-      await message.reply(reply);
-    } else {
-      await message.reply("Failed to start self-governing mode.");
-    }
+    const count = await setGoalForAllAgents(goalText, message.author.tag);
+    await message.reply(`🎯 Goal set for **${count} agent(s)**:\n> ${goalText}`);
     await sendAdminPanel();
-  } else if (cmd === "STOPGOV" || cmd === "STOP GOV" || cmd === "STOP GOVERN") {
-    const ok = await stopSelfGoverning(message.author.tag);
-    await message.reply(ok ? "⏹ Self-Governing mode stopped." : "Failed to stop self-governing.");
+  } else if (cmd === "CLEARGOAL" || cmd === "CLEAR GOAL") {
+    const count = await clearGoalForAllAgents(message.author.tag);
+    await message.reply(`✖ Goal cleared for **${count} agent(s)**.`);
     await sendAdminPanel();
-  } else if (cmd === "WAKE" || cmd === "WAKE CEO") {
-    try {
-      const res = await fetch(`${API_URL}/api/agents/${CEO_ID}/wakeup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "manual", triggerDetail: `Discord by ${message.author.tag}` }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        await message.reply(`⚠ Wake failed (${res.status}): ${body.error || "Unknown error"}`);
-      } else if (body.status === "skipped") {
-        await message.reply("⏭ CEO wake was skipped — likely already running or at max concurrent runs.");
-      } else {
-        await message.reply("⚡ CEO heartbeat triggered.");
-      }
-    } catch (err) {
-      await message.reply(`Failed to wake CEO: ${err.message}`);
-    }
   }
 });
 
-// Admin + Self-Governing button interactions
+// Admin + Goal button interactions
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Modal submission (self-governing goal form)
-  if (interaction.isModalSubmit() && interaction.customId === "sg:modal_submit") {
-    const hours = parseInt(interaction.fields.getTextInputValue("sg_hours"), 10) || 6;
-    const condition = interaction.fields.getTextInputValue("sg_condition")?.trim() || null;
+  // Modal submission (goal form)
+  if (interaction.isModalSubmit() && interaction.customId === "goal:modal_submit") {
+    const goalText = interaction.fields.getTextInputValue("goal_text")?.trim();
     await interaction.deferUpdate();
-    const result = await startSelfGoverning(hours, condition, interaction.user.tag);
-    if (result) {
-      let reply = `👑 Self-Governing started for **${hours}h**`;
-      if (condition) reply += ` — Goal: ${condition}`;
-      await interaction.followUp({ content: reply, ephemeral: true });
-    } else {
-      await interaction.followUp({ content: "Failed to start.", ephemeral: true });
+    if (!goalText) {
+      await interaction.followUp({ content: "Goal text cannot be empty.", ephemeral: true });
+      return;
     }
+    const count = await setGoalForAllAgents(goalText, interaction.user.tag);
+    await interaction.followUp({ content: `🎯 Goal set for **${count} agent(s)**:\n> ${goalText}`, ephemeral: true });
     await sendAdminPanel();
     return;
   }
@@ -727,45 +607,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const id = interaction.customId;
 
-  // Self-governing buttons
-  if (id === "sg:start_modal") {
+  // Goal buttons
+  if (id === "goal:set_modal") {
     const modal = new ModalBuilder()
-      .setCustomId("sg:modal_submit")
-      .setTitle("Start Self-Governing Mode");
+      .setCustomId("goal:modal_submit")
+      .setTitle("Set Team Goal");
 
-    const hoursInput = new TextInputBuilder()
-      .setCustomId("sg_hours")
-      .setLabel("Max hours (safety limit)")
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder("6")
-      .setValue("6")
-      .setRequired(true)
-      .setMaxLength(3);
-
-    const conditionInput = new TextInputBuilder()
-      .setCustomId("sg_condition")
-      .setLabel("Goal / stop condition (optional)")
+    const goalInput = new TextInputBuilder()
+      .setCustomId("goal_text")
+      .setLabel("What should all agents work toward?")
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder("e.g. CEO is highly confident M2 is complete")
-      .setRequired(false)
-      .setMaxLength(500);
+      .setPlaceholder("e.g. Fix all bugs and polish the game for launch")
+      .setRequired(true)
+      .setMaxLength(1000);
 
     modal.addComponents(
-      new ActionRowBuilder().addComponents(hoursInput),
-      new ActionRowBuilder().addComponents(conditionInput),
+      new ActionRowBuilder().addComponents(goalInput),
     );
 
     await interaction.showModal(modal);
     return;
   }
 
-  if (id === "sg:stop") {
+  if (id === "goal:clear") {
     await interaction.deferUpdate();
-    const ok = await stopSelfGoverning(interaction.user.tag);
-    await interaction.followUp({
-      content: ok ? "⏹ Self-Governing stopped." : "Failed to stop.",
-      ephemeral: true,
-    });
+    const count = await clearGoalForAllAgents(interaction.user.tag);
+    await interaction.followUp({ content: `✖ Goal cleared for **${count} agent(s)**.`, ephemeral: true });
     await sendAdminPanel();
     return;
   }
@@ -775,32 +642,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const action = id.split(":")[1];
   await interaction.deferUpdate();
 
-  if (action === "pause_all") {
-    const count = await pauseAllAgents(interaction.user.tag);
-    await interaction.followUp({ content: `⏸ Paused ${count} agent(s).`, ephemeral: true });
+  if (action === "sleep_all") {
+    const count = await sleepAllAgents(interaction.user.tag);
+    await interaction.followUp({ content: `😴 Sleeping — paused ${count} agent(s).`, ephemeral: true });
     await sendAdminPanel();
-  } else if (action === "resume_all") {
-    const count = await resumeAllAgents(interaction.user.tag);
-    await interaction.followUp({ content: `▶ Resumed ${count} agent(s).`, ephemeral: true });
-    await sendAdminPanel();
-  } else if (action === "wake_ceo") {
-    try {
-      const res = await fetch(`${API_URL}/api/agents/${CEO_ID}/wakeup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "manual", triggerDetail: `Discord by ${interaction.user.tag}` }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        await interaction.followUp({ content: `⚠ Wake failed (${res.status}): ${body.error || "Unknown error"}`, ephemeral: true });
-      } else if (body.status === "skipped") {
-        await interaction.followUp({ content: "⏭ CEO wake was skipped — likely already running or at max concurrent runs.", ephemeral: true });
-      } else {
-        await interaction.followUp({ content: "⚡ CEO heartbeat triggered.", ephemeral: true });
-      }
-    } catch (err) {
-      await interaction.followUp({ content: `Failed to wake CEO: ${err.message}`, ephemeral: true });
-    }
+  } else if (action === "reboot_all") {
+    const count = await rebootAllAgents(interaction.user.tag);
+    await interaction.followUp({ content: `🔄 Rebooting ${count} agent(s) with fresh context.`, ephemeral: true });
     await sendAdminPanel();
   } else if (action === "refresh") {
     await sendAdminPanel();

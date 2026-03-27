@@ -3,45 +3,70 @@
 local WorldConfig = {}
 
 WorldConfig.Worlds = {
-	grasslands = {
-		id = "grasslands",
-		name = "Grasslands",
+	forest = {
+		id = "forest",
+		name = "Forest",
+		folderName = "1",
 		order = 1,
-		highwayLength = 5_000, -- studs
+		highwayLength = 5_000,
 		unlockCost = 0,
 		unlockCurrency = "coins",
+		currencyKey = "coins",
+		currencyName = "Coins",
 		coinMultiplier = 1.0,
-		description = "Where every journey begins. Green fields and open road.",
+		description = "Where every journey begins. Winding roads through the trees.",
 	},
 	desert = {
 		id = "desert",
-		name = "Scorching Desert",
+		name = "Desert",
+		folderName = "2",
 		order = 2,
 		highwayLength = 8_000,
 		unlockCost = 500_000,
 		unlockCurrency = "coins",
+		currencyKey = "sandGranules",
+		currencyName = "Sand Granules",
 		coinMultiplier = 2.0,
 		description = "Hot sand, long roads, and bigger payouts.",
 	},
-	frozen = {
-		id = "frozen",
-		name = "Frozen Tundra",
+	ice = {
+		id = "ice",
+		name = "Ice",
+		folderName = "3",
 		order = 3,
 		highwayLength = 12_000,
 		unlockCost = 50_000,
-		unlockCurrency = "gems",
+		unlockCurrency = "sandGranules",
+		currencyKey = "icycles",
+		currencyName = "Icycles",
 		coinMultiplier = 4.0,
-		description = "Icy highways and chilling profits.",
+		description = "Frozen highways and chilling profits.",
 	},
-	neon = {
-		id = "neon",
-		name = "Neon City",
+	volcano = {
+		id = "volcano",
+		name = "Volcano",
+		folderName = "4",
 		order = 4,
 		highwayLength = 20_000,
 		unlockCost = 100_000,
-		unlockCurrency = "crystals",
+		unlockCurrency = "icycles",
+		currencyKey = "magmaCores",
+		currencyName = "Magma Cores",
 		coinMultiplier = 10.0,
-		description = "The future is bright. The future is profitable.",
+		description = "Molten roads and blazing speed. Don't look down.",
+	},
+	space = {
+		id = "space",
+		name = "Space",
+		folderName = "5",
+		order = 5,
+		highwayLength = 30_000,
+		unlockCost = 500_000,
+		unlockCurrency = "magmaCores",
+		currencyKey = "infinitium",
+		currencyName = "Infinitium",
+		coinMultiplier = 20.0,
+		description = "The final frontier. Zero gravity, infinite speed.",
 	},
 }
 
@@ -54,6 +79,30 @@ function WorldConfig.getWorldsSorted(): { { id: string, name: string, order: num
 		return a.order < b.order
 	end)
 	return sorted
+end
+
+function WorldConfig.getCurrencyKey(worldId: string): string
+	local world = WorldConfig.Worlds[worldId]
+	if world and (world :: any).currencyKey then
+		return (world :: any).currencyKey
+	end
+	return "coins"
+end
+
+function WorldConfig.getCurrencyName(worldId: string): string
+	local world = WorldConfig.Worlds[worldId]
+	if world and (world :: any).currencyName then
+		return (world :: any).currencyName
+	end
+	return "Coins"
+end
+
+function WorldConfig.getFolderName(worldId: string): string
+	local world = WorldConfig.Worlds[worldId]
+	if world and (world :: any).folderName then
+		return (world :: any).folderName
+	end
+	return worldId
 end
 
 return WorldConfig

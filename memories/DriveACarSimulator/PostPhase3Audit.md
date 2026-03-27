@@ -4,6 +4,12 @@
 **Date:** 2026-03-20  
 **Method:** Static review (Rojo `default.project.json` tree), full-text search for `require()`, `Remotes.get*`, `data.` usage, and cross-check against `MainServer.server.luau`, `Remotes.luau`, `DataManager.luau`, `Constants.luau`, `GuiBootstrap.client.luau`, `Bootstrap.client.luau`.
 
+### 2026-03-23 refresh
+
+- **§3 remotes / leaderboard:** `GetLeaderboard` is wired from `DACStarterGui/LeaderboardPanel.luau` (`RemoteFailSafe.invokeFunction("GetLeaderboard", statForFetch)`) to `LeaderboardService.luau` — audit text below updated to match.
+- **`LeaderboardPanelDesignSpec.luau`:** Context block updated so it no longer claims the menu panel is unwired.
+- **`rbxassetid://0` hot path:** Grep of runtime `.luau` shows only intentional placeholders (documented in `LaunchAssets/AssetIdChecklist.md` and `Audio/MANIFEST.md`) or documented server/UI fallbacks (`DevProductService` / `GamePassService` / purchase thank-you — see checklist §5).
+
 ---
 
 ## 1. Require paths
@@ -70,10 +76,10 @@ The following remotes have **server `OnServerEvent` / `OnServerInvoke` handlers*
 
 ### `GetLeaderboard`
 
-- **Server:** `LeaderboardService.luau` registers `GetLeaderboard` `OnServerInvoke`.
-- **Client:** No `InvokeServer("GetLeaderboard")` in this repo — leaderboard UI not wired yet.
+- **Server:** `LeaderboardService.luau` registers `GetLeaderboard` `OnServerInvoke` (rate limit + validation via `ValidationService` / `RemoteCooldown`).
+- **Client:** `DACStarterGui/LeaderboardPanel.luau` calls `RemoteFailSafe.invokeFunction("GetLeaderboard", statForFetch)` when refreshing tab data (distance / coins / rebirths / friends). Failures surface via `RemoteFailSafe.notifyRemoteFailure("GetLeaderboard")` and `MicrocopyConfig` copy for the panel.
 
-**Conclusion:** Registry is internally consistent (no references to undefined remote names). Several remotes are intentionally ahead of UI (world change, fuse, trade, leaderboard).
+**Conclusion:** Registry is internally consistent (no references to undefined remote names). Remotes still intentionally ahead of dedicated menu UI for some flows: world change (`UnlockWorld` / `ChangeWorld`), fuse pets, and trade (`TradeRespond` still minimal).
 
 ---
 
@@ -138,14 +144,16 @@ All other `DACStarterGui/*.luau` modules that expose `init()` are listed in `Gui
 |-------|--------|
 | Require paths | PASS |
 | MainServer init order & service files | PASS |
-| Remotes registry vs usage | PASS (see unused/placeholder remotes above) |
+| Remotes registry vs usage | PASS (`GetLeaderboard` wired to menu `LeaderboardPanel`; see unused remotes above) |
 | DataManager defaults | PASS |
 | Constants | PASS |
 | GuiBootstrap | PASS |
 | Bootstrap.client | PASS |
 
-No blocking defects found. Follow-ups (optional): wire client UI to `ChangeWorld` / `UnlockWorld` / `FusePets`, implement `TradeRespond` + trade flow, add leaderboard UI calling `GetLeaderboard`, or remove/comment unused remote names if the API surface should stay minimal.
+No blocking defects found. Follow-ups (optional): wire client UI to `ChangeWorld` / `UnlockWorld` / `FusePets`, implement `TradeRespond` + trade flow, or remove/comment unused remote names if the API surface should stay minimal.
 
 #### Files on disk
 
 - `memories/DriveACarSimulator/PostPhase3Audit.md` (this file)
+- `memories/DriveACarSimulator/DACStarterGui/LeaderboardPanelDesignSpec.luau`
+- `memories/DriveACarSimulator/LaunchAssets/AssetIdChecklist.md`

@@ -203,7 +203,11 @@ local function attachVipGlow(character: Model, show: boolean)
 	activeConnections[bb] = conn
 end
 
+local hookCleanups: { [number]: () -> () } = {}
+
 local function hookPlayer(player: Player)
+	local conns: { RBXScriptConnection } = {}
+
 	local function refresh()
 		local char = player.Character
 		if not char then
@@ -213,12 +217,30 @@ local function hookPlayer(player: Player)
 		attachVipGlow(char, vip)
 	end
 
-	player.CharacterAdded:Connect(refresh)
-	player:GetAttributeChangedSignal("DAC_VipPass"):Connect(refresh)
+	local function cleanup()
+		for _, c in conns do
+			c:Disconnect()
+		end
+		table.clear(conns)
+		if hookCleanups[player.UserId] == cleanup then
+			hookCleanups[player.UserId] = nil
+		end
+	end
+
+	table.insert(conns, player.CharacterAdded:Connect(refresh))
+	table.insert(conns, player:GetAttributeChangedSignal("DAC_VipPass"):Connect(refresh))
+	hookCleanups[player.UserId] = cleanup
 	if player.Character then
 		refresh()
 	end
 end
+
+Players.PlayerRemoving:Connect(function(p)
+	local fn = hookCleanups[p.UserId]
+	if fn then
+		fn()
+	end
+end)
 
 for _, p in Players:GetPlayers() do
 	hookPlayer(p)

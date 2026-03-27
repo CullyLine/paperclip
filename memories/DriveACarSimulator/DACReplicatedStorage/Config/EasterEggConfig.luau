@@ -1,14 +1,14 @@
 --!strict
 --[[
 	Hidden easter egg placements. imageId stays rbxassetid://0 until Bard assigns assets.
-	At runtime, EasterEggService resolves textures via imageKey → ReplicatedStorage.Images.<name>.
+	At runtime, EasterEggService resolves textures via imageKey → ReplicatedStorage.Images.<name> (POLA-95).
 ]]
 
 export type DisplayType = "poster" | "framed" | "billboard" | "decal"
 
 export type EasterEggPlacement = {
 	id: string,
-	worldId: "grasslands" | "desert" | "frozen" | "neon",
+	worldId: "forest" | "desert" | "ice" | "volcano" | "space",
 	-- Offset from Workspace.Worlds.<world> model pivot (studs).
 	position: Vector3,
 	-- Degrees; applied as X/Y/Z Euler on top of placement CFrame.
@@ -55,11 +55,11 @@ local EasterEggConfig = {}
 -- imageKey/imageSource stay nil until Board provides the ReplicatedStorage.Images catalog.
 -- Hints and rarity tiers assigned by Bard (POLA-66).
 EasterEggConfig.Placements = {
-	-- ── Grasslands ──────────────────────────────────────────────
+	-- ── Forest ──────────────────────────────────────────────────
 	-- Theme: "Welcome home" — warm, nostalgic. First world = friendly secrets.
 	{
 		id = "grass_1",
-		worldId = "grasslands",
+		worldId = "forest",
 		position = Vector3.new(-120, 18, -2800),
 		rotation = Vector3.new(0, 15, 0),
 		size = Vector2.new(180, 120),
@@ -72,7 +72,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "grass_2",
-		worldId = "grasslands",
+		worldId = "forest",
 		position = Vector3.new(85, 6, -4200),
 		rotation = Vector3.new(0, -110, 0),
 		size = Vector2.new(120, 80),
@@ -85,7 +85,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "grass_3",
-		worldId = "grasslands",
+		worldId = "forest",
 		position = Vector3.new(-40, 3, -1800),
 		rotation = Vector3.new(0, 90, 0),
 		size = Vector2.new(200, 80),
@@ -98,7 +98,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "grass_4",
-		worldId = "grasslands",
+		worldId = "forest",
 		position = Vector3.new(200, 35, -3600),
 		rotation = Vector3.new(0, 0, 0),
 		size = Vector2.new(160, 100),
@@ -111,7 +111,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "grass_5",
-		worldId = "grasslands",
+		worldId = "forest",
 		position = Vector3.new(-95, 12, -900),
 		rotation = Vector3.new(0, 45, 0),
 		size = Vector2.new(100, 100),
@@ -122,7 +122,7 @@ EasterEggConfig.Placements = {
 		hint = "Before you drive forward, check what's behind you.",
 		rarity = "hidden",
 	},
-	-- ── Scorching Desert ────────────────────────────────────────
+	-- ── Desert ──────────────────────────────────────────────────
 	-- Theme: "Lost and found" — sun-bleached, abandoned, left in the sand long ago.
 	{
 		id = "desert_1",
@@ -189,11 +189,11 @@ EasterEggConfig.Placements = {
 		hint = "Past the last dune, the sky tells a story.",
 		rarity = "common",
 	},
-	-- ── Frozen Tundra ───────────────────────────────────────────
+	-- ── Ice World ───────────────────────────────────────────────
 	-- Theme: "Frozen in time" — preserved, crystallized, trapped in ice.
 	{
 		id = "frozen_1",
-		worldId = "frozen",
+		worldId = "ice",
 		position = Vector3.new(-110, 20, -4500),
 		rotation = Vector3.new(0, 55, 0),
 		size = Vector2.new(160, 100),
@@ -206,7 +206,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "frozen_2",
-		worldId = "frozen",
+		worldId = "ice",
 		position = Vector3.new(90, 6, -2200),
 		rotation = Vector3.new(0, -90, 0),
 		size = Vector2.new(130, 85),
@@ -219,7 +219,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "frozen_3",
-		worldId = "frozen",
+		worldId = "ice",
 		position = Vector3.new(0, 3, -5800),
 		rotation = Vector3.new(0, 0, 0),
 		size = Vector2.new(240, 70),
@@ -232,7 +232,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "frozen_4",
-		worldId = "frozen",
+		worldId = "ice",
 		position = Vector3.new(160, 32, -7000),
 		rotation = Vector3.new(0, 0, 0),
 		size = Vector2.new(150, 100),
@@ -245,7 +245,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "frozen_5",
-		worldId = "frozen",
+		worldId = "ice",
 		position = Vector3.new(-70, 12, -3400),
 		rotation = Vector3.new(0, 125, 0),
 		size = Vector2.new(100, 100),
@@ -256,11 +256,11 @@ EasterEggConfig.Placements = {
 		hint = "Behind the ice, where the wind doesn't reach, there's color.",
 		rarity = "hidden",
 	},
-	-- ── Neon City ───────────────────────────────────────────────
-	-- Theme: "Digital graffiti" — cyberpunk ads, glowing street art.
+	-- ── Volcano ─────────────────────────────────────────────────
+	-- Theme: "Buried relics" — scorched, ancient, half-melted into the rock.
 	{
 		id = "neon_1",
-		worldId = "neon",
+		worldId = "volcano",
 		position = Vector3.new(130, 28, -5000),
 		rotation = Vector3.new(0, -15, 0),
 		size = Vector2.new(240, 140),
@@ -273,7 +273,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "neon_2",
-		worldId = "neon",
+		worldId = "volcano",
 		position = Vector3.new(-90, 10, -3200),
 		rotation = Vector3.new(0, 90, 0),
 		size = Vector2.new(150, 95),
@@ -286,7 +286,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "neon_3",
-		worldId = "neon",
+		worldId = "volcano",
 		position = Vector3.new(40, 5, -8100),
 		rotation = Vector3.new(0, 0, 0),
 		size = Vector2.new(200, 80),
@@ -299,7 +299,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "neon_4",
-		worldId = "neon",
+		worldId = "volcano",
 		position = Vector3.new(-150, 16, -6400),
 		rotation = Vector3.new(0, 180, 0),
 		size = Vector2.new(120, 120),
@@ -312,7 +312,7 @@ EasterEggConfig.Placements = {
 	},
 	{
 		id = "neon_5",
-		worldId = "neon",
+		worldId = "volcano",
 		position = Vector3.new(200, 45, -9000),
 		rotation = Vector3.new(0, 0, 0),
 		size = Vector2.new(260, 130),
@@ -337,7 +337,7 @@ EasterEggConfig.LoadingScreenImages = {
 
 EasterEggConfig.SecretGallery = {
 	enabled = true,
-	worldId = "neon",
+	worldId = "volcano",
 	centerPosition = Vector3.new(24000, 400, 12000),
 	interiorSize = Vector3.new(36, 10, 28),
 	frames = {

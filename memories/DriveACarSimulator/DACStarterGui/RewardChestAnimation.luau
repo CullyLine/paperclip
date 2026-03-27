@@ -13,6 +13,7 @@ local DAC = ReplicatedStorage:WaitForChild("DAC")
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 local Utils = require(DAC:WaitForChild("Utils"))
+local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 
 local RewardChestAnimation = {}
 
@@ -74,7 +75,7 @@ local function estimateTotalNumber(items: { RewardItem }): number
 	for _, it in items do
 		if type(it.amount) == "number" and it.amount > 0 then
 			local k = it.kind or ""
-			if k == "coins" or k == "gems" or k == "crystals" or k == "skulls" or k == "xp" then
+			if k == "coins" or k == "sandGranules" or k == "icycles" or k == "magmaCores" or k == "infinitium" or k == "xp" then
 				sum += it.amount
 				any = true
 			end
@@ -97,9 +98,11 @@ function RewardChestAnimation.play(payload: RewardPayload)
 	destroyActive()
 
 	local items = normalizeItems(payload)
-	local screenGui = player:WaitForChild("PlayerGui") :: PlayerGui
-	local host = screenGui:FindFirstChild("DACMain") :: ScreenGui?
+	local pg = player:WaitForChild("PlayerGui") :: PlayerGui
+	-- Cold join / reward edge: DACMain can trail PlayerGui by a frame; FindFirstChild dropped the overlay silently.
+	local host = pg:WaitForChild("DACMain", 15) :: ScreenGui?
 	if not host then
+		warn("[DAC] RewardChestAnimation: DACMain missing — reward overlay skipped")
 		return
 	end
 
@@ -419,11 +422,11 @@ function RewardChestAnimation.play(payload: RewardPayload)
 						if i == steps then
 							v = target
 						end
-						totalLabel.Text = "Total value: " .. Utils.formatNumber(v)
+						totalLabel.Text = MicrocopyConfig.RewardChestTotalValueFormat:gsub("{VALUE}", Utils.formatNumber(v))
 					end)
 				end
 			else
-				totalLabel.Text = "Claimed!"
+				totalLabel.Text = MicrocopyConfig.RewardChestClaimedLine
 			end
 		end)
 	end)

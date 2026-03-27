@@ -9,6 +9,7 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local RARITY_STYLES: { [string]: {
@@ -111,7 +112,7 @@ local function startStrokePulse(bb: BillboardGui, glow: UIStroke)
 	local maxTransparency = math.min(baseTransparency + 0.15, 1)
 	local t0 = os.clock()
 
-	local conn = game:GetService("RunService").RenderStepped:Connect(function()
+	local conn = RunService.RenderStepped:Connect(function()
 		if not bb.Parent then
 			return
 		end
@@ -218,7 +219,11 @@ local function attachTitle(character: Model, titleText: string?, rarity: string?
 	emitSparks(bb, style)
 end
 
+local hookCleanups: { [number]: () -> () } = {}
+
 local function hookPlayer(target: Player)
+	local conns: { RBXScriptConnection } = {}
+
 	local function refresh()
 		local char = target.Character
 		if not char then
@@ -233,15 +238,33 @@ local function hookPlayer(target: Player)
 		)
 	end
 
-	target.CharacterAdded:Connect(refresh)
-	target:GetAttributeChangedSignal("DAC_PlayerTitle"):Connect(refresh)
-	target:GetAttributeChangedSignal("DAC_TitleRarity"):Connect(refresh)
+	local function cleanup()
+		for _, c in conns do
+			c:Disconnect()
+		end
+		table.clear(conns)
+		if hookCleanups[target.UserId] == cleanup then
+			hookCleanups[target.UserId] = nil
+		end
+	end
+
+	table.insert(conns, target.CharacterAdded:Connect(refresh))
+	table.insert(conns, target:GetAttributeChangedSignal("DAC_PlayerTitle"):Connect(refresh))
+	table.insert(conns, target:GetAttributeChangedSignal("DAC_TitleRarity"):Connect(refresh))
+	hookCleanups[target.UserId] = cleanup
 	if target.Character then
 		refresh()
 	end
 end
 
 function TitleNametag.init()
+	Players.PlayerRemoving:Connect(function(player)
+		local fn = hookCleanups[player.UserId]
+		if fn then
+			fn()
+		end
+	end)
+
 	for _, p in Players:GetPlayers() do
 		hookPlayer(p)
 	end

@@ -34,21 +34,46 @@
 
 --[[
 ================================================================================
+  IMPLEMENTATION MAPPING (shipped code vs this spec)
+================================================================================
+  Canonical chain window: **4.0 seconds** — single source of truth is
+  `Constants.NEAR_MISS_CHAIN_RESET_SEC` in `DACReplicatedStorage/Constants.luau`.
+  Client (`DrivingController` streak reset) and server (`RunService.claimNearMiss`
+  chain expiry) both use this constant.
+
+  DrivingController (`DACStarterPlayerScripts/Controllers/DrivingController.luau`):
+    nearMissStreak           — current chain length (maps to pseudo `nearMissCombo` below)
+    lastNearMissStreakAt     — `os.clock()` at last qualifying near-miss; compared to
+                               `NEAR_MISS_CHAIN_RESET_SEC` to decide streak reset (replaces
+                               decrementing `nearMissComboTimer` in pseudo-code)
+    lastNearMissEnterClock   — lateral edge debounce only; uses
+                               `NEAR_MISS_CLIENT_LATERAL_DEBOUNCE_SEC`, not the combo window
+    maxNearMissStreakThisRun — best streak this run (maps to pseudo `nearMissBestCombo`)
+    nearMissGrantChainTotal  — coin total for combo-break HUD / celebration
+
+  The pseudo-code in §A uses a timer-decrement model for readability; shipped behavior is
+  timestamp-based — equivalent for the 4.0s window.
+================================================================================
+]]
+
+
+--[[
+================================================================================
   SECTION A — NEAR-MISS DETECTION + COMBO STATE
 ================================================================================
   DrivingController already detects near-misses via proximity raycasting.
   This spec defines the combo state machine that sits on top of detection.
 
   State variables (maintained in DrivingController during a run):
-    nearMissCombo      : number = 0     -- current combo chain
-    nearMissComboTimer : number = 0     -- seconds since last near-miss
+    nearMissCombo      : number = 0     -- current combo chain → `nearMissStreak` in code
+    nearMissComboTimer : number = 0     -- seconds since last near-miss → see `lastNearMissStreakAt` + constant
     nearMissTotalRun   : number = 0     -- total near-misses this run
-    nearMissBestCombo  : number = 0     -- best combo this run
+    nearMissBestCombo  : number = 0     -- best combo this run → `maxNearMissStreakThisRun`
     nearMissCoinsEarned: number = 0     -- total near-miss coins this run
     nearMissXpEarned   : number = 0     -- total near-miss XP this run
 
   COMBO RULES:
-    Window             : 4.0 seconds between consecutive near-misses
+    Window             : 4.0 seconds between consecutive near-misses (`Constants.NEAR_MISS_CHAIN_RESET_SEC`)
     Reset triggers     : crash, run end, or timer expiry
     No upper cap       : combo can grow indefinitely (skill ceiling)
 
@@ -64,7 +89,7 @@
   On near-miss detected:
     nearMissCombo += 1
     nearMissTotalRun += 1
-    nearMissComboTimer = 4.0
+    nearMissComboTimer = Constants.NEAR_MISS_CHAIN_RESET_SEC  -- 4.0s
     nearMissBestCombo = math.max(nearMissBestCombo, nearMissCombo)
     local reward = calculateReward(nearMissCombo)
     nearMissCoinsEarned += reward.coins

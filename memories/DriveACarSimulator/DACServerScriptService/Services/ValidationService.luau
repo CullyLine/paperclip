@@ -2,6 +2,16 @@
 --[[
 	Server-side anti-exploit: remote rate limits, currency source checks,
 	speed sampling, periodic game pass re-verification, and save sanity checks.
+
+	POLA-603 — Client → server remotes (inventory for audits):
+	RemoteEvents: StartRun, EndRun, NearMissClaim | BuyCar, EquipCar, UpgradeStat |
+	BuyEgg, HatchEgg | EquipPet, UnequipPet, FusePets | Rebirth | UnlockWorld, ChangeWorld, ReturnToLobby |
+	ClaimDailyReward, ClaimBattlePassTier | RedeemCode | PurchaseGamePass, PurchaseDevProduct,
+	PurchaseThankYouAck | UpdateSettings | TradeRequest, TradeRespond | TutorialSkip |
+	AdminCommand | MarkAchievementsSeen | DismissGroupJoinPrompt
+	RemoteFunctions: GetPlayerData | GetLeaderboard | GetPassFlags | GetQuests |
+	GetAchievementData | AdminAuth | FirstSessionOnboarding | RequestVehicleReset
+	(Server→client only remotes are omitted.)
 ]]
 
 local Players = game:GetService("Players")
@@ -32,11 +42,14 @@ local SETTINGS_INTERVAL = 0.08
 local MOVEMENT_REMOTES: { [string]: boolean } = {
 	StartRun = true,
 	EndRun = true,
+	-- POLA-468: two-step lane snap can fire twice within <0.5s
+	RequestVehicleReset = true,
 }
 
 -- Whitelisted sources for DataManager.addCurrency / CurrencyService.add
 local ALLOWED_CURRENCY_SOURCES: { [string]: boolean } = {
 	run_complete = true,
+	near_miss = true,
 	code_redemption = true,
 	daily_reward = true,
 	battle_pass = true,
@@ -44,6 +57,8 @@ local ALLOWED_CURRENCY_SOURCES: { [string]: boolean } = {
 	playtime = true,
 	tutorial = true,
 	admin = true,
+	admin_global = true,
+	group_join = true,
 }
 
 local purchaseLast: { [number]: { [string]: number } } = {}
@@ -59,6 +74,16 @@ local lastPassRecheck: { [number]: number } = {}
 local MAX_REBIRTH_SAVE = 10000
 local MAX_TOTAL_PETS = 500
 
+-- Throttle repeated rate_limit warnings (same player + remote) to avoid console/ring-buffer spam under attack.
+local RATE_LIMIT_LOG_INTERVAL_SEC = 5
+local rateLimitLogLast: { [number]: { [string]: number } } = {}
+
+ValidationService.MAX_REMOTE_STRING_ID_LEN = 64
+local MAX_SETTINGS_PATCH_KEYS = 32
+
+-- One log per (player, key) per session — pet/egg remote abuse without log spam.
+local sessionAnomalyLogged: { [number]: { [string]: boolean } } = {}
+
 local function cleanupPlayer(uid: number)
 	purchaseLast[uid] = nil
 	movementLast[uid] = nil
@@ -66,6 +91,8 @@ local function cleanupPlayer(uid: number)
 	speedSampleClock[uid] = nil
 	speedFlagTimes[uid] = nil
 	lastPassRecheck[uid] = nil
+	sessionAnomalyLogged[uid] = nil
+	rateLimitLogLast[uid] = nil
 end
 
 Players.PlayerRemoving:Connect(function(player)
@@ -76,12 +103,105 @@ function ValidationService.logViolation(player: Player, violationType: string, s
 	getAdminService().logValidation(player, violationType, severity, detail)
 end
 
+--[[
+	POLA-510: Gameplay remotes must not run while dead or without a live character.
+
+	- Character must exist with a Humanoid and Health > 0 (not Dead state).
+	- DAC_ServerRemoteBlock: optional server/admin hard-block (trusted).
+	Note: We do not read client-replicated "loading" flags here — they race world-travel
+	(ChangeWorld fires mid-transition) and are spoofable; character checks are authoritative.
+]]
+function ValidationService.canActWithReason(player: Player): (boolean, string?)
+	if not player or not player.Parent then
+		return false, "no_player"
+	end
+	if player:GetAttribute("DAC_ServerRemoteBlock") == true then
+		return false, "server_block"
+	end
+	local char = player.Character
+	if not char then
+		return false, "no_character"
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		return false, "no_humanoid"
+	end
+	if hum.Health <= 0 then
+		return false, "dead"
+	end
+	if hum:GetState() == Enum.HumanoidStateType.Dead then
+		return false, "dead"
+	end
+	return true, nil
+end
+
+function ValidationService.canAct(player: Player): boolean
+	return select(1, ValidationService.canActWithReason(player))
+end
+
+--[[
+	Non-empty string id within byte length (egg/car/world keys, etc.).
+]]
+function ValidationService.isBoundedStringId(value: unknown, maxLen: number): boolean
+	return type(value) == "string" and (value :: string) ~= "" and #(value :: string) <= maxLen
+end
+
+--[[
+	Rejects oversized or non-string-keyed settings tables (DoS via huge pair iteration).
+]]
+function ValidationService.validateSettingsPatchShape(player: Player, patch: { [any]: any }): boolean
+	local n = 0
+	for k, _ in patch do
+		n += 1
+		if n > MAX_SETTINGS_PATCH_KEYS then
+			ValidationService.logAnomalyOncePerSession(player, "settings_patch_key_flood", tostring(n))
+			return false
+		end
+		if type(k) ~= "string" then
+			ValidationService.logAnomalyOncePerSession(player, "settings_patch_bad_key", "")
+			return false
+		end
+		if #k > 48 then
+			ValidationService.logAnomalyOncePerSession(player, "settings_key_len", "")
+			return false
+		end
+	end
+	return true
+end
+
+function ValidationService.logAnomalyOncePerSession(player: Player, anomalyKey: string, detail: string?)
+	local uid = player.UserId
+	local bucket = sessionAnomalyLogged[uid]
+	if not bucket then
+		bucket = {}
+		sessionAnomalyLogged[uid] = bucket
+	end
+	if bucket[anomalyKey] then
+		return
+	end
+	bucket[anomalyKey] = true
+	getAdminService().logValidation(player, "remote_anomaly", "medium", detail or anomalyKey)
+end
+
 function ValidationService.checkRemoteRate(player: Player, remoteName: string): boolean
 	local uid = player.UserId
 	local now = os.clock()
 	local isMovement = MOVEMENT_REMOTES[remoteName] == true
-	local interval = if remoteName == "UpdateSettings"
+	-- Read-only idempotent queries use shorter intervals than purchase remotes.
+	local isReadQuery = remoteName == "GetPlayerData"
+		or remoteName == "GetQuests"
+		or remoteName == "GetAchievementData"
+		or remoteName == "GetPassFlags"
+		or remoteName == "MarkAchievementsSeen"
+		or remoteName == "PurchaseThankYouAck"
+	local interval = if isReadQuery
+		then 0.12
+		elseif remoteName == "GetLeaderboard"
+		then 0.22
+		elseif remoteName == "UpdateSettings"
 		then SETTINGS_INTERVAL
+		elseif remoteName == "FirstSessionOnboarding"
+		then 0.2
 		elseif isMovement then MOVEMENT_INTERVAL
 		else PURCHASE_INTERVAL
 	local bucket = if isMovement then movementLast else purchaseLast
@@ -92,12 +212,21 @@ function ValidationService.checkRemoteRate(player: Player, remoteName: string): 
 	end
 	local prev = sub[remoteName]
 	if prev and now - prev < interval then
-		ValidationService.logViolation(
-			player,
-			"rate_limit",
-			"medium",
-			`remote={remoteName} interval={interval}`
-		)
+		local bucketRL = rateLimitLogLast[uid]
+		if not bucketRL then
+			bucketRL = {}
+			rateLimitLogLast[uid] = bucketRL
+		end
+		local lastLog = bucketRL[remoteName]
+		if not lastLog or now - lastLog >= RATE_LIMIT_LOG_INTERVAL_SEC then
+			bucketRL[remoteName] = now
+			ValidationService.logViolation(
+				player,
+				"rate_limit",
+				"medium",
+				`remote={remoteName} interval={interval}`
+			)
+		end
 		return false
 	end
 	sub[remoteName] = now
@@ -123,7 +252,7 @@ end
 ]]
 function ValidationService.validatePlayerDataForSave(player: Player, data: any): boolean
 	local clean = true
-	local currencies = { "coins", "gems", "crystals", "skulls" }
+	local currencies = { "coins", "sandGranules", "icycles", "magmaCores", "infinitium" }
 	for _, c in currencies do
 		local v = data[c]
 		if type(v) ~= "number" or v < 0 then

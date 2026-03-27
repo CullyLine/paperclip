@@ -2,19 +2,33 @@
 --[[
 	Achievement popup text for the notification HUD.
 
-	Covers every category of unlockable achievement: driving, collection,
-	economy, social, and secret achievements. Each achievement has a short
-	title (<=20 chars, ALL CAPS), a description (<=60 chars), and a
-	celebratory toast line (flat variant pool picked randomly).
+	**IDs must match AchievementService.tryUnlock** — only server-backed
+	achievements appear here so the trophy grid stays honest.
+
+	Each achievement: short title (<=20 chars, ALL CAPS), description (<=60 chars).
 
 	Placeholders: {COUNT}, {SPEED}, {WORLD}, {PET}, {COINS}, {PERCENT}.
+
+	Trophy metallic tiers (border/toast intensity) are NOT pet egg rarities
+	(common…mythic). Use RarityTiers for display labels + voice.
 ]]
 
 local AchievementPopupConfig = {}
 
+--[[
+	Metallic trophy tier → HUD label + optional subtitle pattern (whale-forward).
+	Keys match server RARITY_BY_ID / client rarityForId (bronze | silver | gold | diamond).
+]]
+AchievementPopupConfig.RarityTiers = {
+	bronze = { label = "BRONZE", subtitle = "Starter shine — first milestones & quick wins" },
+	silver = { label = "SILVER", subtitle = "Mid grind — streaks, spends, and flex" },
+	gold = { label = "GOLD", subtitle = "Heavy flex — grinds, prestige beats, top ranks" },
+	diamond = { label = "DIAMOND", subtitle = "Crown jewels — completionist endgame" },
+}
+
 --------------------------------------------------------------------------
 -- ACHIEVEMENT DEFINITIONS
--- id = internal key, title = display name, description = unlock criteria.
+-- id = internal key (must match AchievementService.tryUnlock), title, description.
 --------------------------------------------------------------------------
 
 AchievementPopupConfig.Achievements = {
@@ -32,39 +46,39 @@ AchievementPopupConfig.Achievements = {
 		category = "driving",
 	},
 	{
-		id = "centurion_runs",
-		title = "CENTURION!",
-		description = "Complete 100 runs. The road warrior awakens!",
-		category = "driving",
-	},
-	{
-		id = "marathon_driver",
-		title = "MARATHON DRIVER!",
-		description = "Complete 1,000 runs. Tireless legend!",
-		category = "driving",
-	},
-	{
-		id = "near_miss_king",
-		title = "NEAR MISS KING!",
-		description = "Chain 10 near-misses in a single run.",
-		category = "driving",
-	},
-	{
-		id = "combo_master",
-		title = "COMBO MASTER!",
-		description = "Reach a x20 combo multiplier. Legendary chain!",
-		category = "driving",
-	},
-	{
 		id = "world_tourer",
 		title = "WORLD TOURER!",
-		description = "Complete a run in every unlocked world.",
+		description = "Complete a run in every world you've unlocked.",
 		category = "driving",
 	},
 	{
-		id = "speed_god",
-		title = "SPEED GOD!",
-		description = "Hit 1,000 studs/s. Simulation broken!",
+		id = "runs_10",
+		title = "ROAD REGULAR!",
+		description = "Complete 10 runs. You're getting the hang of it!",
+		category = "driving",
+	},
+	{
+		id = "runs_100",
+		title = "HIGHWAY VETERAN!",
+		description = "Complete 100 runs. The asphalt knows your name!",
+		category = "driving",
+	},
+	{
+		id = "combo_inferno",
+		title = "COMBO INFERNO!",
+		description = "Hit a ×20 near-miss chain in a single run. Untouchable!",
+		category = "driving",
+	},
+	{
+		id = "garage_full",
+		title = "FULL GARAGE!",
+		description = "Own every car in the showroom. Collector supreme!",
+		category = "driving",
+	},
+	{
+		id = "world_elite",
+		title = "WORLD ELITE!",
+		description = "Complete world mastery for the final map. End of the road!",
 		category = "driving",
 	},
 
@@ -76,55 +90,25 @@ AchievementPopupConfig.Achievements = {
 		category = "collection",
 	},
 	{
-		id = "rare_find",
-		title = "RARE FIND!",
-		description = "Hatch a Rare pet. The luck begins!",
-		category = "collection",
-	},
-	{
-		id = "epic_moment",
-		title = "EPIC MOMENT!",
-		description = "Hatch an Epic pet. Against the odds!",
-		category = "collection",
-	},
-	{
-		id = "legendary_pull",
-		title = "LEGENDARY PULL!",
-		description = "Hatch a Legendary pet. 0.5% odds crushed!",
-		category = "collection",
-	},
-	{
-		id = "mythic_miracle",
-		title = "MYTHIC MIRACLE!",
-		description = "Hatch a Mythical pet. One in ten thousand!",
-		category = "collection",
-	},
-	{
-		id = "half_index",
-		title = "HALF THE INDEX!",
-		description = "Collect 50% of all pets. Dedicated curator!",
+		id = "hatch_100",
+		title = "HATCH CENTURY!",
+		description = "Hatch 100 eggs total. Keep cracking!",
 		category = "collection",
 	},
 	{
 		id = "full_index",
 		title = "COMPLETIONIST!",
-		description = "Collect 100% of all pets. Every. Single. One!",
+		description = "Discover every pet in the index. Every. Single. One!",
+		category = "collection",
+	},
+	{
+		id = "legendary_hatch",
+		title = "JACKPOT HATCH!",
+		description = "Hatch a Legendary or Mythic pet from an egg!",
 		category = "collection",
 	},
 
 	-- ECONOMY
-	{
-		id = "first_million",
-		title = "MILLIONAIRE!",
-		description = "Earn 1,000,000 total coins. Money moves!",
-		category = "economy",
-	},
-	{
-		id = "gem_hoarder",
-		title = "GEM HOARDER!",
-		description = "Accumulate 500 gems. Sparkling!",
-		category = "economy",
-	},
 	{
 		id = "big_spender",
 		title = "BIG SPENDER!",
@@ -138,73 +122,79 @@ AchievementPopupConfig.Achievements = {
 		category = "economy",
 	},
 	{
-		id = "rebirth_ten",
-		title = "ELITE REBIRTHER!",
-		description = "Reach 10 rebirths. Top-tier commitment!",
-		category = "economy",
-	},
-	{
-		id = "rebirth_hundred",
-		title = "IMMORTAL!",
-		description = "100 rebirths. Nothing left to prove!",
+		id = "coin_tycoon",
+		title = "COIN TYCOON!",
+		description = "Earn 1,000,000 lifetime coins. The economy runs through you!",
 		category = "economy",
 	},
 
 	-- SOCIAL
 	{
-		id = "leaderboard_debut",
-		title = "ON THE BOARD!",
-		description = "Appear on any leaderboard for the first time.",
-		category = "social",
-	},
-	{
-		id = "top_ten",
-		title = "TOP TEN!",
-		description = "Reach top 10 on any leaderboard. Elite!",
+		id = "daily_streak_7",
+		title = "WEEK WARRIOR!",
+		description = "Hit a 7-day login streak.",
 		category = "social",
 	},
 	{
 		id = "number_one",
 		title = "#1 DRIVER!",
-		description = "Claim the #1 spot on a leaderboard. KING!",
+		description = "Reach #1 on a leaderboard. KING!",
 		category = "social",
 	},
 	{
-		id = "daily_streak_7",
-		title = "WEEK WARRIOR!",
-		description = "Maintain a 7-day login streak.",
+		id = "top_ten",
+		title = "TOP 10 TITAN!",
+		description = "Break into the top 10 on a global leaderboard!",
 		category = "social",
 	},
 	{
 		id = "daily_streak_30",
-		title = "MONTHLY MASTER!",
-		description = "30-day login streak. True dedication!",
+		title = "MONTH MONSTER!",
+		description = "Maintain a 30-day login streak. Dedication!",
 		category = "social",
 	},
 	{
-		id = "quest_grinder",
-		title = "QUEST GRINDER!",
-		description = "Complete 50 quests. Mission machine!",
+		id = "quest_veteran",
+		title = "QUEST VETERAN!",
+		description = "Complete 10 quests total. Always on the board!",
 		category = "social",
 	},
 
 	-- SECRET
 	{
-		id = "easter_egg",
+		id = "egg_hunter",
 		title = "EGG HUNTER!",
-		description = "Find a hidden easter egg. Sharp eyes!",
+		description = "Discover a hidden easter egg in the world!",
 		category = "secret",
 	},
 	{
-		id = "max_car",
-		title = "GARAGE KING!",
-		description = "Own every car in the game. Full fleet!",
+		id = "night_owl",
+		title = "NIGHT OWL!",
+		description = "60+ minutes in one session — the road never sleeps!",
 		category = "secret",
 	},
 	{
-		id = "world_master",
-		title = "WORLD MASTER!",
-		description = "Master every world. Total domination!",
+		id = "secret_speed_demon",
+		title = "MACH 500!",
+		description = "Hit 500+ speed in one run. Pure engine violence!",
+		category = "secret",
+	},
+	{
+		id = "egg_straordinary",
+		title = "EGG-STRAORDINARY!",
+		description = "Legendary/Mythic from a Basic Egg. Luck on a budget!",
+		category = "secret",
+	},
+	{
+		id = "lap_legend",
+		title = "LAP LEGEND!",
+		description = "100 laps in one run. The highway is your treadmill!",
+		category = "secret",
+	},
+	{
+		id = "rebirth_royalty",
+		title = "REBIRTH ROYALTY!",
+		description = "Reach Rebirth 10. The crown belongs to the persistent!",
 		category = "secret",
 	},
 }
@@ -218,7 +208,7 @@ AchievementPopupConfig.Achievements = {
 AchievementPopupConfig.UnlockToastLines = {
 	"ACHIEVEMENT UNLOCKED! {TITLE}",
 	"NEW ACHIEVEMENT! {TITLE}",
-	"🏆 UNLOCKED: {TITLE}",
+	"TROPHY UNLOCKED: {TITLE}",
 	"YOU DID IT! {TITLE}",
 	"TROPHY EARNED! {TITLE}",
 	"ACHIEVEMENT GET! {TITLE}",
@@ -236,17 +226,17 @@ AchievementPopupConfig.CategoryComplete = {
 		"Full driving sweep! The ultimate road warrior!",
 	},
 	collection = {
-		"FULL COLLECTION SWEEP! Every pet, every rarity — YOURS!",
+		"FULL COLLECTION SWEEP! Every species in the index — YOURS!",
 		"Collection achievements DONE. The index has been CONQUERED!",
 		"All collection trophies earned. Hatch master CONFIRMED!",
 	},
 	economy = {
-		"ECONOMY MASTERED! Coins, gems, rebirths — ALL conquered!",
+		"ECONOMY MASTERED! Spending and rebirths — ALL conquered!",
 		"Every economy achievement unlocked. You're the TYCOON!",
 		"Full economy sweep! The vault overflows with your legacy!",
 	},
 	social = {
-		"SOCIAL LEGEND! Leaderboards, streaks, quests — ALL DONE!",
+		"SOCIAL LEGEND! Leaderboards and streaks — ALL DONE!",
 		"Every social achievement earned. The server knows your NAME!",
 		"Social sweep complete! Community ROYALTY!",
 	},
@@ -263,11 +253,11 @@ AchievementPopupConfig.CategoryComplete = {
 --------------------------------------------------------------------------
 
 AchievementPopupConfig.TotalCompletion = {
-	"🏆 100% ACHIEVEMENTS! Every challenge, every secret, every trophy — YOURS!",
+	"100% ACHIEVEMENTS! Every challenge, every trophy — YOURS!",
 	"TOTAL COMPLETION! You've done EVERYTHING. The game bows to you!",
 	"ALL ACHIEVEMENTS UNLOCKED! The rarest accomplishment in the game!",
 	"PERFECTION! Every achievement earned. You are the ULTIMATE driver!",
-	"100% COMPLETE! Fewer than 0.01% of players will EVER stand here!",
+	"100% COMPLETE! Full trophy sweep — one of the rarest flexes in the game!",
 }
 
 --------------------------------------------------------------------------

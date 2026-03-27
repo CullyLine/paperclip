@@ -1,17 +1,40 @@
 --!strict
 --[[
-	Headless egg-hatch handler: pity streak tracking + hatch VFX.
-	No UI is created here — the Egg Shop UI lives in DACMain.Panels.EggStore
-	and is wired by UIController.wireEggStorePanel().
+	Headless egg-hatch handler: pity streak tracking + first-session onboarding.
+	Egg Shop panel UI lives in DACMain.Panels.EggStore (wired by UIController.wireEggStorePanel).
+	Shop afford states + spotlight / breathe juice are driven from UIController (Egg Buy popup + slots).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Constants = require(DAC:WaitForChild("Constants"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
-local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 
 local EggShopPanel = {}
+
+local function showFirstSessionNotification(msg: string)
+	task.defer(function()
+		local ps = Players.LocalPlayer:FindFirstChild("PlayerScripts")
+		if not ps then
+			return
+		end
+		local dac = ps:FindFirstChild("DAC")
+		local ctrls = dac and dac:FindFirstChild("Controllers")
+		local mod = ctrls and ctrls:FindFirstChild("UIController")
+		if not mod or not mod:IsA("ModuleScript") then
+			return
+		end
+		local ok, uc = pcall(require, mod)
+		if ok and type(uc) == "table" then
+			if type((uc :: any).showToast) == "function" then
+				(uc :: any).showToast({ type = "success", message = msg })
+			elseif uc.showNotification then
+				uc.showNotification({ type = "success", message = msg })
+			end
+		end
+	end)
+end
 
 local pityNoRareStreak = 0
 
@@ -40,7 +63,18 @@ end
 function EggShopPanel.init()
 	Remotes.getEvent("HatchEgg").OnClientEvent:Connect(function(result)
 		onHatchResultForPity(result)
-		VFXFacade.hatchReveal(result)
+		task.defer(function()
+			local ok, r = pcall(function()
+				return Remotes.getFunction("FirstSessionOnboarding"):InvokeServer({ kind = "prepareFirstHatch" })
+			end)
+			if ok and type(r) == "table" and r.applied == true then
+				local msg = r.mainLine
+				if type(r.hookLine) == "string" and r.hookLine ~= "" then
+					msg = msg .. "\n" .. r.hookLine
+				end
+				showFirstSessionNotification(msg)
+			end
+		end)
 	end)
 end
 

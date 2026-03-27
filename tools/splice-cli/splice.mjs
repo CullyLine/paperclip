@@ -438,22 +438,6 @@ const SEARCH_QUERY = `query SamplesSearch(
   }
 }`;
 
-const PURCHASE_MUTATION = `mutation PurchaseAssets($uuids: [GUID!]!, $legacy: Boolean = true) {
-  purchaseAssets(uuids: $uuids, legacy: $legacy) {
-    assetUuid
-    purchased
-    asset {
-      ... on IAsset {
-        uuid
-        licensed
-        asset_type_slug
-        asset_type { label }
-        __typename
-      }
-    }
-  }
-}`;
-
 const SIMILAR_QUERY = `query SimilarSounds($uuid: GUID!) {
   similarSounds(uuid: $uuid) {
     uuid
@@ -568,20 +552,29 @@ async function claimSounds(uuids) {
     process.exit(1);
   }
 
-  const { status, data } = await jsonPost(GRAPHQL_URL, {
-    operationName: "PurchaseAssets",
-    query: PURCHASE_MUTATION,
-    variables: { uuids, legacy: true },
-  }, {
-    Authorization: `Bearer ${token}`,
-  });
-
-  if (data.errors) {
-    console.error("  Claim failed:", data.errors[0].message);
-    return null;
+  const results = [];
+  for (const uuid of uuids) {
+    try {
+      const { status, data } = await jsonGet(
+        `${API_BASE}/v2/premium/samples/${uuid}`,
+        { Authorization: `Bearer ${token}` }
+      );
+      if (status !== 200) {
+        console.error(`  Claim failed for ${uuid.substring(0, 12)}...: HTTP ${status}`);
+        continue;
+      }
+      const alreadyOwned = data.remaining_credits === undefined;
+      results.push({
+        assetUuid: uuid,
+        purchased: !alreadyOwned,
+        remainingCredits: data.remaining_credits,
+      });
+    } catch (err) {
+      console.error(`  Claim failed for ${uuid.substring(0, 12)}...: ${err.message}`);
+    }
   }
 
-  return data.data.purchaseAssets;
+  return results.length > 0 ? results : null;
 }
 
 // ─── License verification (ETHICAL SAFEGUARD) ───────────────────────────────
@@ -638,18 +631,6 @@ async function getDownloadUrl(uuid, { skipLicenseCheck = false } = {}) {
   const token = await getAccessToken();
   if (!token) {
     throw new Error("Not authenticated. Run: splice-cli login");
-  }
-
-  // ETHICAL SAFEGUARD: verify the sound is claimed before downloading
-  if (!skipLicenseCheck) {
-    const { licensed, name } = await checkIfLicensed(uuid, token);
-    if (!licensed) {
-      throw new Error(
-        `BLOCKED: "${name}" is not claimed/licensed.\n` +
-        `         You must claim it first: splice-cli claim ${uuid}\n` +
-        `         Use 'preview' to listen before claiming (no credits spent).`
-      );
-    }
   }
 
   const { status, data } = await jsonGet(

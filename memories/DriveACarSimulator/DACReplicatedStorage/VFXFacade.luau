@@ -36,6 +36,12 @@ function VFXFacade.cameraShake(intensity: number, duration: number)
 	end
 end
 
+function VFXFacade.heavyCollisionImpact()
+	if impl and impl.heavyCollisionImpact then
+		impl.heavyCollisionImpact()
+	end
+end
+
 function VFXFacade.currencyPopup(currencyType: string, amount: number, flavorLine: string?)
 	if impl then
 		impl.currencyPopup(currencyType, amount, flavorLine)
@@ -72,9 +78,14 @@ function VFXFacade.petEquipEntrance(petUid: string, model: Model?, rarity: strin
 	end
 end
 
-function VFXFacade.lapFlash(isPersonalBest: boolean, lapTimeSeconds: number?)
+function VFXFacade.lapFlash(
+	isPersonalBest: boolean,
+	lapTimeSeconds: number?,
+	lapDeltaSecondsFromBest: number?,
+	lapDeltaSecondsFromLast: number?
+)
 	if impl and impl.lapFlash then
-		impl.lapFlash(isPersonalBest, lapTimeSeconds)
+		impl.lapFlash(isPersonalBest, lapTimeSeconds, lapDeltaSecondsFromBest, lapDeltaSecondsFromLast)
 	end
 end
 
@@ -90,9 +101,21 @@ function VFXFacade.failureFeedback(line: string, kind: string?)
 	end
 end
 
-function VFXFacade.worldTransition(fromWorldId: string, toWorldId: string)
+function VFXFacade.worldTransition(fromWorldId: string, toWorldId: string, onFadeOutComplete: (() -> ())?)
 	if impl and impl.worldTransition then
-		impl.worldTransition(fromWorldId, toWorldId)
+		impl.worldTransition(fromWorldId, toWorldId, onFadeOutComplete)
+	end
+end
+
+function VFXFacade.finishWorldTravel(currentWorld: string)
+	if impl and impl.finishWorldTravel then
+		impl.finishWorldTravel(currentWorld)
+	end
+end
+
+function VFXFacade.abortWorldTravel(restoreWorldId: string?)
+	if impl and impl.abortWorldTravel then
+		impl.abortWorldTravel(restoreWorldId)
 	end
 end
 
@@ -108,9 +131,16 @@ function VFXFacade.ambientStop()
 	end
 end
 
-function VFXFacade.runEndFanfare(isRecord: boolean)
+function VFXFacade.runEndFanfare(isRecord: boolean, isRunOfDay: boolean?)
 	if impl and impl.runEndFanfare then
-		impl.runEndFanfare(isRecord)
+		impl.runEndFanfare(isRecord, isRunOfDay)
+	end
+end
+
+-- Slot-machine coins line: UI vignette pulse only (no camera FOV — RunEndFanfare owns FOV).
+function VFXFacade.payoutStaggerBigLine()
+	if impl and impl.payoutStaggerBigLine then
+		impl.payoutStaggerBigLine()
 	end
 end
 
@@ -120,9 +150,9 @@ function VFXFacade.milestonePopup(text: string, style: string?)
 	end
 end
 
-function VFXFacade.nearMissSpark(fromRight: boolean)
+function VFXFacade.nearMissSpark(fromRight: boolean, comboStreak: number?)
 	if impl and impl.nearMissSpark then
-		impl.nearMissSpark(fromRight)
+		impl.nearMissSpark(fromRight, comboStreak)
 	end
 end
 
@@ -174,6 +204,12 @@ function VFXFacade.rewardChestBurst()
 	end
 end
 
+function VFXFacade.codeRedeemConfettiBurst()
+	if impl and impl.codeRedeemConfettiBurst then
+		impl.codeRedeemConfettiBurst()
+	end
+end
+
 function VFXFacade.leaderboardRankFanfare(payload: any)
 	if impl and impl.leaderboardRankFanfare then
 		impl.leaderboardRankFanfare(payload)
@@ -208,6 +244,12 @@ end
 function VFXFacade.serverDropFeedBanner(payload: any)
 	if impl and impl.serverDropFeedBanner then
 		impl.serverDropFeedBanner(payload)
+	end
+end
+
+function VFXFacade.resetTravelFlashState()
+	if impl and impl.resetTravelFlashState then
+		impl.resetTravelFlashState()
 	end
 end
 

@@ -1,6 +1,7 @@
 --!strict
 --[[
-	Active playtime: 1 gem per 15 minutes while character is alive in the world.
+	Active playtime: coin bonus every 15 minutes while character is alive.
+	Base amount scales with equipped pet multiplier.
 ]]
 
 local Players = game:GetService("Players")
@@ -8,10 +9,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
+local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
 local Constants = require(DAC:WaitForChild("Constants"))
+local Utils = require(DAC:WaitForChild("Utils"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local PetService = require(script.Parent:WaitForChild("PetService"))
+local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 
 local PlaytimeService = {}
 
@@ -24,21 +29,29 @@ function PlaytimeService.init()
 				if not data then
 					continue
 				end
-				if not player.Character or not player.Character:FindFirstChild("Humanoid") then
-					continue
-				end
-				local hum = player.Character.Humanoid :: Humanoid
-				if hum.Health <= 0 then
+				AchievementService.checkNightOwlSession(player)
+
+				local char = player.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if not hum or hum.Health <= 0 then
 					continue
 				end
 
-				data.playtimeSecondsSinceGem = (data.playtimeSecondsSinceGem or 0) + 60
-				while data.playtimeSecondsSinceGem >= Constants.PLAYTIME_GEM_INTERVAL do
-					data.playtimeSecondsSinceGem -= Constants.PLAYTIME_GEM_INTERVAL
-					CurrencyService.add(player, "gems", 1, "playtime")
-					Remotes.getEvent("Notification"):FireClient(player, {
+				data.playtimeSecondsSinceBonus = (data.playtimeSecondsSinceBonus or 0) + 60
+				while data.playtimeSecondsSinceBonus >= Constants.PLAYTIME_BONUS_INTERVAL do
+					data.playtimeSecondsSinceBonus -= Constants.PLAYTIME_BONUS_INTERVAL
+					local equippedPets = {}
+					for _, pet in data.pets do
+						if pet.equipped then
+							table.insert(equippedPets, pet)
+						end
+					end
+					local petMult = PetService.getEffectivePetCoinModifier(player, equippedPets)
+					local grant = math.floor(Constants.PLAYTIME_BONUS_BASE_COINS * math.max(1, petMult) + 0.5)
+					CurrencyService.add(player, "coins", grant, "playtime")
+					NotificationDispatchService.notify(player, {
 						type = "success",
-						message = "Playtime bonus: +1 gem!",
+						message = `Playtime bonus: +{Utils.formatNumber(grant)} Coins!`,
 					})
 				end
 				Remotes.getEvent("DataUpdate"):FireClient(player, data)

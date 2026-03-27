@@ -40,12 +40,6 @@ BattlePassConfig.xpPerTier = buildXpPerTier()
 local function C(n: number)
 	return { type = "coins", amount = n }
 end
-local function G(n: number)
-	return { type = "gems", amount = n }
-end
-local function Cr(n: number)
-	return { type = "crystals", amount = n }
-end
 local function N()
 	return { type = "none" }
 end
@@ -74,54 +68,54 @@ end
 -- Full table from Season1_ContentPlan.md §2 "Full 50-Tier Reward Table"
 BattlePassConfig.Tiers = {
 	{ freeReward = C(2500), premiumReward = C(5000) },
-	{ freeReward = N(), premiumReward = G(25) },
+	{ freeReward = N(), premiumReward = C(2500) },
 	{ freeReward = C(1000), premiumReward = SB(1) },
-	{ freeReward = N(), premiumReward = G(50) },
+	{ freeReward = N(), premiumReward = C(5000) },
 	{ freeReward = COS("midnight_trail"), premiumReward = C(5000) },
 	{ freeReward = C(2500), premiumReward = LB(1) },
-	{ freeReward = N(), premiumReward = G(75) },
+	{ freeReward = N(), premiumReward = C(7500) },
 	{ freeReward = C(5000), premiumReward = C(10000) },
 	{ freeReward = N(), premiumReward = SB(2) },
-	{ freeReward = C(10000), premiumReward = Cr(10) },
-	{ freeReward = N(), premiumReward = G(100) },
+	{ freeReward = C(10000), premiumReward = C(10000) },
+	{ freeReward = N(), premiumReward = C(10000) },
 	{ freeReward = C(5000), premiumReward = COS("starlight_trail") },
 	{ freeReward = N(), premiumReward = C(15000) },
 	{ freeReward = C(2500), premiumReward = LB(2) },
-	{ freeReward = C(10000), premiumReward = G(150) },
+	{ freeReward = C(10000), premiumReward = C(15000) },
 	{ freeReward = N(), premiumReward = SB(3) },
 	{ freeReward = C(5000), premiumReward = C(20000) },
-	{ freeReward = N(), premiumReward = G(200) },
+	{ freeReward = N(), premiumReward = C(20000) },
 	{ freeReward = C(7500), premiumReward = LB(3) },
 	{ freeReward = C(15000), premiumReward = TI("night_rider") },
-	{ freeReward = N(), premiumReward = Cr(25) },
-	{ freeReward = C(10000), premiumReward = G(250) },
+	{ freeReward = N(), premiumReward = C(25000) },
+	{ freeReward = C(10000), premiumReward = C(25000) },
 	{ freeReward = N(), premiumReward = C(30000) },
 	{ freeReward = C(5000), premiumReward = SB(5) },
-	{ freeReward = PET("neon_firefly"), premiumReward = G(300) },
+	{ freeReward = PET("neon_firefly"), premiumReward = C(30000) },
 	{ freeReward = N(), premiumReward = C(50000) },
 	{ freeReward = C(10000), premiumReward = LB(5) },
-	{ freeReward = N(), premiumReward = Cr(50) },
-	{ freeReward = C(15000), premiumReward = G(400) },
+	{ freeReward = N(), premiumReward = C(50000) },
+	{ freeReward = C(15000), premiumReward = C(40000) },
 	{ freeReward = COS("headlight_glow_trail"), premiumReward = C(75000) },
-	{ freeReward = N(), premiumReward = Cr(75) },
+	{ freeReward = N(), premiumReward = C(75000) },
 	{ freeReward = C(10000), premiumReward = SB(5) },
-	{ freeReward = N(), premiumReward = G(500) },
+	{ freeReward = N(), premiumReward = C(50000) },
 	{ freeReward = C(20000), premiumReward = LB(5) },
 	{ freeReward = N(), premiumReward = COS("neon_streak_trail") },
 	{ freeReward = C(15000), premiumReward = C(100000) },
-	{ freeReward = N(), premiumReward = Cr(100) },
-	{ freeReward = C(25000), premiumReward = G(750) },
+	{ freeReward = N(), premiumReward = C(100000) },
+	{ freeReward = C(25000), premiumReward = C(75000) },
 	{ freeReward = N(), premiumReward = BD() },
 	{ freeReward = C(20000), premiumReward = PET("shadow_panther") },
-	{ freeReward = N(), premiumReward = Cr(150) },
-	{ freeReward = C(30000), premiumReward = G(1000) },
+	{ freeReward = N(), premiumReward = C(150000) },
+	{ freeReward = C(30000), premiumReward = C(100000) },
 	{ freeReward = N(), premiumReward = C(200000) },
 	{ freeReward = C(25000), premiumReward = LB(10) },
 	{ freeReward = N(), premiumReward = TI("s1_veteran") },
-	{ freeReward = C(50000), premiumReward = Cr(200) },
-	{ freeReward = N(), premiumReward = G(1500) },
+	{ freeReward = C(50000), premiumReward = C(200000) },
+	{ freeReward = N(), premiumReward = C(150000) },
 	{ freeReward = C(40000), premiumReward = C(500000) },
-	{ freeReward = N(), premiumReward = Cr(300) },
+	{ freeReward = N(), premiumReward = C(300000) },
 	{ freeReward = C(75000), premiumReward = CAR("midnight_drifter") },
 }
 

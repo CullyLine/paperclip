@@ -1,0 +1,38 @@
+---
+description: Permanent design specifications for Drive A Car Simulator 3D pets. Apply whenever creating, modifying, rigging, animating, or discussing pet assets, concept art, or the 3D pipeline.
+globs:
+  - memories/DriveACarSimulator/**
+  - memories/3d-experiments/**
+  - decimate.py
+  - assets/pet-*
+alwaysApply: false
+---
+
+# Permanent Design Specs
+
+All 3D pet assets for Drive A Car Simulator follow a strict, documented design system.
+
+**Before creating or modifying any pet asset, read the full spec:**
+
+`memories/DriveACarSimulator/PermanentDesignSpecs.md`
+
+This spec covers:
+
+- Concept art prompt template and mandatory keywords
+- Rarity-to-color mapping (common → mythic)
+- Visual identity of produced pets
+- Hunyuan3D v3 settings (NEVER use v2)
+- Decimation parameters (340 faces, voxel/bake settings)
+- UniRig rigging pipeline (CPU skeleton, GPU skin, path bridging) — **offline end product: rigged GLB**
+- **In-game** animation: `PetAnimator.luau` + `PetController.luau` (idle / walk / float; procedural Luau)
+- Pet following, replication, settings
+- File naming conventions through **`{name}-game-340_rigged.glb`** (no Blender animation export required)
+- Quality targets and produced pet inventory
+
+**Non-negotiable rules:**
+
+1. Every pet concept uses the exact prompt template from the spec
+2. Use `pet-designs-rarity-tiers.png` as style reference for all new concept art
+3. Target ~340 faces and the decimation settings in the spec
+4. Offline pipeline ends at **rigged GLB**; animate in **Roblox Studio** (Luau), not Blender batch scripts
+5. Follow file naming: `{name}-highpoly.glb` → `{name}-game-340.glb` → `{name}-game-340_rigged.glb` → import Studio

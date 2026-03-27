@@ -6,12 +6,33 @@
 		{OLD_RANK}    – player's previous rank
 		{NEW_RANK}    – player's new rank after climbing
 		{NEXT_RANK}   – the rank directly above the player
-		{GAP}         – coins/distance remaining to next rank
+		{GAP}         – distance (formatted) remaining to next rank
 		{RIVAL_NAME}  – display name of the rival near your rank
 		{RIVAL_RANK}  – the rank number of an approaching rival
+
+	Distance values use studs (canonical sim unit); HUD speed stays studs/s — see NumberFormattingStyleGuide.
 ]]
 
+type EmptyStatePair = { title: string, body: string? }
+
 local LeaderboardTextConfig = {}
+
+-- World SurfaceGui tabs (keep short — narrow header).
+LeaderboardTextConfig.TabDistanceLabel = "Distance"
+LeaderboardTextConfig.TabRebirthsLabel = "Rebirths"
+LeaderboardTextConfig.RefreshButtonLabel = "Refresh"
+LeaderboardTextConfig.LoadingStatus = "Loading\u{2026}"
+
+-- Empty board: title + optional body (Phase 4 headline/body pattern on single status label).
+LeaderboardTextConfig.EmptyDistance = {
+	{ title = "No rankings yet", body = "Total distance ranks the board — your next run counts!" },
+	{ title = "The board is wide open", body = "Drive to put your name in lights!" },
+}
+
+LeaderboardTextConfig.EmptyRebirths = {
+	{ title = "No rebirth rankings yet", body = "Rebirth and climb — your count shows here." },
+	{ title = "Nobody's on this chart yet", body = "Reset and grind — you'll land on the board." },
+}
 
 LeaderboardTextConfig.RankUpMessages = {
 	"You just CRUSHED rank #{OLD_RANK}! Welcome to #{NEW_RANK}!",
@@ -23,7 +44,7 @@ LeaderboardTextConfig.RankUpMessages = {
 	"#{NEW_RANK}?! You weren't here five minutes ago. Respect.",
 	"Rank #{OLD_RANK} didn't stand a chance. You own #{NEW_RANK} now.",
 	"Climbed to #{NEW_RANK}! The top isn't far — floor it!",
-	"#{OLD_RANK} → #{NEW_RANK}. Someone's on a rampage!",
+	"#{OLD_RANK} → #{NEW_RANK}. Someone's on a heater!",
 	"You just leapfrogged into #{NEW_RANK}. The board is shaking!",
 	"Rank #{NEW_RANK}, baby! They'll remember this run.",
 }
@@ -47,14 +68,14 @@ LeaderboardTextConfig.CloseToNextRank = {
 	"#{NEXT_RANK} is practically begging you to take it. {GAP} left!",
 	"Don't stop now — {GAP} separates you from #{NEXT_RANK}!",
 	"You can TASTE rank #{NEXT_RANK}. Gap: {GAP}. Finish it!",
-	"This close to #{NEXT_RANK} and you're gonna quit? {GAP} to go!",
+	"Almost #{NEXT_RANK}! {GAP} left — one solid run could do it!",
 }
 
 LeaderboardTextConfig.RivalApproaching = {
 	"#{RIVAL_RANK} is gaining on you! Drive harder!",
 	"{RIVAL_NAME} is creeping up — defend your spot!",
 	"Watch your back! #{RIVAL_RANK} wants your rank!",
-	"Someone at #{RIVAL_RANK} is coming for you. Move!",
+	"Someone at #{RIVAL_RANK} is closing in — keep the pace!",
 	"{RIVAL_NAME} is closing in fast. One run could flip you!",
 	"Your spot is in danger — #{RIVAL_RANK} is RIGHT behind you!",
 	"You're about to get passed! {RIVAL_NAME} won't slow down!",

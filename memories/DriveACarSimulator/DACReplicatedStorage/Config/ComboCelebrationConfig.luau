@@ -132,21 +132,21 @@ ComboCelebrationConfig.Bodies = {
 --------------------------------------------------------------------------
 
 ComboCelebrationConfig.ComboBreak = {
-	"x{COMBO} combo broken! But you banked +{COINS} bonus coins!",
-	"COMBO LOST at x{COMBO}! Still earned +{COINS} extra. Not bad!",
-	"Streak snapped at x{COMBO}! +{COINS} bonus coins secured.",
-	"The combo falls at x{COMBO}! You still pocketed +{COINS}!",
-	"x{COMBO} combo gone — but +{COINS} coins say it was WORTH IT!",
-	"CRASH! x{COMBO} ended! The +{COINS} bonus lives on, though!",
+	"x{COMBO} combo ended — you still banked +{COINS} bonus coins!",
+	"Combo dropped at x{COMBO}! +{COINS} bonus coins still yours!",
+	"Streak snapped at x{COMBO} — +{COINS} bonus secured; not a wash!",
+	"The chain broke at x{COMBO}! You still pocketed +{COINS}!",
+	"x{COMBO} is gone — but +{COINS} coins from that run still count!",
+	"Run ended the streak at x{COMBO} — +{COINS} bonus sticks with you!",
 }
 
 ComboCelebrationConfig.ComboBreakMotivation = {
-	"Build it back! The next combo could be BIGGER!",
-	"One crash doesn't define you — GO AGAIN!",
-	"Reset and RUN! Your best combo is still ahead!",
-	"Combo down, but your skills are UP! Chain it back!",
-	"That was JUST the warm-up. The real combo starts NOW!",
-	"Pick it up! The road forgives — start another chain!",
+	"Build it back — the next chain can climb higher!",
+	"One rough moment — the next lap is a fresh start!",
+	"Reset and drive — your best combo might be the next one!",
+	"Combo down, skills aren't — chain it when you're ready!",
+	"Warm-up's done — the real streak could be next!",
+	"The road's still there — another chain starts anytime!",
 }
 
 --------------------------------------------------------------------------

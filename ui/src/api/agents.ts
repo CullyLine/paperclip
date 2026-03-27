@@ -131,8 +131,8 @@ export const agentsApi = {
       data,
     ),
   invoke: (id: string, companyId?: string) => api.post<HeartbeatRun>(agentPath(id, companyId, "/heartbeat/invoke"), {}),
-  run: (id: string, companyId?: string) =>
-    api.post<{ status: string; runId: string | null }>(agentPath(id, companyId, "/run"), {}),
+  run: (id: string, companyId?: string, runGoal?: string) =>
+    api.post<{ status: string; runId: string | null }>(agentPath(id, companyId, "/run"), runGoal ? { runGoal } : {}),
   sleep: (id: string, companyId?: string) =>
     api.post<{ status: string }>(agentPath(id, companyId, "/sleep"), {}),
   reboot: (id: string, companyId?: string) =>

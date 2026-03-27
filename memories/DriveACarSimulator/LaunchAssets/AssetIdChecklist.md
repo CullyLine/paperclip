@@ -8,7 +8,7 @@ Every `rbxassetid://0` placeholder in the codebase, mapped to a human-readable d
 
 ## 1. Currency Icons (Constants.luau)
 
-**File:** `DACReplicatedStorage/Constants.luau` lines 36–39
+**File:** `DACReplicatedStorage/Constants.luau` — `Constants.CURRENCY_DISPLAY` (approx. lines 75–81; see POLA-95 comment above the table)
 
 | Code Slot | Currency | Color | Suggested Filename | Asset Description |
 |-----------|----------|-------|--------------------|-------------------|
@@ -23,7 +23,7 @@ Every `rbxassetid://0` placeholder in the codebase, mapped to a human-readable d
 
 ## 2. Sound Assets (SoundController.luau)
 
-**File:** `DACStarterPlayerScripts/Controllers/SoundController.luau` lines 293–344
+**File:** `DACStarterPlayerScripts/Controllers/SoundController.luau` — default `SoundController.register(…, "rbxassetid://…", …)` IDs live in the `init` registration block (approx. lines 860–1020+); `hydrateFromReplicatedStorageAudio()` (approx. line 248) overlays `ReplicatedStorage.Audio` when present
 **Full manifest:** [`Audio/MANIFEST.md`](../Audio/MANIFEST.md) — contains per-file Splice search hints, bitrate guidance, and upload notes.
 
 `SoundController.hydrateFromReplicatedStorageAudio()` reads `ReplicatedStorage.Audio` at init and overwrites `rbxassetid://0` placeholders automatically. The Sound's `Name` must match the registry key (or have an alias in `AUDIO_NAME_ALIASES`).
@@ -157,6 +157,8 @@ Runtime resolution: `EasterEggService` looks up `imageKey` in `ReplicatedStorage
 **File:** `DACReplicatedStorage/Config/EasterEggConfig.luau` line 331  
 **Consumer:** `DACReplicatedFirst/LoadingScreen.local.luau` — picks one at random.
 
+**Full per-slot art direction (creative brief):** `docs/marketing/LoadingScreenSplashSlotsSpec.md` — expands this table into subject hierarchy, safe zones, palette, and avoid lists for each filename below.
+
 `EasterEggConfig.LoadingScreenImages` is currently an empty table `{}`. Board should populate it with 3–4 `rbxassetid://` strings once images are uploaded.
 
 | Slot | Content Type | Suggested Filename | Notes |
@@ -165,6 +167,21 @@ Runtime resolution: `EasterEggService` looks up `imageKey` in `ReplicatedStorage
 | 2 | Logo / Branding | `loading_logo.png` | Studio identity. Clean on dark background. |
 | 3 | Character / Avatar | `loading_character.png` | Personal feel. |
 | 4 | Artistic / Abstract | `loading_abstract.png` | Eye candy while waiting. |
+
+### 3d. Inventory Tab Bar — shop / reward surface icons (POLA-619)
+
+**File:** `DACReplicatedStorage/Config/InventoryTabBarIconConfig.luau`  
+**Wired by:** `DACStarterPlayerScripts/Controllers/UIController.luau` (`TAB_BUTTONS`).
+
+| Tab | Before (issue) | After | Notes |
+|-----|------------------|-------|--------|
+| Stats | `rbxassetid://15473783825` (duplicate of Quests) | `rbxassetid://7733968421` | Distinct chart/leaderboard-style silhouette; **verify in Studio** — replace with a Board upload if this ID is unavailable to your Creator account. |
+| Quests | `rbxassetid://15473783825` | *(unchanged)* | Kept as the quest-scroll icon. |
+| Codes | `rbxassetid://4871215849` | *(unchanged)* | Different ID family than Egg/Quest/BP; optional **re-export** to a matched 128×128 silhouette set for pixel-crisp tabs at `ScaleType.Fit`. |
+
+**Corner-radius alignment (runtime-generated chips):** Store FOMO badges + “Owned” chip and Battle Pass tier claim buttons now use **8px** `UICorner` (was 6px) to match the DAC UI kit (cards/buttons = 8px per `AGENTS.md`).
+
+**Currency HUD:** `Constants.CURRENCY_DISPLAY.*.icon` remain `rbxassetid://0` until §1 uploads land — when wired, use **128×128 PNG**, `ScaleType.Fit`, and tint via existing color tokens so coins/gems/crystals/skulls read as clearly distinct **and** premium tiers feel richer (warmer glow / sharper art for higher currencies).
 
 ---
 
@@ -180,6 +197,20 @@ These are not `rbxassetid://0` code slots — they are external uploads to the R
 | Thumbnail 3 | 1920×1080 | `thumb_rare_pet_chase.png` | Rare pet chase — Cosmic Whale or Golden Dragon reveal. |
 | Thumbnail 4 | 1920×1080 | `thumb_stylxus_social.png` | Stylxus social proof (pending Stylxus approval). |
 | Thumbnail 5 (backup) | 1920×1080 | `thumb_update_badge.png` | Update badge — fallback if Stylxus thumbnail isn't ready. |
+
+---
+
+## 5. Runtime fallbacks (not Board upload slots)
+
+These are **not** missing assets — they default to `rbxassetid://0` when data omits an icon so UI does not crash.
+
+| Location | Behavior |
+|----------|----------|
+| `DACServerScriptService/Services/DevProductService.luau` | `iconId` falls back to `rbxassetid://0` if unset in product def. |
+| `DACServerScriptService/Services/GamePassService.luau` | Same for game pass `iconId`. |
+| `DACStarterPlayerScripts/Controllers/PurchaseThankYouController.luau` | Thank-you modal image uses payload `iconId` or `rbxassetid://0`. |
+
+`AchievementTrophySpec.luau` may still describe `rbxassetid://0` in type comments — trophy art is assigned in Studio / data, not a separate manifest row.
 
 ---
 
