@@ -13,19 +13,26 @@ local REMOTE_EVENTS = {
 	"StartRun",
 	"EndRun",
 	"RunUpdate",
+	"CheckpointHit",
 
 	"BuyCar",
 	"EquipCar",
-	"UpgradeStat",
 
 	"BuyEgg",
 	"HatchEgg",
 	"EquipPet",
 	"UnequipPet",
+	"UnequipAllPets",
+	"DeletePet",
 	"FusePets",
 	"FusionResult",
 
 	"Rebirth",
+	"BuyRebirthUpgrade",
+
+	"StartTraining",
+	"StopTraining",
+	"TrainingTick",
 
 	"UnlockWorld",
 	"ChangeWorld",
@@ -33,7 +40,6 @@ local REMOTE_EVENTS = {
 
 	"ClaimDailyReward",
 	"ClaimBattlePassTier",
-	-- Server ack for tier claim (success/failure) so client can clear pending UI (POLA-527)
 	"BattlePassClaimResult",
 	"RedeemCode",
 
@@ -49,28 +55,21 @@ local REMOTE_EVENTS = {
 	"CurrencyUpdate",
 	"DataUpdate",
 	"Notification",
-	-- Robux / GamePass purchase confirmed (server → client celebration)
 	"PurchaseCelebration",
-	-- Full post-purchase thank-you overlay (server → client)
 	"PurchaseComplete",
-	-- Thank-you dismissed; server may flush queued SpendMilestone payloads (client → server)
 	"PurchaseThankYouAck",
 	"LaunchEventState",
 
 	"EasterEggDiscovered",
 
-	-- Leaderboard rank improved (server → client VFX)
 	"RankUpNotification",
 
-	-- First-time / spend / streak milestone ceremonies (server → client VFX)
 	"FirstTimeCeremony",
 	"SpendMilestone",
 	"StreakMilestone",
 
-	-- Client reports lane near-miss during a run; server grants combo-scaled coins (server → client echo for VFX)
 	"NearMissClaim",
 
-	-- Server-wide rare+ hatch social proof (server → all clients)
 	"ServerDropFeed",
 
 	"TutorialStep",
@@ -82,14 +81,11 @@ local REMOTE_EVENTS = {
 
 	"AdminCommand",
 
-	-- Group rewards: claim fanfare (server → client), dismiss join prompt (client → server)
 	"GroupRewardClaimed",
 	"DismissGroupJoinPrompt",
 
-	-- Friend play bonus multiplier (server → client HUD)
 	"FriendBonusUpdate",
 
-	-- Cross-player pet visibility (server → all clients)
 	"PetEquipSync",
 }
 

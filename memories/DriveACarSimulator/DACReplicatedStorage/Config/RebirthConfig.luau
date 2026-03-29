@@ -6,17 +6,18 @@ RebirthConfig.BaseCost = 1_000_000
 RebirthConfig.CostMultiplier = 1.5
 
 RebirthConfig.Rewards = {
-	speedBoost = 5,
-	powerBoost = 5,
-	gasBoost = 5,
+	trainingBonusPerRebirth = 10,
+	gemsGranted = 100,
 }
 
 RebirthConfig.ResetOnRebirth = {
 	coins = true,
-	carUpgrades = true,
+	trainedPower = true,
 	cars = false,
 	pets = false,
-	eggs = true,
+	eggs = false,
 }
+
+RebirthConfig.SkipTiers = { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }
 
 return RebirthConfig

@@ -159,7 +159,7 @@ end
 -- ============= PER-PAGE WIRING =============
 
 local function wireCurrencyPage(pg: Instance)
-	for _, pair in { {"Coins", "coins"}, {"SandGranules", "sandGranules"}, {"Icycles", "icycles"}, {"MagmaCores", "magmaCores"}, {"Infinitium", "infinitium"} } do
+	for _, pair in { {"Coins", "coins"}, {"Gems", "gems"} } do
 		local cur = pair[1]
 		local lower = pair[2]
 		local amounts = { ["1K"] = 1000, ["10K"] = 10000, ["100K"] = 100000, ["1M"] = 1000000, ["10M"] = 10000000 }

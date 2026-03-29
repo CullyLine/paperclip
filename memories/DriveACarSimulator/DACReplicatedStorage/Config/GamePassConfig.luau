@@ -87,6 +87,13 @@ GamePassConfig.Passes = {
 		description = "Permanent: rebirths cost 25% fewer coins. Reach the next multiplier tier before the rest of the lobby.",
 		gamePassId = 0,
 	},
+	unlimited_rebirths = {
+		id = "unlimited_rebirths",
+		name = "Unlimited Rebirths",
+		robuxPrice = 999,
+		description = "Permanent: unlock the 'Max Rebirths' button — rebirth as many times as you can afford in one click.",
+		gamePassId = 0,
+	},
 	coin_boost = {
 		id = "coin_boost",
 		name = "Coin Boost",

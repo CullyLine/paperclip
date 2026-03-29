@@ -32,6 +32,7 @@ local ClientRemoteDebounce = require(DAC:WaitForChild("ClientRemoteDebounce"))
 local RebirthClientState = require(DAC:WaitForChild("RebirthClientState"))
 local MicrocopyConfig = require(DAC:WaitForChild("Config"):WaitForChild("MicrocopyConfig"))
 local InventoryTabBarIconConfig = require(DAC:WaitForChild("Config"):WaitForChild("InventoryTabBarIconConfig"))
+local RebirthUpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthUpgradeConfig"))
 
 local UIController = {}
 
@@ -90,8 +91,8 @@ local actionBar: Frame
 local cachedData: any = nil
 local registeredPanels: { [string]: Frame } = {}
 
-local PANEL_NAMES = { "Inventory", "Store", "Settings", "Codes", "Rebirth", "EggStore" }
-local INV_SUB_PANELS = { "Pets", "Eggs", "Cosmetics", "Stats" }
+local PANEL_NAMES = { "Inventory", "Store", "Settings", "Codes", "Rebirth", "EggStore", "RebirthUpgrades", "Daily", "World", "Potions", "Items" }
+local INV_SUB_PANELS = { "Pets", "Eggs", "Cars", "Stats" }
 
 -- Single source: Constants.RARITY_COLORS (POLA-629 token sheet)
 local RARITY_COLORS: { [string]: Color3 } = Constants.RARITY_COLORS
@@ -350,27 +351,23 @@ local function fillHoverData(hover: Frame, petData: any)
 	end
 	local nicknameLabel = hover:FindFirstChild("Nickname")
 	if nicknameLabel and nicknameLabel:IsA("TextLabel") then
-		nicknameLabel.Text = petData.nickname and ('"' .. petData.nickname .. '"') or ""
+		nicknameLabel.Visible = false
 	end
 	local rarityLabel = hover:FindFirstChild("Rarity")
 	if rarityLabel and rarityLabel:IsA("TextLabel") then
 		rarityLabel.Text = def.rarity:sub(1, 1):upper() .. def.rarity:sub(2)
 	end
-	local powerLabel = hover:FindFirstChild("Power")
-	if powerLabel and powerLabel:IsA("TextLabel") then
-		powerLabel.Text = tostring(petData.power or def.basePower)
-	end
-	local gasLabel = hover:FindFirstChild("Gas")
+	local gasLabel = hover:FindFirstChild("Gas") or hover:FindFirstChild("Power")
 	if gasLabel and gasLabel:IsA("TextLabel") then
-		gasLabel.Text = "+0"
+		gasLabel.Text = "Gas: +" .. tostring(petData.power or def.basePower)
 	end
 	local speedLabel = hover:FindFirstChild("Speed")
 	if speedLabel and speedLabel:IsA("TextLabel") then
-		speedLabel.Text = "+0"
+		speedLabel.Visible = false
 	end
 	local fuseLabel = hover:FindFirstChild("Fuse")
 	if fuseLabel and fuseLabel:IsA("TextLabel") then
-		fuseLabel.Text = tostring(petData.fuseLevel or 0)
+		fuseLabel.Visible = false
 	end
 
 	local equipBtn = getOrCreateEquipButton(hover)
@@ -384,6 +381,9 @@ local function fillHoverData(hover: Frame, petData: any)
 	hoverEquipConn = equipBtn.MouseButton1Click:Connect(function()
 		local uid = hoveredPetUid
 		if not uid then return end
+		if cachedData and cachedData.settings and cachedData.settings.petLock then
+			return
+		end
 		SoundFacade.playOneShot("click")
 		if isEquipped then
 			RemoteFailSafe.fireEvent("PET", "UnequipPet", uid)
@@ -876,6 +876,15 @@ local function refreshEggBuyAffordState()
 	startEggBuyPrimaryJuice(eggBuy)
 end
 
+local function getPlayerMaxHatchCount(): number
+	if not cachedData then return Constants.BASE_HATCH_COUNT end
+	local upgradePoints = 0
+	if cachedData.rebirthUpgrades and type(cachedData.rebirthUpgrades.moreEggsAtOnce) == "number" then
+		upgradePoints = cachedData.rebirthUpgrades.moreEggsAtOnce
+	end
+	return math.min(Constants.BASE_HATCH_COUNT + upgradePoints, Constants.MAX_HATCH_COUNT)
+end
+
 local function refreshEggOpenPromptAffordState()
 	local invPanel = panels:FindFirstChild("Inventory")
 	if not invPanel then
@@ -886,17 +895,37 @@ local function refreshEggOpenPromptAffordState()
 		return
 	end
 	local eggs = cachedData.eggs
-	local count = 0
+	local owned = 0
 	if type(eggs) == "table" and type(eggs[selectedEggId]) == "number" then
-		count = eggs[selectedEggId]
+		owned = eggs[selectedEggId]
 	end
+
+	local maxHatch = getPlayerMaxHatchCount()
+	local maxAvailable = math.min(owned, maxHatch)
+
 	local open1 = prompt:FindFirstChild("Open1")
 	if open1 and open1:IsA("GuiButton") then
-		styleEggBuyButton(open1, count >= 1, true)
+		styleEggBuyButton(open1, owned >= 1, true)
 	end
 	local open3 = prompt:FindFirstChild("Open3")
 	if open3 and open3:IsA("GuiButton") then
-		styleEggBuyButton(open3, count >= 3, false)
+		styleEggBuyButton(open3, owned >= 3, false)
+	end
+	local open10 = prompt:FindFirstChild("Open10")
+	if open10 and open10:IsA("GuiButton") then
+		styleEggBuyButton(open10, owned >= 10, false)
+	end
+	local openMax = prompt:FindFirstChild("OpenMax")
+	if openMax and openMax:IsA("GuiButton") then
+		styleEggBuyButton(openMax, maxAvailable >= 1, false)
+		if openMax:IsA("TextButton") then
+			openMax.Text = "Open " .. tostring(maxAvailable)
+		else
+			local lbl = openMax:FindFirstChild("TextLabel")
+			if lbl and lbl:IsA("TextLabel") then
+				lbl.Text = "Open " .. tostring(maxAvailable)
+			end
+		end
 	end
 end
 
@@ -1341,11 +1370,29 @@ function UIController.openPanel(name: string)
 	end)
 end
 
+local lastToggleTime = 0
 function UIController.togglePanel(name: string)
+	local now = os.clock()
+	if now - lastToggleTime < 0.25 then
+		return
+	end
+	lastToggleTime = now
 	if activePanel == name then
 		UIController.closeAll()
 	else
 		UIController.openPanel(name)
+	end
+end
+
+function UIController.showPanel(name: string)
+	if activePanel ~= name then
+		UIController.openPanel(name)
+	end
+end
+
+function UIController.hidePanel(name: string)
+	if activePanel == name then
+		UIController.closeAll()
 	end
 end
 
@@ -1397,6 +1444,7 @@ function UIController.showInvSub(sub: string)
 	if sub == "Pets" then UIController.populatePets() end
 	if sub == "Eggs" then UIController.populateEggs() end
 	if sub == "Stats" then UIController.populateStats() end
+	if sub == "Cars" then UIController.populateCars() end
 end
 
 function UIController.showStoreTab(tab: string)
@@ -1617,11 +1665,27 @@ function UIController.populatePets()
 			end
 		end
 
+		local petCount = 0
+		for _ in pets do
+			petCount += 1
+		end
+		local equippedCount = 0
+		for _, p in pets do
+			if p.equipped then
+				equippedCount += 1
+			end
+		end
+		local maxSlots = cachedData.maxPetSlots or 8
+
 		local header = main:FindFirstChild("Header")
 		if header then
 			local total = header:FindFirstChild("Total")
 			if total and total:IsA("TextLabel") then
-				total.Text = tostring(#pets) .. " Pets"
+				total.Text = tostring(petCount) .. " Pets"
+			end
+			local slotCounter = header:FindFirstChild("SlotCounter")
+			if slotCounter and slotCounter:IsA("TextLabel") then
+				slotCounter.Text = tostring(equippedCount) .. "/" .. tostring(maxSlots) .. " Equipped"
 			end
 		end
 	end
@@ -1722,12 +1786,28 @@ function UIController.populateStats()
 
 	local stats = cachedData.stats or {}
 
+	local equippedPets = {}
+	if type(cachedData.pets) == "table" then
+		for _, pet in cachedData.pets do
+			if pet.equipped then
+				table.insert(equippedPets, pet)
+			end
+		end
+	end
+	local petMod = Utils.calculatePetModifier(equippedPets)
+	local petModStr = string.format("%.0f%%", (petMod - 1) * 100)
+
+	local totalPlaytime = stats.totalPlaytimeSeconds or 0
+	local hours = math.floor(totalPlaytime / 3600)
+	local minutes = math.floor((totalPlaytime % 3600) / 60)
+	local playtimeStr = hours > 0 and (tostring(hours) .. "h " .. tostring(minutes) .. "m") or (tostring(minutes) .. "m")
+
 	local fields: { [string]: string } = {
-		DiscoveredPets = tostring(stats.discoveredPets or 0),
-		EarnedCoins = Utils.formatNumber(stats.earnedCoins or 0),
-		TotalEggs = tostring(stats.totalEggs or 0),
-		TotalDistance = string.format("%.1f mi", (stats.totalDistance or 0) / 5280),
-		["Total Rebirths"] = tostring(cachedData.rebirths or 0),
+		PetMultiplier = petModStr,
+		TotalRebirths = tostring(cachedData.rebirths or 0),
+		TotalCoinsEarned = Utils.formatNumber(stats.totalCoinsEarned or 0),
+		TotalTimePlayed = playtimeStr,
+		TotalRobuxSpent = Utils.formatNumber(cachedData.totalRobuxSpent or 0),
 	}
 
 	for name, text in fields do
@@ -1751,21 +1831,99 @@ function UIController.populateRebirth()
 		costLabel.Text = Utils.formatNumber(cost)
 	end
 
-	
+	local powerLabel = rebirthPanel:FindFirstChild("Power")
+	if powerLabel and powerLabel:IsA("TextLabel") then
+		powerLabel.Text = "+" .. tostring(RebirthConfig.Rewards.trainingBonusPerRebirth) .. "% Power/tick"
+	end
+
+	local gemsLabel = rebirthPanel:FindFirstChild("Gems") or rebirthPanel:FindFirstChild("GemsReward")
+	if gemsLabel and gemsLabel:IsA("TextLabel") then
+		gemsLabel.Text = "+" .. tostring(RebirthConfig.Rewards.gemsGranted) .. " Gems"
+	end
+
+	local trainedPowerLabel = rebirthPanel:FindFirstChild("TrainedPower")
+	if trainedPowerLabel and trainedPowerLabel:IsA("TextLabel") then
+		trainedPowerLabel.Text = "Trained Power: " .. Utils.formatNumber(cachedData.trainedPower or 0) .. " (will reset)"
+	end
+
+	local currentGemsLabel = rebirthPanel:FindFirstChild("CurrentGems")
+	if currentGemsLabel and currentGemsLabel:IsA("TextLabel") then
+		currentGemsLabel.Text = "Gems: " .. Utils.formatNumber(cachedData.gems or 0)
+	end
 
 	local speedLabel = rebirthPanel:FindFirstChild("Speed")
 	if speedLabel and speedLabel:IsA("TextLabel") then
-		speedLabel.Text = "+" .. tostring(RebirthConfig.Rewards.speedBoost) .. "%"
+		speedLabel.Visible = false
 	end
-
-	local powerLabel = rebirthPanel:FindFirstChild("Power")
-	if powerLabel and powerLabel:IsA("TextLabel") then
-		powerLabel.Text = "+" .. tostring(RebirthConfig.Rewards.powerBoost) .. "%"
-	end
-
 	local gasLabel = rebirthPanel:FindFirstChild("Gas")
 	if gasLabel and gasLabel:IsA("TextLabel") then
-		gasLabel.Text = "+" .. tostring(RebirthConfig.Rewards.gasBoost) .. "%"
+		gasLabel.Visible = false
+	end
+end
+
+function UIController.populateCars()
+	if not cachedData then return end
+	local invPanel = panels:FindFirstChild("Inventory")
+	if not invPanel then return end
+	local carsPanel = invPanel:FindFirstChild("Cars")
+	if not carsPanel then return end
+	local main = carsPanel:FindFirstChild("Main") :: ScrollingFrame
+	if not main then return end
+
+	local carScroll = main:FindFirstChild("Inventory") or main:FindFirstChild("Cars") :: ScrollingFrame
+	if not carScroll then
+		carScroll = main
+	end
+
+	local template = findTemplate(carScroll, "CarTemplate")
+	clearChildren(carScroll, "CarTemplate")
+
+	local ownedCars = cachedData.cars or {}
+	local equippedCar = cachedData.equippedCar
+
+	for carId, ownedCar in ownedCars do
+		local carDef = CarConfig.Cars[carId]
+		if not carDef then continue end
+		if not template then continue end
+
+		local item = template:Clone()
+		item.Name = carId
+		item.Visible = true
+
+		local nameLabel = item:FindFirstChild("Name") or item:FindFirstChild("TextLabel")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = carDef.name
+		end
+
+		local gasLabel = item:FindFirstChild("Gas")
+		if gasLabel and gasLabel:IsA("TextLabel") then
+			gasLabel.Text = tostring(carDef.baseStats.gas) .. " GAL"
+		end
+		local powerLabel = item:FindFirstChild("Power")
+		if powerLabel and powerLabel:IsA("TextLabel") then
+			local effectivePower = carDef.baseStats.power + (cachedData.trainedPower or 0)
+			powerLabel.Text = tostring(carDef.baseStats.power) .. " +" .. tostring(cachedData.trainedPower or 0)
+		end
+		local accelLabel = item:FindFirstChild("Acceleration")
+		if accelLabel and accelLabel:IsA("TextLabel") then
+			accelLabel.Text = tostring(carDef.baseStats.acceleration) .. "s"
+		end
+
+		local isEquipped = equippedCar == carId
+		local equipBtn = item:FindFirstChild("EquipButton") or item:FindFirstChild("Equip")
+		if equipBtn and equipBtn:IsA("TextButton") then
+			equipBtn.Text = isEquipped and "Equipped" or "Equip"
+			equipBtn.BackgroundColor3 = isEquipped and Color3.fromRGB(80, 80, 100) or Color3.fromRGB(80, 180, 80)
+			if not isEquipped then
+				local eid = carId
+				equipBtn.MouseButton1Click:Connect(function()
+					SoundFacade.playOneShot("click")
+					RemoteFailSafe.fireEvent("CAR", "EquipCar", eid)
+				end)
+			end
+		end
+
+		item.Parent = carScroll
 	end
 end
 
@@ -2081,6 +2239,7 @@ function UIController.onDataUpdate(data: any)
 		if activeInvSub == "Pets" then UIController.populatePets() end
 		if activeInvSub == "Eggs" then UIController.populateEggs() end
 		if activeInvSub == "Stats" then UIController.populateStats() end
+		if activeInvSub == "Cars" then UIController.populateCars() end
 	end
 	if activePanel == "Rebirth" then UIController.populateRebirth() end
 
@@ -2172,11 +2331,11 @@ local function resolveTrophyIcon(): string
 end
 
 local TAB_BUTTONS = {
-	{ name = "EggShopTab", icon = InventoryTabBarIconConfig.eggShop, panelName = "EggStore", order = 20 },
-	{ name = "WorldsTab", icon = "rbxassetid://91664976763919", panelName = "worlds", order = 22 },
 	{ name = "CodesTab", icon = InventoryTabBarIconConfig.codes, panelName = "Codes", order = 40 },
 	{ name = "Stats", icon = InventoryTabBarIconConfig.quests, invSub = "Stats", order = 15 },
 	{ name = "TrophyTab", icon = "", panelName = "trophyCase", order = 25 },
+	{ name = "PotionsTab", icon = "rbxassetid://0", panelName = "Potions", order = 30 },
+	{ name = "ItemsTab", icon = "rbxassetid://0", panelName = "Items", order = 35 },
 }
 
 local function wireInventoryTabBar()
@@ -2188,7 +2347,7 @@ local function wireInventoryTabBar()
 	local subMap: { [string]: string } = {
 		Pets = "Pets",
 		Eggs = "Eggs",
-		Cosmetics = "Cosmetics",
+		Cars = "Cars",
 	}
 
 	local panelMap: { [string]: string } = {
@@ -2287,24 +2446,40 @@ local function wireEggPromptButtons()
 	local prompt = invPanel:FindFirstChild("EggOpenPrompt") :: Frame
 	if not prompt then return end
 
+	local function fireHatchAndClose(count: number)
+		if not selectedEggId then return end
+		if RemoteFailSafe.fireEvent("HATCH", "HatchEgg", selectedEggId, count) then
+			prompt.Visible = false
+			UIController.closeAllInstant()
+		end
+	end
+
 	local open1 = prompt:FindFirstChild("Open1")
-	if open1 and open1:IsA("ImageButton") then
-		open1.MouseButton1Click:Connect(function()
-			if selectedEggId then
-				if RemoteFailSafe.fireEvent("HATCH", "HatchEgg", selectedEggId, 1) then
-					prompt.Visible = false
-				end
-			end
-		end)
+	if open1 and open1:IsA("GuiButton") then
+		open1.MouseButton1Click:Connect(function() fireHatchAndClose(1) end)
 	end
 
 	local open3 = prompt:FindFirstChild("Open3")
-	if open3 and open3:IsA("ImageButton") then
-		open3.MouseButton1Click:Connect(function()
-			if selectedEggId then
-				if RemoteFailSafe.fireEvent("HATCH", "HatchEgg", selectedEggId, 3) then
-					prompt.Visible = false
-				end
+	if open3 and open3:IsA("GuiButton") then
+		open3.MouseButton1Click:Connect(function() fireHatchAndClose(3) end)
+	end
+
+	local open10 = prompt:FindFirstChild("Open10")
+	if open10 and open10:IsA("GuiButton") then
+		open10.MouseButton1Click:Connect(function() fireHatchAndClose(10) end)
+	end
+
+	local openMax = prompt:FindFirstChild("OpenMax")
+	if openMax and openMax:IsA("GuiButton") then
+		openMax.MouseButton1Click:Connect(function()
+			local maxHatch = getPlayerMaxHatchCount()
+			local owned = 0
+			if cachedData and cachedData.eggs and type(cachedData.eggs[selectedEggId]) == "number" then
+				owned = cachedData.eggs[selectedEggId]
+			end
+			local count = math.min(owned, maxHatch)
+			if count >= 1 then
+				fireHatchAndClose(count)
 			end
 		end)
 	end
@@ -2369,9 +2544,8 @@ local function wirePetActions()
 	if none and none:IsA("ImageButton") then
 		none.MouseButton1Click:Connect(function()
 			if not cachedData then return end
-			for _, eq in ipairs(buildEquippedPetSlots(cachedData)) do
-				RemoteFailSafe.fireEvent("PET", "UnequipPet", eq)
-			end
+			SoundFacade.playOneShot("click")
+			RemoteFailSafe.fireEvent("PET", "UnequipAllPets")
 		end)
 	end
 end
@@ -2532,10 +2706,6 @@ local WORLD_DISPLAY: { [string]: string } = {
 
 local CURRENCY_PREFIX: { [string]: string } = {
 	coins = "$",
-	sandGranules = "$",
-	icycles = "$",
-	magmaCores = "$",
-	infinitium = "$",
 }
 
 local LAYOUT_CLASSES: { [string]: boolean } = {

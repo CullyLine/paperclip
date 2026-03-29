@@ -13,10 +13,8 @@ local EconomyLogService = require(script.Parent:WaitForChild("EconomyLogService"
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
-local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
 local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
--- local QuestService = require(script.Parent:WaitForChild("QuestService"))
 
 local RebirthService = {}
 
@@ -33,67 +31,73 @@ function RebirthService.getRebirthCost(rebirths: number): number
 	return Utils.calculateRebirthCost(rebirths, RebirthConfig.BaseCost, RebirthConfig.CostMultiplier)
 end
 
--- expectedRebirths: client snapshot of `data.rebirths` before requesting. Enables idempotent duplicate handling:
--- if server already applied (rebirths == expected + 1), return success without re-running rewards/quests.
-function RebirthService.rebirth(player: Player, skipCost: boolean?, expectedRebirths: number?): (boolean, string?, boolean?)
-	local data = DataManager.get(player)
-	if not data then
-		return false, "No data", false
+function RebirthService.calculateRebirthCosts(currentRebirths: number, count: number): number
+	local total = 0
+	for i = 0, count - 1 do
+		total += RebirthService.getRebirthCost(currentRebirths + i)
 	end
+	return total
+end
 
-	if type(expectedRebirths) == "number" then
-		local exp = math.max(0, math.floor(expectedRebirths))
-		local cur = math.max(0, math.floor(data.rebirths))
-		if cur ~= exp then
-			if cur == exp + 1 then
-				-- Duplicate request after successful rebirth; keep client in sync without double rewards.
-				Remotes.getEvent("DataUpdate"):FireClient(player, data)
-				return true, nil, true
-			end
-			return false, "Out of sync — try again.", false
-		end
-	end
-
-	if not skipCost then
-		local cost = RebirthService.getRebirthCost(data.rebirths)
+function RebirthService.calculateMaxAffordable(coins: number, currentRebirths: number): number
+	local count = 0
+	local remaining = coins
+	while true do
+		local cost = RebirthService.getRebirthCost(currentRebirths + count)
 		local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
-		if GamePassService.hasPass(player, "rebirth_rush") then
+		if GamePassService._cachedPasses and GamePassService._cachedPasses["rebirth_rush"] then
 			cost = math.floor(cost * 0.75)
 		end
-		if data.coins < cost then
-			return false, "Not enough coins", false
+		if remaining < cost then
+			break
+		end
+		remaining -= cost
+		count += 1
+	end
+	return count
+end
+
+function RebirthService.rebirth(player: Player, count: number?, skipCost: boolean?): (boolean, string?)
+	local data = DataManager.get(player)
+	if not data then
+		return false, "No data"
+	end
+
+	local rebirthCount = math.max(1, math.floor(tonumber(count) or 1))
+
+	if not skipCost then
+		local totalCost = 0
+		local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
+		local hasRush = GamePassService.hasPass(player, "rebirth_rush")
+		for i = 0, rebirthCount - 1 do
+			local c = RebirthService.getRebirthCost(data.rebirths + i)
+			if hasRush then
+				c = math.floor(c * 0.75)
+			end
+			totalCost += c
+		end
+		if data.coins < totalCost then
+			return false, "Not enough coins"
 		end
 	end
 
 	local prevRebirths = data.rebirths
 	local wasFirstRebirth = prevRebirths == 0
 
-	-- Apply rebirth rewards
-	data.rebirths += 1
-	data.rebirthStats.gas += RebirthConfig.Rewards.gasBoost
-	data.rebirthStats.power += RebirthConfig.Rewards.powerBoost
-	data.rebirthStats.speed += RebirthConfig.Rewards.speedBoost
+	data.rebirths += rebirthCount
+	data.rebirthTrainingBonus = (data.rebirthTrainingBonus or 0) + (RebirthConfig.Rewards.trainingBonusPerRebirth * rebirthCount)
+	data.gems = (data.gems or 0) + (RebirthConfig.Rewards.gemsGranted * rebirthCount)
 
-	-- Reset according to config
 	if RebirthConfig.ResetOnRebirth.coins then
 		data.coins = 0
 	end
-	if RebirthConfig.ResetOnRebirth.eggs then
-		data.eggs = {}
-	end
-	if RebirthConfig.ResetOnRebirth.carUpgrades then
-		for _, car in data.cars do
-			car.gasLevel = 0
-			car.powerLevel = 0
-			car.speedLevel = 0
-		end
+	if RebirthConfig.ResetOnRebirth.trainedPower then
+		data.trainedPower = 0
 	end
 
-	data.stats.totalRebirths += 1
+	data.stats.totalRebirths += rebirthCount
 
 	EconomyLogService.logRebirth(player, data.rebirths, 0)
-
-	-- QuestService.onRebirth(player)
 
 	RebirthService.syncPrestigeAttributes(player)
 
@@ -111,16 +115,26 @@ function RebirthService.rebirth(player: Player, skipCost: boolean?, expectedRebi
 	DataManager.saveImmediate(player)
 
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
-	NotificationDispatchService.notify(player, {
-		type = "success",
-		message = `Rebirth #{data.rebirths}! +{RebirthConfig.Rewards.gasBoost} Gas, +{RebirthConfig.Rewards.powerBoost} Power, +{RebirthConfig.Rewards.speedBoost} Speed`,
-	})
 
-	return true, nil, false
+	local bonusGained = RebirthConfig.Rewards.trainingBonusPerRebirth * rebirthCount
+	local gemsGained = RebirthConfig.Rewards.gemsGranted * rebirthCount
+	if rebirthCount == 1 then
+		NotificationDispatchService.notify(player, {
+			type = "success",
+			message = `Rebirth #{data.rebirths}! +{bonusGained}% training power, +{gemsGained} Gems`,
+		})
+	else
+		NotificationDispatchService.notify(player, {
+			type = "success",
+			message = `{rebirthCount}x Rebirth! Now at #{data.rebirths}. +{bonusGained}% training power, +{gemsGained} Gems`,
+		})
+	end
+
+	return true, nil
 end
 
 function RebirthService.init()
-	Remotes.getEvent("Rebirth").OnServerEvent:Connect(function(player, expectedRebirths: any?)
+	Remotes.getEvent("Rebirth").OnServerEvent:Connect(function(player, requestedCount: any?)
 		if not ValidationService.checkRemoteRate(player, "Rebirth") then
 			return
 		end
@@ -130,21 +144,48 @@ function RebirthService.init()
 		if not RemoteCooldown.allow(player, "Rebirth", Constants.REMOTE_COOLDOWN_DEFAULT) then
 			return
 		end
-		local exp: number? = nil
-		if type(expectedRebirths) == "number" then
-			exp = math.max(0, math.floor(expectedRebirths))
-		elseif expectedRebirths ~= nil then
-			ValidationService.logAnomalyOncePerSession(player, "rebirth_bad_expected_type", "")
+
+		local count = 1
+		if type(requestedCount) == "number" then
+			count = math.max(1, math.floor(requestedCount))
+		elseif requestedCount ~= nil then
+			ValidationService.logAnomalyOncePerSession(player, "rebirth_bad_count_type", "")
 			return
 		end
-		local success, err, dup = RebirthService.rebirth(player, false, exp)
+
+		local data = DataManager.get(player)
+		if not data then
+			return
+		end
+
+		local maxSkipTier = 1
+		local skips = (data.rebirthUpgrades and data.rebirthUpgrades.moreRebirthSkips) or 0
+		local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
+		local hasUnlimited = GamePassService.hasPass(player, "unlimited_rebirths")
+
+		if hasUnlimited then
+			maxSkipTier = math.huge
+		else
+			local tiers = RebirthConfig.SkipTiers
+			local unlockedTiers = math.min(1 + skips, #tiers)
+			maxSkipTier = tiers[unlockedTiers] or 1
+		end
+
+		if count > maxSkipTier and not hasUnlimited then
+			count = maxSkipTier
+		end
+
+		if hasUnlimited and count > 1000 then
+			local maxAffordable = RebirthService.calculateMaxAffordable(data.coins, data.rebirths)
+			count = math.min(count, maxAffordable)
+		end
+
+		local success, err = RebirthService.rebirth(player, count, false)
 		if not success then
 			NotificationDispatchService.notify(player, {
 				type = "error",
 				message = err or "Rebirth failed",
 			})
-		elseif dup then
-			-- Idempotent replay: DataUpdate already fired inside rebirth(); no toast spam.
 		end
 	end)
 end

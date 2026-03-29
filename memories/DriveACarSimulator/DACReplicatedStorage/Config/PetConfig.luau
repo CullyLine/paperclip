@@ -2,7 +2,7 @@
 
 local PetConfig = {}
 
-PetConfig.MAX_FOLLOWING = 5
+PetConfig.MAX_FOLLOWING = 8
 
 PetConfig.Pets = {
 	tabby_cat = {

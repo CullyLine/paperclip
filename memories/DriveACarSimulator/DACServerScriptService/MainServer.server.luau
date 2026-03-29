@@ -48,6 +48,8 @@ local GroupRewardService = require(Services:WaitForChild("GroupRewardService"))
 local FriendBonusService = require(Services:WaitForChild("FriendBonusService"))
 local FirstSessionOnboardingService = require(Services:WaitForChild("FirstSessionOnboardingService"))
 local WorldSpawnUtil = require(Services:WaitForChild("WorldSpawnUtil"))
+local TrainingService = require(Services:WaitForChild("TrainingService"))
+local RebirthUpgradeService = require(Services:WaitForChild("RebirthUpgradeService"))
 
 Constants.bootLog("[DAC] Server initializing...")
 
@@ -89,6 +91,8 @@ AchievementService.init()
 GroupRewardService.init()
 FriendBonusService.init()
 FirstSessionOnboardingService.init()
+TrainingService.init()
+RebirthUpgradeService.init()
 
 -- 4. Wire GetPlayerData so clients can request their data at any time
 Remotes.getFunction("GetPlayerData").OnServerInvoke = function(player)

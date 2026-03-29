@@ -97,7 +97,7 @@ local centerX = 0
 local lateralX = 0
 local currentSpeed = 0
 local maxSpeed = 0
-local runPower = 0
+local runAccelSeconds = 30
 local currentGas = 0
 local totalDistance = 0
 local currentLapDistance = 0
@@ -552,7 +552,7 @@ local function updateDriving(dt: number)
 		steerInput = math.clamp(steerInput - s * 1.2 * dt, -1, 1)
 	end
 
-	local accelRate = 8 + runPower * 0.5
+	local accelRate = maxSpeed / runAccelSeconds
 	currentSpeed = math.min(maxSpeed, currentSpeed + accelRate * dt)
 
 	local forwardDelta = currentSpeed * dt
@@ -723,8 +723,8 @@ function DrivingController.startRun(info: any)
 	vehicleResetCooldownUntil = 0
 	headlightMode = 0
 	clearClientHeadlights()
-	maxSpeed = if type(info.stats) == "table" and type(info.stats.speed) == "number" then info.stats.speed else 0
-	runPower = if type(info.stats) == "table" and type(info.stats.power) == "number" then info.stats.power else 0
+	maxSpeed = if type(info.stats) == "table" and type(info.stats.power) == "number" then info.stats.power else 0
+	runAccelSeconds = if type(info.stats) == "table" and type(info.stats.acceleration) == "number" then math.max(info.stats.acceleration, 1) else 30
 	currentSpeed = 0
 	runMaxSpeedForRush = math.max(maxSpeed, 1)
 	currentGas = info.stats.gas

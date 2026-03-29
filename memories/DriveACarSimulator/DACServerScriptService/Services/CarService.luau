@@ -4,7 +4,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
-local Types = require(DAC:WaitForChild("Types"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
@@ -30,7 +29,6 @@ function CarService.buyCar(player: Player, carId: string): (boolean, string?)
 		return false, "Already owned"
 	end
 
-	-- Check world unlock
 	if not data.unlockedWorlds[carDef.worldId] then
 		return false, "World not unlocked"
 	end
@@ -48,9 +46,6 @@ function CarService.buyCar(player: Player, carId: string): (boolean, string?)
 
 	data.cars[carId] = {
 		id = carId,
-		gasLevel = 0,
-		powerLevel = 0,
-		speedLevel = 0,
 	}
 
 	if carCountBefore == 1 then
@@ -76,35 +71,26 @@ function CarService.equipCar(player: Player, carId: string): (boolean, string?)
 	return true, nil
 end
 
-function CarService.getEffectiveStats(player: Player, carId: string): Types.EffectiveCarStats?
+function CarService.getEffectiveStats(player: Player, carId: string): { gas: number, power: number, acceleration: number }?
 	local data = DataManager.get(player)
 	if not data then return nil end
 
-	local ownedCar = data.cars[carId]
-	if not ownedCar then return nil end
+	if not data.cars[carId] then return nil end
 
 	local carDef = CarConfig.Cars[carId]
 	if not carDef then return nil end
 
-	local UpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
+	local upgrades = data.rebirthUpgrades or {}
+	local gasMultiplier = 1 + ((upgrades :: any).moreGas or 0) * 5 / 100
+	local accelMultiplier = 1 + ((upgrades :: any).moreAcceleration or 0) * 5 / 100
 
-	local gasUpgrade = ownedCar.gasLevel * UpgradeConfig.Stats.gas.perLevel
-	local powerUpgrade = ownedCar.powerLevel * UpgradeConfig.Stats.power.perLevel
-	local speedUpgrade = ownedCar.speedLevel * UpgradeConfig.Stats.speed.perLevel
+	local gas = carDef.baseStats.gas * gasMultiplier
+	local power = carDef.baseStats.power + (data.trainedPower or 0)
+	local acceleration = carDef.baseStats.acceleration / accelMultiplier
 
-	-- Add rebirth bonuses
-	local rebirthGas = data.rebirthStats.gas
-	local rebirthPower = data.rebirthStats.power
-	local rebirthSpeed = data.rebirthStats.speed
-
-	local gas = carDef.baseStats.gas + gasUpgrade + rebirthGas
-	local power = carDef.baseStats.power + powerUpgrade + rebirthPower
-	local speed = carDef.baseStats.speed + speedUpgrade + rebirthSpeed
-
-	-- Apply game pass bonuses
 	local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
 	if GamePassService.hasPass(player, "double_speed") then
-		speed = speed * 2
+		power = power * 2
 	end
 	if GamePassService.hasPass(player, "gas_3x") then
 		gas = gas * 3
@@ -113,9 +99,7 @@ function CarService.getEffectiveStats(player: Player, carId: string): Types.Effe
 		gas = math.huge
 	end
 
-	local vipExclusiveSkin = GamePassService.hasPass(player, "vip")
-
-	return { gas = gas, power = power, speed = speed, vipExclusiveSkin = vipExclusiveSkin }
+	return { gas = gas, power = power, acceleration = acceleration }
 end
 
 function CarService.init()

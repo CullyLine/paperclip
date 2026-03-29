@@ -615,7 +615,11 @@ function DailyRewardPanel.init()
 			if DailyRewardConfig.canClaimNow(lc) then
 				autoOpenFired = true
 				task.delay(1.5, function()
-					if not root.Visible then
+					if root.Visible then return end
+					local freshData = fetchData()
+					if not freshData or type(freshData.dailyReward) ~= "table" then return end
+					local freshLc = math.floor(tonumber((freshData.dailyReward :: any).lastClaim) or 0)
+					if DailyRewardConfig.canClaimNow(freshLc) then
 						MenuHub.open("daily")
 					end
 				end)

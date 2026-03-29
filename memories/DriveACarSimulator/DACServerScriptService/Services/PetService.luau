@@ -113,14 +113,55 @@ local function countEquippedPets(data: any): number
 end
 
 --[[
-	Effective pet coin multiplier for run payout (base modifier + pet_magnet +10%).
+	Pet training modifier: 1 + sum(equippedPetPower)/100.
+	Used by TrainingService for power per tick. Pets no longer affect run payouts.
 ]]
-function PetService.getEffectivePetCoinModifier(player: Player, equippedPets: { { power: number } }): number
+function PetService.getEffectivePetTrainingModifier(player: Player, equippedPets: { { power: number } }): number
 	local base = Utils.calculatePetModifier(equippedPets)
 	if GamePassService.hasPass(player, "pet_magnet") then
 		return base * 1.1
 	end
 	return base
+end
+
+function PetService.unequipAll(player: Player)
+	local data = DataManager.get(player)
+	if not data or type(data.pets) ~= "table" then
+		return
+	end
+	if data.settings and data.settings.petLock then
+		NotificationDispatchService.notify(player, {
+			type = "error",
+			message = "Pets are locked. Disable pet lock first.",
+		})
+		return
+	end
+	for _, pet in data.pets do
+		pet.equipped = false
+	end
+	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	broadcastEquippedPets(player)
+end
+
+function PetService.deletePet(player: Player, petUid: string): (boolean, string?)
+	local data = DataManager.get(player)
+	if not data or type(data.pets) ~= "table" then
+		return false, "No data"
+	end
+	if data.settings and data.settings.petLock then
+		return false, "Pets are locked"
+	end
+	local pet = data.pets[petUid]
+	if not pet then
+		return false, "Pet not found"
+	end
+	if pet.equipped then
+		return false, "Unequip pet before deleting"
+	end
+	data.pets[petUid] = nil
+	Remotes.getEvent("DataUpdate"):FireClient(player, data)
+	broadcastEquippedPets(player)
+	return true, nil
 end
 
 function PetService.equipPet(player: Player, petUid: string): (boolean, string?)
@@ -138,7 +179,7 @@ function PetService.equipPet(player: Player, petUid: string): (boolean, string?)
 	end
 
 	pet.equipped = true
-	QuestService.onPetEquip(player, petUid)
+	-- QuestService.onPetEquip(player, petUid)
 	TutorialService.onEquipPet(player)
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	broadcastEquippedPets(player)
@@ -420,6 +461,44 @@ function PetService.init()
 		local ok, err = PetService.unequipPet(player, petUid)
 		if not ok and err == "Pet not found" then
 			ValidationService.logAnomalyOncePerSession(player, "unequip_unknown_pet", petUid)
+		end
+	end)
+
+	Remotes.getEvent("UnequipAllPets").OnServerEvent:Connect(function(player)
+		if not ValidationService.checkRemoteRate(player, "UnequipAllPets") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		if not RemoteCooldown.allow(player, "UnequipAllPets", Constants.REMOTE_COOLDOWN_DEFAULT) then
+			return
+		end
+		PetService.unequipAll(player)
+	end)
+
+	Remotes.getEvent("DeletePet").OnServerEvent:Connect(function(player, petUid)
+		if not ValidationService.checkRemoteRate(player, "DeletePet") then
+			return
+		end
+		if not ValidationService.canAct(player) then
+			return
+		end
+		if type(petUid) ~= "string" then
+			return
+		end
+		if petUid == "" or #petUid > MAX_PET_UID_LEN then
+			return
+		end
+		if not RemoteCooldown.allow(player, "DeletePet", Constants.REMOTE_COOLDOWN_DEFAULT) then
+			return
+		end
+		local success, err = PetService.deletePet(player, petUid)
+		if not success then
+			NotificationDispatchService.notify(player, {
+				type = "error",
+				message = err or "Failed to delete pet",
+			})
 		end
 	end)
 

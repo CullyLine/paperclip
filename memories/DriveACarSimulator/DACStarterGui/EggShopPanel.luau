@@ -60,9 +60,21 @@ function EggShopPanel.getNoRareStreak(): number
 	return pityNoRareStreak
 end
 
+local function processHatchResults(resultOrArray: any)
+	if type(resultOrArray) ~= "table" then return end
+
+	if resultOrArray[1] ~= nil then
+		for _, result in resultOrArray do
+			onHatchResultForPity(result)
+		end
+	else
+		onHatchResultForPity(resultOrArray)
+	end
+end
+
 function EggShopPanel.init()
 	Remotes.getEvent("HatchEgg").OnClientEvent:Connect(function(result)
-		onHatchResultForPity(result)
+		processHatchResults(result)
 		task.defer(function()
 			local ok, r = pcall(function()
 				return Remotes.getFunction("FirstSessionOnboarding"):InvokeServer({ kind = "prepareFirstHatch" })

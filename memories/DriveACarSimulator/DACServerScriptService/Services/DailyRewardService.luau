@@ -177,42 +177,44 @@ function DailyRewardService.claim(player: Player): (boolean, string?)
 
 	waitClaimLock(userId)
 	local okStore, outcome, storeErr = updateAuthStore(userId, todayD, profileClaimsToday)
-	if not okStore or not outcome then
-		releaseClaimLock(userId)
-		return false, storeErr or "Daily reward unavailable"
-	end
 
-	local authGen = math.floor(tonumber(data.dailyReward.authClaimGen) or 0)
+	if okStore and outcome then
+		local authGen = math.floor(tonumber(data.dailyReward.authClaimGen) or 0)
 
-	-- Pre-deploy profile already counted today's claim; seed DataStore without granting again.
-	if outcome.migrated == true then
+		if outcome.migrated == true then
+			data.dailyReward.authClaimGen = outcome.gen
+			Remotes.getEvent("DataUpdate"):FireClient(player, data)
+			DataManager.scheduleSave(player)
+			releaseClaimLock(userId)
+			return true, nil
+		end
+
+		if outcome.gen <= authGen then
+			Remotes.getEvent("DataUpdate"):FireClient(player, data)
+			releaseClaimLock(userId)
+			return true, nil
+		end
+
+		if outcome.gen > authGen + 1 then
+			data.dailyReward.authClaimGen = outcome.gen
+			Remotes.getEvent("DataUpdate"):FireClient(player, data)
+			DataManager.scheduleSave(player)
+			releaseClaimLock(userId)
+			return true, nil
+		end
+
+		if outcome.gen ~= authGen + 1 then
+			releaseClaimLock(userId)
+			return false, "Daily reward out of sync"
+		end
+
 		data.dailyReward.authClaimGen = outcome.gen
-		Remotes.getEvent("DataUpdate"):FireClient(player, data)
-		DataManager.scheduleSave(player)
-		releaseClaimLock(userId)
-		return true, nil
-	end
-
-	-- Duplicate claim same UTC day (replay / double tap after authoritative grant).
-	if outcome.gen <= authGen then
-		Remotes.getEvent("DataUpdate"):FireClient(player, data)
-		releaseClaimLock(userId)
-		return true, nil
-	end
-
-	-- Profile behind DataStore (e.g. another session advanced gen) — sync without granting currency.
-	if outcome.gen > authGen + 1 then
-		data.dailyReward.authClaimGen = outcome.gen
-		Remotes.getEvent("DataUpdate"):FireClient(player, data)
-		DataManager.scheduleSave(player)
-		releaseClaimLock(userId)
-		return true, nil
-	end
-
-	-- Legitimate new-day grant: gen must advance by exactly one vs saved profile.
-	if outcome.gen ~= authGen + 1 then
-		releaseClaimLock(userId)
-		return false, "Daily reward out of sync"
+	else
+		if not DailyRewardConfig.canClaimNow(lastClaimUnix) then
+			releaseClaimLock(userId)
+			return false, "Already claimed today"
+		end
+		warn("[DailyRewardService] DataStore unavailable, falling back to profile-only claim: " .. tostring(storeErr))
 	end
 
 	-- Streak: missed at least one UTC calendar day since last claim.
@@ -255,7 +257,9 @@ function DailyRewardService.claim(player: Player): (boolean, string?)
 	data.dailyReward.lastClaim = now
 	data.dailyReward.premiumBoxClaimed = false
 	data.dailyReward.lastClaimLostStreak = if hadLongBreak then prevStreak else 0
-	data.dailyReward.authClaimGen = outcome.gen
+	if outcome then
+		data.dailyReward.authClaimGen = outcome.gen
+	end
 
 	MilestoneCeremonyService.checkStreakMilestones(player, data, data.dailyReward.streak)
 

@@ -1,22 +1,15 @@
 --!strict
 
-export type Currency = "coins" | "sandGranules" | "icycles" | "magmaCores" | "infinitium"
+export type Currency = "coins"
 
 export type CarStats = {
 	gas: number,
 	power: number,
-	speed: number,
-}
-
-export type EffectiveCarStats = CarStats & {
-	vipExclusiveSkin: boolean,
+	acceleration: number,
 }
 
 export type OwnedCar = {
 	id: string,
-	gasLevel: number,
-	powerLevel: number,
-	speedLevel: number,
 }
 
 export type Pet = {
@@ -68,17 +61,12 @@ export type WorldDefinition = {
 	id: string,
 	name: string,
 	order: number,
+	universeId: string,
 	highwayLength: number,
 	unlockCost: number,
 	unlockCurrency: Currency,
 	coinMultiplier: number,
 	description: string,
-}
-
-export type UpgradeCost = {
-	baseCost: number,
-	costMultiplier: number,
-	currency: Currency,
 }
 
 export type GamePassDefinition = {
@@ -111,13 +99,13 @@ export type PlayerSettings = {
 	reducedMotion: boolean,
 	particleDensity: number,
 	showFps: boolean,
+	petLock: boolean,
 }
 
 export type DailyRewardData = {
 	lastClaim: number,
 	streak: number,
 	lastClaimLostStreak: number?,
-	-- Server: last applied DACDailyRewardAuth_v1 generation (POLA-519).
 	authClaimGen: number?,
 }
 
@@ -126,20 +114,23 @@ export type PlayerStats = {
 	totalRebirths: number,
 	totalEggsHatched: number,
 	totalLaps: number,
+	totalCoinsEarned: number,
+	totalPlaytimeSeconds: number,
 }
 
-export type RebirthStats = {
-	gas: number,
-	power: number,
-	speed: number,
+export type RebirthUpgrades = {
+	moreGas: number,
+	moreCurrency: number,
+	moreLuck: number,
+	moreAcceleration: number,
+	moreEggsAtOnce: number,
+	moreInventorySpace: number,
+	moreRebirthSkips: number,
 }
 
 export type PlayerData = {
 	coins: number,
-	sandGranules: number,
-	icycles: number,
-	magmaCores: number,
-	infinitium: number,
+	gems: number,
 
 	cars: { [string]: OwnedCar },
 	equippedCar: string,
@@ -150,7 +141,9 @@ export type PlayerData = {
 	eggs: { [string]: number },
 
 	rebirths: number,
-	rebirthStats: RebirthStats,
+	rebirthTrainingBonus: number,
+	trainedPower: number,
+	rebirthUpgrades: RebirthUpgrades,
 
 	currentWorld: string,
 	unlockedWorlds: { [string]: boolean },
@@ -160,10 +153,13 @@ export type PlayerData = {
 	settings: PlayerSettings,
 	stats: PlayerStats,
 
+	potions: { [string]: number },
+
 	playtimeSecondsSinceBonus: number,
 	lastRunOfDayBonusYday: number,
 	starterPackPurchased: boolean,
 	discoveredPets: { [string]: boolean },
+	totalRobuxSpent: number,
 }
 
 return nil

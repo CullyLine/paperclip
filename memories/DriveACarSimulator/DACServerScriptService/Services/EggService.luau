@@ -19,6 +19,8 @@ local ValidationService = require(script.Parent:WaitForChild("ValidationService"
 local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 local FirstSessionOnboardingService = require(script.Parent:WaitForChild("FirstSessionOnboardingService"))
 
+local RebirthUpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthUpgradeConfig"))
+
 local EggService = {}
 
 -- Config egg ids are short snake_case; reject garbage from remotes.
@@ -93,7 +95,9 @@ local function rollDrop(drops: { any }, luckyEggs: boolean, ultraLucky: boolean)
 	return drops[#drops]
 end
 
-function EggService.buyEgg(player: Player, eggId: string): (boolean, string?)
+function EggService.buyEgg(player: Player, eggId: string, count: number?): (boolean, string?)
+	local qty = math.clamp(if type(count) == "number" then math.floor(count) else 1, 1, 10)
+
 	local eggDef = EggConfig.Eggs[eggId]
 	if not eggDef then
 		ValidationService.logAnomalyOncePerSession(player, "buy_unknown_egg", eggId)
@@ -103,25 +107,26 @@ function EggService.buyEgg(player: Player, eggId: string): (boolean, string?)
 	local data = DataManager.get(player)
 	if not data then return false, "No data" end
 
-	-- Check world unlock
 	if not data.unlockedWorlds[eggDef.worldId] then
 		return false, "World not unlocked"
 	end
 
-	-- Check inventory capacity
 	local totalEggs = 0
-	for _, count in data.eggs do
-		totalEggs += count
+	for _, c in data.eggs do
+		totalEggs += c
 	end
-	if totalEggs >= Constants.MAX_EGGS_INVENTORY then
+	local slotsLeft = math.max(0, Constants.MAX_EGGS_INVENTORY - totalEggs)
+	if slotsLeft <= 0 then
 		return false, "Egg inventory full"
 	end
+	qty = math.min(qty, slotsLeft)
 
-	if not CurrencyService.spend(player, eggDef.currency, eggDef.price) then
+	local totalCost = eggDef.price * qty
+	if not CurrencyService.spend(player, eggDef.currency, totalCost) then
 		return false, "Not enough " .. eggDef.currency
 	end
 
-	data.eggs[eggId] = (data.eggs[eggId] or 0) + 1
+	data.eggs[eggId] = (data.eggs[eggId] or 0) + qty
 	Remotes.getEvent("DataUpdate"):FireClient(player, data)
 	return true, nil
 end
@@ -213,8 +218,51 @@ function EggService.hatchEgg(player: Player, eggId: string): (boolean, string?, 
 	return true, nil, result
 end
 
+function EggService.getMaxHatchCount(player: Player): number
+	local data = DataManager.get(player)
+	if not data then return Constants.BASE_HATCH_COUNT end
+	local upgradePoints = 0
+	if data.rebirthUpgrades and type(data.rebirthUpgrades.moreEggsAtOnce) == "number" then
+		upgradePoints = data.rebirthUpgrades.moreEggsAtOnce
+	end
+	return math.min(Constants.BASE_HATCH_COUNT + upgradePoints, Constants.MAX_HATCH_COUNT)
+end
+
+function EggService.hatchEggBatch(player: Player, eggId: string, count: number): (boolean, string?, { any }?)
+	local eggDef = EggConfig.Eggs[eggId]
+	if not eggDef then
+		ValidationService.logAnomalyOncePerSession(player, "batch_hatch_unknown_egg", eggId)
+		return false, "Egg not found", nil
+	end
+
+	local data = DataManager.get(player)
+	if not data then return false, "No data", nil end
+
+	local maxAllowed = EggService.getMaxHatchCount(player)
+	count = math.clamp(count, 1, maxAllowed)
+
+	local available = data.eggs[eggId] or 0
+	if available <= 0 then
+		return false, "No eggs of this type", nil
+	end
+	count = math.min(count, available)
+
+	local results: { any } = {}
+	for _ = 1, count do
+		local ok, err, result = EggService.hatchEgg(player, eggId)
+		if not ok then break end
+		table.insert(results, result)
+	end
+
+	if #results == 0 then
+		return false, "Failed to hatch any eggs", nil
+	end
+
+	return true, nil, results
+end
+
 function EggService.init()
-	Remotes.getEvent("BuyEgg").OnServerEvent:Connect(function(player, eggId)
+	Remotes.getEvent("BuyEgg").OnServerEvent:Connect(function(player, eggId, count)
 		if not ValidationService.checkRemoteRate(player, "BuyEgg") then
 			return
 		end
@@ -235,7 +283,7 @@ function EggService.init()
 		if not RemoteCooldown.allow(player, "BuyEgg", Constants.REMOTE_COOLDOWN_DEFAULT) then
 			return
 		end
-		local success, err = EggService.buyEgg(player, eggId)
+		local success, err = EggService.buyEgg(player, eggId, if type(count) == "number" then count else 1)
 		if not success then
 			NotificationDispatchService.notify(player, {
 				type = "error",
@@ -244,7 +292,7 @@ function EggService.init()
 		end
 	end)
 
-	Remotes.getEvent("HatchEgg").OnServerEvent:Connect(function(player, eggId)
+	Remotes.getEvent("HatchEgg").OnServerEvent:Connect(function(player, eggId, count)
 		if not ValidationService.checkRemoteRate(player, "HatchEgg") then
 			return
 		end
@@ -265,18 +313,26 @@ function EggService.init()
 		if not RemoteCooldown.allow(player, "HatchEgg", 0.25) then
 			return
 		end
-		local success, err, result = EggService.hatchEgg(player, eggId)
-		if success and result then
-			Remotes.getEvent("HatchEgg"):FireClient(player, result)
-			if type(result.rarity) == "string" and RARE_PLUS_RARITIES[string.lower(result.rarity)] then
-				local oddsText = if type(result.feedOddsLabel) == "string" then result.feedOddsLabel else ""
-				Remotes.getEvent("ServerDropFeed"):FireAllClients({
-					playerName = player.DisplayName,
-					petName = result.petName,
-					rarity = result.rarity,
-					userId = player.UserId,
-					oddsText = oddsText,
-				})
+
+		local hatchCount = 1
+		if type(count) == "number" and count > 1 then
+			hatchCount = math.floor(count)
+		end
+
+		local success, err, results = EggService.hatchEggBatch(player, eggId, hatchCount)
+		if success and results then
+			Remotes.getEvent("HatchEgg"):FireClient(player, results)
+			for _, result in results do
+				if type(result.rarity) == "string" and RARE_PLUS_RARITIES[string.lower(result.rarity)] then
+					local oddsText = if type(result.feedOddsLabel) == "string" then result.feedOddsLabel else ""
+					Remotes.getEvent("ServerDropFeed"):FireAllClients({
+						playerName = player.DisplayName,
+						petName = result.petName,
+						rarity = result.rarity,
+						userId = player.UserId,
+						oddsText = oddsText,
+					})
+				end
 			end
 		elseif not success then
 			NotificationDispatchService.notify(player, {

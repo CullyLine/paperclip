@@ -2212,11 +2212,13 @@ function VFXController.init()
 end
 
 local function virtualCoinFloorFromDistance(dist: number): number
+	local rate = Constants.DISTANCE_TO_COINS_RATE
+	if not rate then return 0 end
 	local world = Cfg.World.Worlds[activeWorldId]
 	local wm = if world then world.coinMultiplier else 1
 	local petMod = math.max(combo.petModifier, 0.01)
 	local power = combo.runPower
-	return math.floor(dist * Constants.DISTANCE_TO_COINS_RATE * wm * petMod * (1 + power * 0.01))
+	return math.floor(dist * rate * wm * petMod * (1 + power * 0.01))
 end
 
 local function hideComboLabel()

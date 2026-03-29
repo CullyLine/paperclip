@@ -75,7 +75,7 @@ local function estimateTotalNumber(items: { RewardItem }): number
 	for _, it in items do
 		if type(it.amount) == "number" and it.amount > 0 then
 			local k = it.kind or ""
-			if k == "coins" or k == "sandGranules" or k == "icycles" or k == "magmaCores" or k == "infinitium" or k == "xp" then
+			if k == "coins" or k == "gems" or k == "xp" then
 				sum += it.amount
 				any = true
 			end

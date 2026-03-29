@@ -39,6 +39,7 @@ local passiveIncomeLabel: TextLabel? = nil
 local prevPassiveIncomeText: string? = nil
 local currentWorldId: string = "forest"
 
+local powerLabel: TextLabel? = nil
 local fpsLabel: TextLabel? = nil
 local fpsFrameAccum = 0
 local fpsClock = 0.0
@@ -64,7 +65,7 @@ local lastPetMultJuiceAt = 0.0
 local SPEND_DRAIN_MIN_INTERVAL = 0.09
 local lastSpendDrainAt: { [string]: number } = {}
 
-local CURRENCY_KEYS = Constants.ALL_CURRENCY_KEYS or { "coins", "sandGranules", "icycles", "magmaCores", "infinitium" }
+local CURRENCY_KEYS = Constants.ALL_CURRENCY_KEYS or { "coins" }
 
 local hudTweenBuckets: { [Instance]: { Tween } } = {}
 local hudLayoutDisconnect: (() -> ())? = nil
@@ -166,18 +167,10 @@ end
 
 local PULSE_COLORS: { [string]: Color3 } = {
 	coins = Color3.fromRGB(255, 220, 80),
-	sandGranules = Color3.fromRGB(220, 200, 120),
-	icycles = Color3.fromRGB(140, 220, 255),
-	magmaCores = Color3.fromRGB(255, 120, 60),
-	infinitium = Color3.fromRGB(180, 150, 255),
 }
 
 local POSITIVE_FLASH: { [string]: Color3 } = {
 	coins = Color3.fromRGB(255, 214, 96),
-	sandGranules = Color3.fromRGB(240, 220, 140),
-	icycles = Color3.fromRGB(150, 230, 255),
-	magmaCores = Color3.fromRGB(255, 140, 80),
-	infinitium = Color3.fromRGB(200, 170, 255),
 }
 
 local function shouldHudEconomyJuice(): boolean
@@ -460,6 +453,18 @@ function HUD.updateCurrencies(currencies: { [string]: number }, activeKey: strin
 	end
 end
 
+function HUD.updatePowerDisplay(data: any)
+	if not powerLabel then return end
+	if type(data) ~= "table" then return end
+	local trainedPower = data.trainedPower or 0
+	local carId = data.equippedCar
+	local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
+	local carDef = carId and CarConfig.Cars[carId]
+	local basePower = carDef and carDef.baseStats and carDef.baseStats.power or 0
+	local totalPower = basePower + trainedPower
+	powerLabel.Text = "Power: " .. Utils.formatNumber(math.floor(totalPower))
+end
+
 function HUD.updatePetMultiplier(mult: number)
 	if petMultLabel then
 		petMultLabel.Text = string.format("x%.1f", mult)
@@ -622,6 +627,10 @@ function HUD.init()
 	end
 	local petMult = currencyFrame:FindFirstChild("PetMultiplier")
 	if petMult then petMultLabel = findLabel(petMult) end
+	local powerRow = currencyFrame:FindFirstChild("Power")
+	if powerRow then
+		powerLabel = findLabel(powerRow)
+	end
 	local passiveRow = currencyFrame:FindFirstChild("PassiveIncome") or currencyFrame:FindFirstChild("CoinsPerSec")
 	if passiveRow then
 		passiveIncomeLabel = findLabel(passiveRow)
@@ -641,7 +650,7 @@ function HUD.init()
 	local lastInvFire = 0.0
 	local function onInventoryActivate()
 		local now = os.clock()
-		if now - lastInvFire < 0.08 then
+		if now - lastInvFire < 0.3 then
 			return
 		end
 		lastInvFire = now
@@ -651,7 +660,6 @@ function HUD.init()
 		end
 	end
 	inventoryButton.Activated:Connect(onInventoryActivate)
-	inventoryButton.MouseButton1Click:Connect(onInventoryActivate)
 
 	Remotes.getEvent("CurrencyUpdate").OnClientEvent:Connect(function(currencies)
 		ingestCurrencySnapshot(currencies)
@@ -668,6 +676,7 @@ function HUD.init()
 		end
 		prevPetMult = mult
 		HUD.updatePetMultiplier(mult)
+		HUD.updatePowerDisplay(data)
 	end)
 
 	Remotes.getEvent("StartRun").OnClientEvent:Connect(function()
@@ -693,6 +702,7 @@ function HUD.init()
 			local mult = petMultiplierFromData(data)
 			prevPetMult = mult
 			HUD.updatePetMultiplier(mult)
+			HUD.updatePowerDisplay(data)
 		end
 	end)
 

@@ -227,7 +227,7 @@ local function updateLocalPetPositions(dt: number)
 		flatLook = root.CFrame.LookVector
 	end
 
-	local index = 0
+	local index = 1
 	for _, uid in localPetOrder do
 		local entry = localPets[uid]
 		if not entry then
@@ -349,7 +349,7 @@ local function updateRemotePetPositions(dt: number)
 			petCount += 1
 		end
 
-		local index = 0
+		local index = 1
 		for _, uid in order do
 			local entry = pets[uid]
 			if not entry then

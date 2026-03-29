@@ -28,18 +28,10 @@ local PLAYER_MAX_PER_WINDOW = 18
 -- "Large" always logged (when rate limit allows), unless source is filtered
 local LARGE_THRESHOLDS: { [string]: number } = {
 	coins = 50_000,
-	sandGranules = 50_000,
-	icycles = 50_000,
-	magmaCores = 50_000,
-	infinitium = 50_000,
 }
 
 local MEDIUM_VERBOSE_THRESHOLDS: { [string]: number } = {
 	coins = 10_000,
-	sandGranules = 10_000,
-	icycles = 10_000,
-	magmaCores = 10_000,
-	infinitium = 10_000,
 }
 
 -- Never spam these (high frequency)

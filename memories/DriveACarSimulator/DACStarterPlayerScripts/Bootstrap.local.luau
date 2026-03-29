@@ -39,6 +39,9 @@ local RetentionController = require(Controllers:WaitForChild("RetentionControlle
 local VehicleEnterJuiceController = require(Controllers:WaitForChild("VehicleEnterJuiceController"))
 local AchievementController = require(Controllers:WaitForChild("AchievementController"))
 local PurchaseThankYouController = require(Controllers:WaitForChild("PurchaseThankYouController"))
+local ZoneController = require(Controllers:WaitForChild("ZoneController"))
+local TrainingController = require(Controllers:WaitForChild("TrainingController"))
+local HatchGridOverlay = require(Controllers:WaitForChild("HatchGridOverlay"))
 local VFXFacade = require(DAC:WaitForChild("VFXFacade"))
 local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local ClientUiLifecycle = require(DAC:WaitForChild("ClientUiLifecycle"))
@@ -183,6 +186,14 @@ end)
 	})
 end)
 
+Remotes.getEvent("CheckpointHit").OnClientEvent:Connect(function(payload: any)
+	if type(payload) ~= "table" then return end
+	local idx = payload.index or 0
+	local reward = payload.reward or 0
+	SoundFacade.playOneShot("checkpoint")
+	VFXFacade.currencyPopup("coins", math.floor(reward), "Checkpoint " .. tostring(idx) .. "/10")
+end)
+
 Remotes.getEvent("StartRun").OnClientEvent:Connect(function(runInfo)
 	DrivingController.startRun(runInfo)
 	VFXController.onRunStarted(runInfo)
@@ -277,11 +288,44 @@ ClientUiLifecycle.init(player)
 DrivingController.init()
 PurchaseThankYouController.init()
 PetController.init()
+HatchGridOverlay.init()
 EggViewController.init()
 UIController.init()
 AchievementController.init(player:WaitForChild("PlayerGui"):WaitForChild("DACMain") :: ScreenGui)
 RetentionController.init()
 VehicleEnterJuiceController.init()
+TrainingController.init()
+ZoneController.init()
+
+local ZONE_PANEL_MAP: { [string]: string } = {
+	RebirthUpgrades = "RebirthUpgrades",
+	EggShop = "EggStore",
+	Worlds = "World",
+	Daily = "Daily",
+}
+
+ZoneController.registerCallbacks({
+	onEnter = function(zoneName: string, zonePart: BasePart)
+		if zoneName == "Training" then
+			TrainingController.show(zonePart)
+			return
+		end
+		local panelName = ZONE_PANEL_MAP[zoneName]
+		if panelName then
+			UIController.showPanel(panelName)
+		end
+	end,
+	onLeave = function(zoneName: string)
+		if zoneName == "Training" then
+			TrainingController.hide()
+			return
+		end
+		local panelName = ZONE_PANEL_MAP[zoneName]
+		if panelName then
+			UIController.hidePanel(panelName)
+		end
+	end,
+})
 
 Remotes.getEvent("FirstTimeCeremony").OnClientEvent:Connect(function(payload: any)
 	VFXController.ceremonyFirstTime(payload)

@@ -1,0 +1,19 @@
+---
+description: Communicate in simple, beginner-friendly language
+alwaysApply: true
+---
+
+# Simple Communication Style
+
+When explaining things to the user, follow these rules:
+
+- Use plain, everyday language. Avoid jargon and technical buzzwords unless absolutely necessary.
+- When you must use a technical term, immediately explain what it means in simple words.
+- Keep sentences short. Break complex ideas into small, digestible pieces.
+- Use analogies and real-world comparisons to explain abstract concepts (e.g. "a server is like a waiter that brings you what you asked for").
+- Summarize what you did and why in 1-2 simple sentences before showing code or details.
+- When listing steps, number them and describe each one like you're walking a friend through it.
+- Prefer "this means..." and "in other words..." when clarifying.
+- Never assume the reader already knows what something means — briefly explain it.
+
+This rule only affects how you communicate. It does NOT change your technical capabilities, code quality, or decision-making. Continue to write professional, production-quality code — just explain it simply.

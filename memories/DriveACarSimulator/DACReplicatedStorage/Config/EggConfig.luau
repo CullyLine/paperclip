@@ -46,7 +46,7 @@ EggConfig.Eggs = {
 		name = "Desert Egg",
 		modelName = "Desert",
 		price = 50_000,
-		currency = "sandGranules",
+		currency = "coins",
 		worldId = "desert",
 		drops = {
 			{ petId = "fox", rarity = "uncommon", weight = 30 },
@@ -62,7 +62,7 @@ EggConfig.Eggs = {
 		name = "Scorching Egg",
 		modelName = "Scorching",
 		price = 2_000,
-		currency = "sandGranules",
+		currency = "coins",
 		worldId = "desert",
 		drops = {
 			{ petId = "eagle", rarity = "rare", weight = 35 },
@@ -78,7 +78,7 @@ EggConfig.Eggs = {
 		name = "Frozen Egg",
 		modelName = "Frozen",
 		price = 10_000,
-		currency = "icycles",
+		currency = "coins",
 		worldId = "ice",
 		drops = {
 			{ petId = "wolf", rarity = "rare", weight = 25 },
@@ -96,7 +96,7 @@ EggConfig.Eggs = {
 		name = "Neon Egg",
 		modelName = "Neon",
 		price = 5_000,
-		currency = "magmaCores",
+		currency = "coins",
 		worldId = "volcano",
 		drops = {
 			{ petId = "phoenix_chick", rarity = "epic", weight = 35 },

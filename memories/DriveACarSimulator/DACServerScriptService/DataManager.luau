@@ -45,7 +45,7 @@ local function sanitizeWorldState(d: any)
 	end
 end
 
-local DATA_STORE_NAME = "DACPlayerData_v5"
+local DATA_STORE_NAME = "DACPlayerData_v6"
 -- Periodic safety flush: players with unsaved dirty data (see scheduleSave).
 local AUTO_SAVE_INTERVAL = 120
 -- Coalesce rapid scheduleSave calls into one SetAsync after this delay (timer is not reset by repeats).
@@ -79,23 +79,18 @@ function DataManager.getDefaultSettings(): { [string]: any }
 		reducedMotion = s.reducedMotion,
 		particleDensity = s.particleDensity,
 		showFps = s.showFps,
+		petLock = s.petLock,
 	}
 end
 
 local function getDefaultData()
 	return {
 		coins = Constants.STARTING_COINS,
-		sandGranules = Constants.STARTING_SAND_GRANULES,
-		icycles = Constants.STARTING_ICYCLES,
-		magmaCores = Constants.STARTING_MAGMA_CORES,
-		infinitium = Constants.STARTING_INFINITIUM,
+		gems = Constants.STARTING_GEMS,
 
 		cars = {
 			[Constants.STARTING_CAR] = {
 				id = Constants.STARTING_CAR,
-				gasLevel = 0,
-				powerLevel = 0,
-				speedLevel = 0,
 			},
 		},
 		equippedCar = Constants.STARTING_CAR,
@@ -106,7 +101,20 @@ local function getDefaultData()
 		eggs = { basic_egg = 5 },
 
 		rebirths = 0,
-		rebirthStats = { gas = 0, power = 0, speed = 0 },
+		rebirthTrainingBonus = 0,
+		trainedPower = 0,
+
+		rebirthUpgrades = {
+			moreGas = 0,
+			moreCurrency = 0,
+			moreLuck = 0,
+			moreAcceleration = 0,
+			moreEggsAtOnce = 0,
+			moreInventorySpace = 0,
+			moreRebirthSkips = 0,
+		},
+
+		potions = {},
 
 		currentWorld = Constants.STARTING_WORLD,
 		unlockedWorlds = { [Constants.STARTING_WORLD] = true },
@@ -117,7 +125,6 @@ local function getDefaultData()
 			dailyCycle = 1,
 			premiumBoxClaimed = false,
 			lastClaimLostStreak = 0,
-			-- Mirrors authoritative DailyReward DataStore gen (POLA-519); do not trust for security.
 			authClaimGen = 0,
 		},
 		redeemedCodes = {},
@@ -135,6 +142,7 @@ local function getDefaultData()
 			reducedMotion = false,
 			particleDensity = 2,
 			showFps = false,
+			petLock = false,
 		},
 		stats = {
 			totalDistance = 0,
@@ -145,12 +153,11 @@ local function getDefaultData()
 			totalRunsCompleted = 0,
 			bestLapSeconds = nil,
 			totalCoinsEarned = 0,
+			totalPlaytimeSeconds = 0,
 			questsCompletedTotal = 0,
-			-- Unix time when the player last left the game (saved on unload). Used for win-back / absence microcopy.
 			lastSessionEndUnix = 0,
 		},
 
-		-- One-shot flags for MilestoneCeremonyCopyConfig-driven celebrations (server)
 		milestoneCopyClaimed = {
 			collection = {} :: { [number]: boolean? },
 			worldMastery = {} :: { [string]: boolean? },
@@ -161,23 +168,19 @@ local function getDefaultData()
 		joinedDuringLaunch = false,
 		lastRunOfDayDate = "",
 		founderBonusNotified = false,
-		-- Roblox group one-time join rewards (GroupRewardService)
 		groupRewardClaimed = false,
 		groupJoinPromptDismissed = false,
 		starterPackPurchased = false,
 		discoveredPets = {},
-		-- Easter egg ids discovered (POLA easter egg system)
 		discoveredEasterEggs = {} :: { [string]: boolean },
 
 		titles = {},
 
-		-- Last known global leaderboard ranks (lower = better). Used for rank-up fanfare.
 		leaderboardRankSnapshot = {
 			totalDistance = nil,
 			totalRebirths = nil,
 		},
 
-		-- One-shot ceremony flags + cumulative monetization (FirstTimeConfig consumers)
 		firstTimeCeremony = {
 			FirstCarPurchased = false,
 			FirstPetHatched = false,
@@ -191,7 +194,6 @@ local function getDefaultData()
 		spendMilestonesClaimed = {} :: { [number]: boolean },
 		streakMilestonesClaimed = {} :: { [number]: boolean },
 
-		-- Achievements (AchievementService)
 		achievementsUnlocked = {} :: { [string]: boolean },
 		achievementsSeen = {} :: { [string]: boolean },
 		coinsSpentTotal = 0,
@@ -207,7 +209,6 @@ local function getDefaultData()
 			premium = false,
 			claimedFree = {},
 			claimedPremium = {},
-			-- Monotonic on successful tier claim; clients can use for optimistic UI / desync detection (POLA-527).
 			claimRevision = 0,
 		},
 
@@ -243,13 +244,11 @@ local function getDefaultData()
 			worldsVisitedWeek = {},
 		},
 
-		-- Dev product receipt ids already fulfilled (ProcessReceipt idempotency)
 		processedReceiptIds = {},
 
 		tutorialStep = 6,
 		tutorialComplete = true,
 
-		-- First play session onboarding (FirstSessionOnboardingService; migrated for existing saves)
 		firstSessionOnboarding = {
 			firstPlaySessionEnded = false,
 			hookLineConsumed = false,
@@ -260,7 +259,7 @@ local function getDefaultData()
 			dailyStreakFramingSeen = false,
 		},
 
-		_version = 1,
+		_version = 2,
 		_lastSave = 0,
 	}
 end

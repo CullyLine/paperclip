@@ -1,89 +1,14 @@
 --!strict
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local DAC = ReplicatedStorage:WaitForChild("DAC")
-local Remotes = require(DAC:WaitForChild("Remotes"))
-local NotificationDispatchService = require(script.Parent:WaitForChild("NotificationDispatchService"))
-local Utils = require(DAC:WaitForChild("Utils"))
-local UpgradeConfig = require(DAC:WaitForChild("Config"):WaitForChild("UpgradeConfig"))
-
-local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
-local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
-local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
-local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
--- local QuestService = require(script.Parent:WaitForChild("QuestService"))
-local Constants = require(DAC:WaitForChild("Constants"))
-
-local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
+--[[
+	Per-car stat upgrades have been removed.
+	All stat progression now comes from AFK training, rebirth bonuses, and gem upgrades.
+	This module is kept as a stub so existing requires don't break.
+]]
 
 local UpgradeService = {}
 
-function UpgradeService.upgrade(player: Player, carId: string, stat: string): (boolean, string?)
-	local data = DataManager.get(player)
-	if not data then return false, "No data" end
-
-	local ownedCar = data.cars[carId]
-	if not ownedCar then return false, "Car not owned" end
-
-	local statConfig = UpgradeConfig.Stats[stat]
-	if not statConfig then return false, "Invalid stat" end
-
-	local levelKey = stat .. "Level"
-	local currentLevel = ownedCar[levelKey]
-	if currentLevel >= statConfig.maxLevel then
-		return false, "Max level reached"
-	end
-
-	local cost = Utils.getUpgradeCost(statConfig.baseCost, statConfig.costMultiplier, currentLevel)
-	if not CurrencyService.spend(player, statConfig.currency, cost) then
-		return false, "Not enough " .. statConfig.currency
-	end
-
-	ownedCar[levelKey] = currentLevel + 1
-
-	-- QuestService.onUpgrade(player)
-	TutorialService.onUpgrade(player, stat)
-
-	Remotes.getEvent("DataUpdate"):FireClient(player, data)
-	return true, nil
-end
-
 function UpgradeService.init()
-	Remotes.getEvent("UpgradeStat").OnServerEvent:Connect(function(player, carId, stat)
-		if not ValidationService.checkRemoteRate(player, "UpgradeStat") then
-			return
-		end
-		if not ValidationService.canAct(player) then
-			return
-		end
-		local maxId = ValidationService.MAX_REMOTE_STRING_ID_LEN
-		if not ValidationService.isBoundedStringId(carId, maxId) or type(stat) ~= "string" then
-			if type(carId) ~= "string" or type(stat) ~= "string" then
-				ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_arg_types", "")
-			else
-				ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_car_id_len", "")
-			end
-			return
-		end
-		if #stat == 0 or #stat > 24 then
-			ValidationService.logAnomalyOncePerSession(player, "upgrade_bad_stat_len", "")
-			return
-		end
-		if UpgradeConfig.Stats[stat] == nil then
-			ValidationService.logAnomalyOncePerSession(player, "upgrade_unknown_stat", stat)
-			return
-		end
-		if not RemoteCooldown.allow(player, "UpgradeStat", Constants.REMOTE_COOLDOWN_DEFAULT) then
-			return
-		end
-		local success, err = UpgradeService.upgrade(player, carId, stat)
-		if not success then
-			NotificationDispatchService.notify(player, {
-				type = "error",
-				message = err or "Upgrade failed",
-			})
-		end
-	end)
+	-- No-op: per-car upgrades no longer exist.
 end
 
 return UpgradeService

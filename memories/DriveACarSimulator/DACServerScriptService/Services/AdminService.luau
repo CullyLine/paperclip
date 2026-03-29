@@ -167,7 +167,7 @@ local function runAdmin(player: Player, parts: { string })
 			replyErr(player, "Usage: /admin give <currency> <amount>")
 			return
 		end
-		if kind == "coins" or kind == "sandGranules" or kind == "icycles" or kind == "magmaCores" or kind == "infinitium" then
+		if kind == "coins" or kind == "gems" then
 			DataManager.addCurrency(player, kind, n, "admin")
 			syncFull(player)
 			reply(player, `Added {n} {kind}.`)
@@ -464,7 +464,7 @@ local function handleAdminCommand(player: Player, payload: { [string]: any })
 		local kind = payload.currency
 		local amount = tonumber(payload.amount)
 		if type(kind) ~= "string" or not amount or amount <= 0 then return end
-		if kind == "coins" or kind == "sandGranules" or kind == "icycles" or kind == "magmaCores" or kind == "infinitium" then
+		if kind == "coins" or kind == "gems" then
 			DataManager.addCurrency(target, kind, math.floor(amount), "admin")
 			syncFull(target)
 			reply(player, `Gave {target.Name} {Utils.formatNumber(amount)} {kind}`)

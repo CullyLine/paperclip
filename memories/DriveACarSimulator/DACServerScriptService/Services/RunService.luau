@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Manages driving runs: start, distance tracking, laps, gas depletion, payout.
-	Car spawning/despawning, physical start zones, anti-cheat, quest/BP integration.
+	Manages driving runs: start, distance tracking, laps, gas depletion,
+	checkpoint-based coin awards, car spawning/despawning.
 ]]
 
 local Players = game:GetService("Players")
@@ -15,16 +15,13 @@ local NotificationDispatchService = require(script.Parent:WaitForChild("Notifica
 local Constants = require(DAC:WaitForChild("Constants"))
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
+local CheckpointConfig = require(DAC:WaitForChild("Config"):WaitForChild("CheckpointConfig"))
 
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local CarService = require(script.Parent:WaitForChild("CarService"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
 local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
-local PetService = require(script.Parent:WaitForChild("PetService"))
 local RemoteCooldown = require(script.Parent:WaitForChild("RemoteCooldown"))
--- v1.0: BattlePass and Quests disabled
--- local BattlePassService = require(script.Parent:WaitForChild("BattlePassService"))
--- local QuestService = require(script.Parent:WaitForChild("QuestService"))
 local MilestoneCeremonyService = require(script.Parent:WaitForChild("MilestoneCeremonyService"))
 local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
 local EventService = require(script.Parent:WaitForChild("EventService"))
@@ -74,7 +71,6 @@ local function clampNonNegativeFinite(n: number, fallback: number): number
 	return n
 end
 
--- Declared before any function uses it (avoids nil activeRuns during circular requires).
 type ActiveRun = {
 	player: Player,
 	carId: string,
@@ -84,25 +80,22 @@ type ActiveRun = {
 	currentLapDistance: number,
 	laps: number,
 	gasRemaining: number,
-	speed: number,
 	power: number,
+	acceleration: number,
 	highwayLength: number,
+	checkpointsHit: { [number]: boolean },
+	coinsEarnedThisRun: number,
 	nearMissChain: number?,
 	nearMissChainAt: number?,
 	nearMissLastClaim: number?,
 	nearMissCoinsThisRun: number?,
 	nearMissBestChain: number,
 	lapStartClock: number,
-	--- Completed lap time for the previous lap in this run (for lap-to-lap delta).
 	lastLapTimeSeconds: number?,
-	--- Last time player snapped to lane center (RequestVehicleReset); cooldown UX.
 	lastVehicleResetClock: number?,
-	--- Authoritative lane anchor from server at run start / respawn (POLA-628).
 	laneCenterX: number,
 	laneAnchorZ: number,
-	--- Single recovery path cooldown — avoids teleport spam loops.
 	lastPhysicsRecoveryAt: number?,
-	--- Throttle invalid-state checks inside tick.
 	physicsCheckAccum: number,
 	currentSpeed: number,
 	distanceAtMaxSpeed: number,
@@ -255,6 +248,51 @@ local function hookPlayerCharacter(player: Player, character: Model)
 	end
 end
 
+-- Checkpoint reward logic
+
+local function getCheckpointThresholds(highwayLength: number): { number }
+	local count = Constants.CHECKPOINT_COUNT
+	local thresholds = {}
+	for i = 1, count do
+		thresholds[i] = highwayLength * i / count
+	end
+	return thresholds
+end
+
+local function tryAwardCheckpoints(run: ActiveRun)
+	local thresholds = getCheckpointThresholds(run.highwayLength)
+	local rewards = CheckpointConfig.getRewards(run.worldId)
+	local data = DataManager.get(run.player)
+	if not data then
+		return
+	end
+
+	local upgrades = data.rebirthUpgrades or {}
+	local currencyMult = 1 + ((upgrades :: any).moreCurrency or 0) * 5 / 100
+
+	for i, threshold in thresholds do
+		if run.currentLapDistance >= threshold and not run.checkpointsHit[i] then
+			run.checkpointsHit[i] = true
+			local baseReward = rewards[i] or 0
+			local finalReward = math.floor(baseReward * currencyMult)
+
+			CurrencyService.add(run.player, "coins", finalReward, "checkpoint")
+			run.coinsEarnedThisRun += finalReward
+
+			if type(data.stats) == "table" then
+				data.stats.totalCoinsEarned = (data.stats.totalCoinsEarned or 0) + finalReward
+			end
+
+			Remotes.getEvent("CheckpointHit"):FireClient(run.player, {
+				checkpoint = i,
+				totalCheckpoints = Constants.CHECKPOINT_COUNT,
+				reward = finalReward,
+				totalCoinsThisRun = run.coinsEarnedThisRun,
+			})
+		end
+	end
+end
+
 -- Run lifecycle
 
 function DACRunService.startRun(player: Player): (boolean, string?)
@@ -281,8 +319,8 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 	if not isFiniteNumber(gas0) or gas0 < 0 then
 		return false, "Invalid vehicle stats"
 	end
-	local spd0 = clampNonNegativeFinite(stats.speed, 0)
 	local pow0 = clampNonNegativeFinite(stats.power, 0)
+	local accel0 = clampNonNegativeFinite(stats.acceleration, 30)
 
 	if not spawnCarForPlayer(player, carId) then
 		local tmpl = CarConfig.getCarTemplateName(carId) or carId
@@ -306,9 +344,11 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 		currentLapDistance = 0,
 		laps = 0,
 		gasRemaining = gas0,
-		speed = spd0,
 		power = pow0,
+		acceleration = accel0,
 		highwayLength = world.highwayLength,
+		checkpointsHit = {},
+		coinsEarnedThisRun = 0,
 		nearMissChain = 0,
 		nearMissChainAt = 0,
 		nearMissLastClaim = 0,
@@ -334,6 +374,7 @@ function DACRunService.startRun(player: Player): (boolean, string?)
 		worldId = data.currentWorld,
 		highwayLength = world.highwayLength,
 		isFirstRunOfDay = isFirstRunOfDay,
+		checkpointCount = Constants.CHECKPOINT_COUNT,
 	})
 
 	TutorialService.onStartRun(player)
@@ -396,8 +437,6 @@ end
 
 function DACRunService.tick(dt: number)
 	for _, run in activeRuns do
-		-- Orphan guard: if player instance was destroyed before PlayerRemoving/unload
-		-- (rare), finalize while DataManager may still have profile, else endRun drops run.
 		if not run.player.Parent then
 			DACRunService.finalizeRunOnLeave(run.player)
 			continue
@@ -409,6 +448,7 @@ function DACRunService.tick(dt: number)
 			run.physicsCheckAccum = 0
 			tryRecoverRunPhysics(run)
 		end
+
 		local gasConsumed = Constants.GAS_DRAIN_RATE * safeDt
 		if not isFiniteNumber(run.gasRemaining) then
 			DACRunService.endRun(run.player)
@@ -421,14 +461,18 @@ function DACRunService.tick(dt: number)
 			continue
 		end
 
-		local maxSpeed = run.speed
+		local maxSpeed = run.power
 		if not isFiniteNumber(maxSpeed) or maxSpeed < 0 then
 			local st = CarService.getEffectiveStats(run.player, run.carId)
-			maxSpeed = if st and isFiniteNumber(st.speed) and st.speed >= 0 then st.speed else 0
-			run.speed = maxSpeed
+			maxSpeed = if st and isFiniteNumber(st.power) and st.power >= 0 then st.power else 0
+			run.power = maxSpeed
 		end
 
-		local accelRate = 8 + run.power * 0.5
+		local accelTime = run.acceleration
+		if not isFiniteNumber(accelTime) or accelTime <= 0 then
+			accelTime = 30
+		end
+		local accelRate = maxSpeed / accelTime
 		run.currentSpeed = math.min(maxSpeed, run.currentSpeed + accelRate * safeDt)
 		local spd = run.currentSpeed
 
@@ -452,9 +496,12 @@ function DACRunService.tick(dt: number)
 			run.currentLapDistance = 0
 		end
 
+		tryAwardCheckpoints(run)
+
 		if run.currentLapDistance >= run.highwayLength then
 			run.laps += 1
 			run.currentLapDistance = run.currentLapDistance - run.highwayLength
+			run.checkpointsHit = {}
 
 			local nowClock = os.clock()
 			local lapTimeSeconds = math.max(0, nowClock - run.lapStartClock)
@@ -497,6 +544,7 @@ function DACRunService.tick(dt: number)
 				lapTimeSeconds = lapTimeSeconds,
 				lapDeltaSecondsFromBest = lapDeltaSecondsFromBest,
 				lapDeltaSecondsFromLast = lapDeltaSecondsFromLast,
+				coinsEarnedThisRun = run.coinsEarnedThisRun,
 			})
 
 			if
@@ -514,8 +562,6 @@ function DACRunService.endRun(player: Player)
 	local run = activeRuns[player.UserId]
 	if not run then return end
 
-	-- Require session data before removing the active run. If unload already cleared
-	-- profile, drop the orphaned run without mutating currency (idempotent second calls).
 	local data = DataManager.get(player)
 	if not data then
 		activeRuns[player.UserId] = nil
@@ -524,180 +570,8 @@ function DACRunService.endRun(player: Player)
 
 	activeRuns[player.UserId] = nil
 
-	-- Authoritative bounds: distance vs elapsed×speed; laps vs distance (POLA-539).
-	local elapsed = os.clock() - run.startTime
-	if not isFiniteNumber(elapsed) or elapsed < 0 then
-		elapsed = 0
-	end
-
-	local hl = clampNonNegativeFinite(run.highwayLength, 1)
-	if hl <= 0 then
-		hl = 1
-	end
-	run.highwayLength = hl
-
-	run.totalDistance = clampNonNegativeFinite(run.totalDistance, 0)
-
-	local statsForPayout = CarService.getEffectiveStats(player, run.carId)
-	local rs = run.speed
-	local ss = statsForPayout and statsForPayout.speed or 0
-	local speedForBound = 0
-	if isFiniteNumber(rs) and isFiniteNumber(ss) then
-		speedForBound = math.min(math.max(0, rs), math.max(0, ss))
-	elseif isFiniteNumber(ss) then
-		speedForBound = math.max(0, ss)
-	elseif isFiniteNumber(rs) then
-		speedForBound = math.max(0, rs)
-	end
-
-	local maxPlausibleDist = elapsed * speedForBound * Constants.RUN_PAYOUT_MAX_DISTANCE_VS_ELAPSED_SLACK
-	if isFiniteNumber(maxPlausibleDist) and maxPlausibleDist >= 0 then
-		local beforeDist = run.totalDistance
-		local cappedDist = math.min(beforeDist, maxPlausibleDist)
-		-- Privacy-safe: one line per session when payout distance is reduced (POLA-539 telemetry).
-		if cappedDist + 0.5 < beforeDist then
-			ValidationService.logAnomalyOncePerSession(player, "run_payout_distance_capped", "")
-		end
-		run.totalDistance = cappedDist
-	end
-
-	local maxLapsByDistance = math.floor(run.totalDistance / hl) + 1
-	if isFiniteNumber(run.laps) and run.laps >= 0 then
-		local beforeLaps = run.laps
-		run.laps = math.min(run.laps, maxLapsByDistance)
-		if beforeLaps > run.laps then
-			ValidationService.logAnomalyOncePerSession(player, "run_payout_laps_capped", "")
-		end
-	else
-		run.laps = 0
-	end
-
 	GroupRewardService.syncGroupMembership(player)
 	GroupRewardService.tryGrantJoinRewards(player)
-
-	local world = WorldConfig.Worlds[run.worldId]
-	local coinMultiplier = 1
-	if world and isFiniteNumber(world.coinMultiplier) and world.coinMultiplier >= 0 then
-		coinMultiplier = world.coinMultiplier
-	end
-
-	local baseCoins = run.totalDistance * Constants.DISTANCE_TO_COINS_RATE
-	local worldCoins = baseCoins * coinMultiplier
-
-	local equippedPets = {}
-	for _, pet in data.pets do
-		if pet.equipped then
-			table.insert(equippedPets, pet)
-		end
-	end
-	local petModifier = PetService.getEffectivePetCoinModifier(player, equippedPets)
-	if not isFiniteNumber(petModifier) or petModifier < 0 then
-		petModifier = 1
-	else
-		petModifier = math.min(petModifier, Constants.RUN_PAYOUT_MAX_PET_COIN_MODIFIER)
-	end
-	local petCoins = worldCoins * petModifier
-
-	local effectivePower = 0
-	if statsForPayout and isFiniteNumber(statsForPayout.power) and statsForPayout.power >= 0 then
-		effectivePower = math.min(statsForPayout.power, Constants.RUN_PAYOUT_MAX_POWER_STAT)
-	end
-	local maxSpeedFraction = if run.totalDistance > 0
-		then math.clamp(run.distanceAtMaxSpeed / run.totalDistance, 0, 1)
-		else 0
-	local powerMultiplier = 1 + effectivePower * 0.01 * maxSpeedFraction
-	if not isFiniteNumber(powerMultiplier) or powerMultiplier < 0 then
-		powerMultiplier = 1
-	end
-	local afterPower = petCoins * powerMultiplier
-
-	local today = utcDateString()
-	local runOfDayMult = 1
-	local isFirstRunOfDay = data.lastRunOfDayDate ~= today
-	if isFirstRunOfDay then
-		runOfDayMult = 3
-		data.lastRunOfDayDate = today
-	end
-
-	local passMultiplier = 1
-	if GamePassService.hasPass(player, "double_coins") then
-		passMultiplier = 2
-	end
-
-	local PremiumService = require(script.Parent:WaitForChild("PremiumService"))
-	local premiumMultiplier = 1
-	if PremiumService.isPremium(player) then
-		premiumMultiplier = 1 + Constants.PREMIUM_COIN_BONUS
-	end
-
-	local groupMultiplier = GroupRewardService.getRunCoinMultiplier(player)
-	local friendMultiplier = FriendBonusService.getRunCoinMultiplier(player)
-
-	local product = afterPower * passMultiplier * premiumMultiplier * runOfDayMult * groupMultiplier * friendMultiplier
-	if not isFiniteNumber(product) or product < 0 then
-		product = 0
-	end
-	local totalCoins = math.floor(product)
-	local coinBoostMultiplier = 1
-	if GamePassService.hasPass(player, "coin_boost") then
-		coinBoostMultiplier = 1.1
-		if isFiniteNumber(totalCoins) then
-			totalCoins = math.floor(totalCoins * coinBoostMultiplier)
-		else
-			totalCoins = 0
-		end
-	end
-
-	local founderMult = EventService.getFounderCoinMultiplier()
-	if not isFiniteNumber(founderMult) or founderMult < 0 then
-		founderMult = 1
-	end
-	if not isFiniteNumber(totalCoins) or totalCoins < 0 then
-		totalCoins = 0
-	end
-	if totalCoins > 1_000_000_000_000 then
-		totalCoins = 1_000_000_000_000
-	end
-	local runCurrencyKey = WorldConfig.getCurrencyKey(run.worldId)
-	local awardedCoins = CurrencyService.add(player, runCurrencyKey, totalCoins, "run_complete")
-
-	TutorialService.onRunEnd(player, awardedCoins)
-
-	local battlePassXpEarned = math.max(0, math.floor(run.totalDistance / 100))
-
-	local isPersonalBest = false
-	local statsBlock = data.stats
-	if type(statsBlock) == "table" then
-		if type(statsBlock.bestSingleRun) ~= "number" then
-			statsBlock.bestSingleRun = 0
-		end
-		local prevBest = statsBlock.bestSingleRun
-		isPersonalBest = run.totalDistance > prevBest
-		statsBlock.bestSingleRun = math.max(prevBest, run.totalDistance)
-	end
-
-	-- BattlePassService.addXP(player, run.totalDistance)
-	local battlePassXpAfter = 0
-	if data.battlePass and type(data.battlePass.xp) == "number" then
-		battlePassXpAfter = data.battlePass.xp
-	end
-	-- QuestService.onRunEnd(player, {
-	-- 	distance = run.totalDistance,
-	-- 	laps = run.laps,
-	-- 	coinsEarned = awardedCoins,
-	-- 	worldId = run.worldId,
-	-- })
-
-	local dailyLoginStreak = 0
-	if data.dailyReward and type(data.dailyReward.streak) == "number" then
-		dailyLoginStreak = data.dailyReward.streak
-	end
-	local nearMissChain = run.nearMissBestChain or 0
-	if not isFiniteNumber(nearMissChain) or nearMissChain < 0 then
-		nearMissChain = 0
-	end
-	local nmRaw = run.nearMissCoinsThisRun or 0
-	local nearMissBonusCoins = if isFiniteNumber(nmRaw) and nmRaw >= 0 then math.floor(nmRaw) else 0
 
 	data.stats.totalDistance += run.totalDistance
 	data.stats.totalLaps += run.laps
@@ -712,9 +586,20 @@ function DACRunService.endRun(player: Player)
 	data.stats.totalRunsCompleted = prevRuns + 1
 	MilestoneCeremonyService.tryTotalRunsMilestones(player, data, prevRuns, data.stats.totalRunsCompleted)
 
+	local isPersonalBest = false
+	local statsBlock = data.stats
+	if type(statsBlock) == "table" then
+		if type(statsBlock.bestSingleRun) ~= "number" then
+			statsBlock.bestSingleRun = 0
+		end
+		local prevBest = statsBlock.bestSingleRun
+		isPersonalBest = run.totalDistance > prevBest
+		statsBlock.bestSingleRun = math.max(prevBest, run.totalDistance)
+	end
+
 	AchievementService.onRunEnded(player, {
 		worldId = run.worldId,
-		speed = run.speed,
+		speed = run.power,
 		maxNearMissChain = run.nearMissBestChain or 0,
 		laps = run.laps,
 	})
@@ -729,37 +614,24 @@ function DACRunService.endRun(player: Player)
 		end
 	end)
 
+	local nearMissChain = run.nearMissBestChain or 0
+	if not isFiniteNumber(nearMissChain) or nearMissChain < 0 then
+		nearMissChain = 0
+	end
+	local nmRaw = run.nearMissCoinsThisRun or 0
+	local nearMissBonusCoins = if isFiniteNumber(nmRaw) and nmRaw >= 0 then math.floor(nmRaw) else 0
+
+	TutorialService.onRunEnd(player, run.coinsEarnedThisRun)
+
 	Remotes.getEvent("EndRun"):FireClient(player, {
 		totalDistance = run.totalDistance,
 		laps = run.laps,
-		dailyLoginStreak = dailyLoginStreak,
+		coinsEarned = run.coinsEarnedThisRun,
 		nearMissBestChain = nearMissChain,
 		nearMissBonusCoins = nearMissBonusCoins,
-		firstSessionOnboarding = {
-			offerFirstPayoutCopy = prevRuns == 0,
-		},
-		coinsEarned = awardedCoins,
-		currencyKey = runCurrencyKey,
+		currencyKey = "coins",
 		currencyName = WorldConfig.getCurrencyName(run.worldId),
-		runOfDayMultiplier = runOfDayMult,
-		runOfDayCelebration = runOfDayMult == 3,
-		founderMultiplier = founderMult,
-		battlePassXpEarned = battlePassXpEarned,
-		battlePassXpAfter = battlePassXpAfter,
 		isPersonalBest = isPersonalBest,
-		breakdown = {
-			base = math.floor(baseCoins),
-			worldMultiplier = coinMultiplier,
-			petModifier = petModifier,
-			powerMultiplier = powerMultiplier,
-			passMultiplier = passMultiplier,
-			premiumMultiplier = premiumMultiplier,
-			runOfDayMultiplier = runOfDayMult,
-			coinBoostMultiplier = coinBoostMultiplier,
-			founderMultiplier = founderMult,
-			groupMultiplier = groupMultiplier,
-			friendMultiplier = friendMultiplier,
-		},
 	})
 end
 
@@ -784,10 +656,6 @@ function DACRunService.adminAbortRunNoPayout(player: Player)
 	activeRuns[player.UserId] = nil
 end
 
---[[
-	POLA-561: One authoritative payout per run — call from DataManager.unload before
-	session data is cleared. Idempotent; safe if no active run.
-]]
 function DACRunService.finalizeRunOnLeave(player: Player)
 	if activeRuns[player.UserId] == nil then
 		return
@@ -911,7 +779,6 @@ function DACRunService.init()
 			return { ok = false, reason = "cooldown", remainingSec = rem }
 		end
 		run.lastVehicleResetClock = now
-		-- POLA-628: authoritative lateral snap so client lane-center reset matches server car/HRP.
 		local char = player.Character
 		local car = char and char:FindFirstChild("Car") :: Model?
 		local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
