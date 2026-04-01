@@ -8,12 +8,19 @@ local EggConfig = {}
 ]]
 EggConfig.SpotlightEggId = "grass_egg"
 
+--[[
+	Egg prices vs CheckpointConfig lap totals (~20k / 44k / 100k / 240k / 600k):
+	  Forest: starter buys; grass is ~10% of a lap
+	  Desert: standard egg <1 lap; premium ~3–4 laps
+	  Ice: several laps but below world unlock (1.5M)
+	  Volcano: premium grind (~8 laps) vs 8M unlock
+]]
 EggConfig.Eggs = {
 	basic_egg = {
 		id = "basic_egg",
 		name = "Meadow Egg",
 		modelName = "Basic",
-		price = 1_500,
+		price = 1_200,
 		currency = "coins",
 		worldId = "forest",
 		drops = {
@@ -28,7 +35,7 @@ EggConfig.Eggs = {
 		id = "grass_egg",
 		name = "Grass Egg",
 		modelName = "Grass",
-		price = 2_500,
+		price = 2_000,
 		currency = "coins",
 		worldId = "forest",
 		drops = {
@@ -38,6 +45,22 @@ EggConfig.Eggs = {
 			{ petId = "wolf", rarity = "rare", weight = 10 },
 			{ petId = "eagle", rarity = "rare", weight = 4 },
 			{ petId = "dragon_hatchling", rarity = "epic", weight = 1 },
+		},
+	},
+
+	brainrot_egg = {
+		id = "brainrot_egg",
+		name = "Italian Brainrot Egg",
+		modelName = "Brainrot",
+		price = 50_000,
+		currency = "coins",
+		worldId = "forest",
+		drops = {
+			{ petId = "tung_tung", rarity = "common", weight = 40 },
+			{ petId = "tralalero", rarity = "uncommon", weight = 30 },
+			{ petId = "bombardiro", rarity = "rare", weight = 18 },
+			{ petId = "cappuccino", rarity = "epic", weight = 9 },
+			{ petId = "bombombini", rarity = "legendary", weight = 3 },
 		},
 	},
 
@@ -61,7 +84,7 @@ EggConfig.Eggs = {
 		id = "scorching_egg",
 		name = "Scorching Egg",
 		modelName = "Scorching",
-		price = 2_000,
+		price = 160_000,
 		currency = "coins",
 		worldId = "desert",
 		drops = {
@@ -77,7 +100,7 @@ EggConfig.Eggs = {
 		id = "frozen_egg",
 		name = "Frozen Egg",
 		modelName = "Frozen",
-		price = 10_000,
+		price = 600_000,
 		currency = "coins",
 		worldId = "ice",
 		drops = {
@@ -95,7 +118,7 @@ EggConfig.Eggs = {
 		id = "neon_egg",
 		name = "Neon Egg",
 		modelName = "Neon",
-		price = 5_000,
+		price = 2_000_000,
 		currency = "coins",
 		worldId = "volcano",
 		drops = {

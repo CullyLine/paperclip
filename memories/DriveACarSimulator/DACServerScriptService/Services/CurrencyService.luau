@@ -8,8 +8,37 @@ local Constants = require(DAC:WaitForChild("Constants"))
 local DataManager = require(script.Parent.Parent:WaitForChild("DataManager"))
 local EventService = require(script.Parent:WaitForChild("EventService"))
 local AchievementService = require(script.Parent:WaitForChild("AchievementService"))
+local GamePassService = require(script.Parent:WaitForChild("GamePassService"))
+local PremiumService = require(script.Parent:WaitForChild("PremiumService"))
 
 local CurrencyService = {}
+
+--[[
+	Sources that count as “earned on the road” for game pass + Premium coin multipliers.
+	Excludes codes, dev products, admin, daily streak grants, etc.
+]]
+local GAMEPLAY_COIN_SOURCES: { [string]: boolean } = {
+	checkpoint = true,
+	near_miss = true,
+	playtime = true,
+}
+
+local function gameplayCoinMultiplier(player: Player, source: string): number
+	if not GAMEPLAY_COIN_SOURCES[source] then
+		return 1
+	end
+	local mult = 1
+	if GamePassService.hasPass(player, "double_coins") then
+		mult *= 2
+	end
+	if GamePassService.hasPass(player, "coin_boost") then
+		mult *= 1.1
+	end
+	if PremiumService.isPremium(player) then
+		mult *= 1 + Constants.PREMIUM_COIN_BONUS
+	end
+	return mult
+end
 
 function CurrencyService.add(player: Player, currency: string, amount: number, source: string): number
 	if amount ~= amount or amount == math.huge or amount == -math.huge then
@@ -19,9 +48,12 @@ function CurrencyService.add(player: Player, currency: string, amount: number, s
 		return 0
 	end
 	local grant = amount
+	if currency == "coins" then
+		grant = math.floor(amount * gameplayCoinMultiplier(player, source) + 0.5)
+	end
 	local m = EventService.getFounderCoinMultiplier()
 	if m > 1 then
-		grant = math.floor(amount * m + 0.5)
+		grant = math.floor(grant * m + 0.5)
 	end
 	if DataManager.addCurrency(player, currency, grant, source) then
 		if currency == "coins" and grant > 0 then

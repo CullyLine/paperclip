@@ -17,38 +17,76 @@ creating, modifying, or extending pet assets MUST follow these specifications ex
 - Small noses, minimal mouths (smile line or tiny open mouth)
 - Colors are vibrant and saturated, not muted or realistic
 
-### 1.2 Image Generation Prompt Template
+### 1.2 Reference-Based Concept Art (CRITICAL)
+
+**Always use a reference image of the real character** when generating concept art
+for pets based on existing characters (memes, IPs, etc.). The reference image ensures
+the generated pet actually looks like the character, not a generic interpretation.
+
+**Two-reference approach:**
+1. **Character reference** — a screenshot/image of the actual character (downloaded to
+   `memories/3d-experiments/<name>-ref.jpg`). Pass as `reference_image_paths`.
+2. **Style enforcement** — the prompt itself enforces chibi toy proportions.
+
+This combination produces pets that are both **recognizable** and **game-style-consistent**.
+Without the character reference, concept art tends to drift into generic interpretations
+that don't match the source material.
+
+### 1.3 Image Generation Prompt Template
 
 Every pet concept art image MUST use this prompt structure:
 
 ```
-ONE SINGLE cute chibi [CREATURE_DESCRIPTION] pet character for a Roblox game.
-[BODY_DESCRIPTION with specific colors, markings, and features].
-[EYE_DESCRIPTION]. [DISTINCTIVE_FEATURES].
-Simplified rounded toy-like proportions.
+ONE SINGLE adorable chibi super-deformed Roblox collectible pet toy figure based on
+[CHARACTER_NAME]. The character is [BODY_DESCRIPTION from reference — shape, colors, key features].
+Key features from the reference: [LIST 3-4 DEFINING VISUAL ELEMENTS].
+CHIBI STYLE: oversized head (40-50% of total body), very stubby short [arms/limbs]
+in T-pose spread out from body, very stubby short legs. The proportions should look
+like a squishy collectible vinyl toy figure - round, smooth, simplified.
+Think Funko Pop or Pet Simulator X pet style.
+NO [weapons/accessories to exclude] - empty tiny hands.
+Vibrant saturated colors, smooth toy-like surfaces.
 Only ONE character, no text, no labels.
-Centered on pure white background, product photography lighting, studio render.
+Centered on pure white background, product photography lighting, studio render,
+front three-quarter view.
 ```
 
-### 1.3 Mandatory Prompt Rules
+### 1.4 Mandatory Prompt Rules
 
 | Rule | Reason |
 |------|--------|
 | "ONE SINGLE" at start | Prevents multi-character lineups |
+| Always pass character reference image | Ensures accuracy to source material |
+| "chibi super-deformed" + "squishy collectible vinyl toy" | Enforces game art style |
+| "Think Funko Pop or Pet Simulator X pet style" | Anchors to correct proportions |
+| "front three-quarter view" | Best 3D reconstruction angle |
 | "no text, no labels" | Prevents species/rarity text overlays |
 | "pure white background" | Clean isolation for 3D generation |
 | "product photography lighting, studio render" | Consistent soft lighting, no dramatic shadows |
-| "Simplified rounded toy-like proportions" | Enforces chibi style |
-| "Centered" | Optimal framing for Hunyuan3D input |
-| Front or three-quarter view | Best 3D reconstruction angle |
+| "T-pose" for humanoids/armed characters | Prevents limb fusion during decimation |
+| No brand logos (Nike, Naruto, etc.) | Roblox TOS risk + mangled at low poly |
+| No held weapons/accessories | They don't survive decimation — add in Studio instead |
+| Clear gaps between appendages | Wings, fins, arms need visible separation for bone placement |
+| "very stubby short" for ALL limbs | Prevents tall/lanky proportions that break chibi style |
 
-### 1.4 Reference Image
+### 1.5 Reference Images
 
-Use `memories/DriveACarSimulator/ConceptArt/pet-designs-rarity-tiers.png` as a
-style reference when generating concept art. Pass it as a reference image to
-maintain visual consistency with the established lineup.
+**Character references** are stored at `memories/3d-experiments/<name>-ref.jpg`.
+Download from Know Your Meme, fan wikis, or official sources using a Python script.
 
-### 1.5 Concept Art File Convention
+**To download a reference image:**
+```python
+import urllib.request
+req = urllib.request.Request(url, headers={
+    "User-Agent": "Mozilla/5.0 ...",
+    "Referer": "https://knowyourmeme.com/",
+})
+urllib.request.urlretrieve(url, "memories/3d-experiments/<name>-ref.jpg")
+```
+
+Never use PowerShell for downloads — always Python.
+
+### 1.6 Concept Art File Convention
 
 Save to: `assets/pet-{name}-concept.png`
 
@@ -116,8 +154,10 @@ v3 produces full PBR/textured GLBs suitable for production. Never use v2.
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Target faces | **340** | Produces 300–400 face models |
-| Voxel size | **0.005** | Controls remesh density; larger = fewer faces |
+| Target faces (standard) | **340** | Produces 300–400 face models |
+| Target faces (detailed) | **600–800** | Humanoids with fingers/toes, complex silhouettes |
+| Voxel size (standard) | **0.032** | For ~340 face pets |
+| Voxel size (detailed) | **0.020–0.025** | For ~600-800 face pets |
 | Bake resolution | **1024 x 1024** | Diffuse color bake from high-poly to low-poly |
 | Bake engine | Cycles (CPU) | 64 samples, diffuse color pass only |
 | UV method | Smart UV Project | angle_limit=1.15192, island_margin=0.02 |
@@ -139,78 +179,185 @@ v3 produces full PBR/textured GLBs suitable for production. Never use v2.
 `decimate.py` at repo root. Usage:
 
 ```
-blender --background --python decimate.py -- <input.glb> <output.glb> 340 0.005
+blender --background --python decimate.py -- <input.glb> <output.glb> 340 0.032
 ```
 
-### 4.4 File Convention
+### 4.4 Manual Cleanup (if needed)
+
+After decimation, inspect the model in Blender. If any geometry is problematic
+(e.g. appendages that decimated into inappropriate shapes), manually edit:
+
+1. Open the decimated GLB in Blender
+2. Enter edit mode, select and delete problematic vertices/faces
+3. Select remaining open edges → Merge at Center (or By Distance)
+4. Adjust merged vertices if needed for a clean silhouette
+5. Export as GLB, overwriting the same file
+
+### 4.5 File Convention
 
 - Game-ready output: `memories/3d-experiments/{name}-game-340.glb`
 - Expected size: **400 KB – 1.5 MB** (mesh + packed 1024px texture)
 
 ---
 
-## 5. Auto-Rigging — UniRig
+## 5. Visual Polish — Texture Enhancement + AO
 
-### 5.1 Location
+After decimation (and any manual cleanup), apply visual polish. This step enhances
+the baked texture without modifying geometry.
+
+### 5.1 What It Does
+
+| Enhancement | Value | Effect |
+|-------------|-------|--------|
+| Shade smooth | normals only | Soft lighting on faces, no vertex movement |
+| Saturation boost | **+40%** | Vibrant toy-like colors |
+| Contrast boost | **+15%** | Crisper definition between color regions |
+| Brightness lift | **+5%** | Midtones feel more alive |
+| Ambient occlusion | bake × multiply (30% floor) | Depth in crevices without extra geometry |
+
+### 5.2 Script
+
+`memories/3d-experiments/polish-pet.py`. Usage:
+
+```
+blender --background --python polish-pet.py -- <input.glb> <output.glb>
+```
+
+Input and output can be the same file (in-place polish).
+
+### 5.3 CRITICAL: No Geometry Smoothing
+
+**NEVER** apply Corrective Smooth, Laplacian Smooth, Subdivision Surface, or any
+modifier that moves vertices on decimated meshes. These meshes have non-manifold
+geometry (disconnected faces from voxel remesh + collapse) and geometry-modifying
+modifiers will "explode" the mesh — pulling faces apart at seams.
+
+**Only shade smooth is safe** — it changes normal direction for rendering, not vertex positions.
+
+### 5.4 File Convention
+
+Polish is applied in-place to `{name}-game-340.glb`. No separate filename needed.
+
+---
+
+## 6. Auto-Rigging — UniRig
+
+### 6.1 Location
 
 - UniRig root: `F:\CODE STUFF\tools\UniRig\`
 - Python venv: `F:\CODE STUFF\tools\UniRig\venv\`
 - Required env: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
 
-### 5.2 Pipeline (4 steps)
+### 6.2 Pipeline — Highpoly Rig Strategy (6 steps)
 
-1. **Extract** (`src.data.extract`): Converts mesh to internal format
-2. **Skeleton** (CPU, `run.py`): Predicts bone structure (~30–120s)
-   - Config: `configs/task/quick_inference_skeleton_articulationxl_ar_256_cpu.yaml`
-   - Uses eager attention (not flash_attention_2) for CPU compatibility
-3. **Skin** (GPU, `run.py`): Predicts skinning weights (~40–600s)
+**Key insight:** Rigging from the **highpoly** model (500K faces → UniRig's internal
+50K decimate) produces significantly better bones (15-20+ vs 8-12 from lowpoly). The
+skeleton is then **merged onto the lowpoly** game model.
+
+**Production script:** `memories/3d-experiments/rig-pet.py` (handles all 6 steps):
+
+```bash
+python memories/3d-experiments/rig-pet.py <pet_name>   # single
+python memories/3d-experiments/rig-pet.py --all         # all brainrot pets
+```
+
+1. **Extract** from highpoly (`src.data.extract`): Converts mesh to internal format
+2. **Skeleton** on highpoly (GPU, `run.py`): Predicts bone structure (~20–30s)
+   - Config: `configs/task/quick_inference_skeleton_articulationxl_ar_256_gpu_eager.yaml`
+   - Uses `eager` attention (NOT `flash_attention_2` — causes OOM/freezes on Windows WDDM)
+   - System config: `ar_inference_articulationxl_minvram` (num_beams=1 to reduce VRAM)
+3. **Copy NPZ** to both `results/` AND `tmp/results/` (fixes skinning path bug)
+4. **Skin** (GPU, `run.py`): Predicts skinning weights (~40–90s)
    - Config: `configs/task/quick_inference_unirig_skin.yaml`
    - Requires CUDA (spconv)
-4. **Merge** (`src.inference.merge`): Combines rig into original GLB
+5. **Merge** (`src.inference.merge`): Combines rig into **lowpoly** game model
+6. **Snout bone** (auto): Adds a snout bone for nose wiggle animation
 
-### 5.3 Critical Path Bridging
+### 6.3 GPU Memory Management (CRITICAL for 8GB cards)
 
-The skeleton step saves `predict_skeleton.npz` adjacent to the input model, NOT
-in the tmp directory. Before running the skin step, copy it:
+| Rule | Reason |
+|------|--------|
+| Close Blender, Roblox Studio, Discord, browsers before rigging | Frees ~2-3 GB VRAM |
+| Use `eager` attention, never `flash_attention_2` | flash_attn causes WDDM deadlocks on Windows |
+| Use `num_beams=1` (minVRAM system config) | Reduces beam search memory from 3x to 1x |
+| Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | Reduces fragmentation |
+| Run skeleton on GPU, not CPU | CPU mode hits 2GB allocation limit on some systems |
+
+### 6.4 Critical Path Bridging (NPZ Fix)
+
+The skeleton step saves `predict_skeleton.npz` in a folder named after the **input
+filename** (e.g. `tralalero-highpoly/predict_skeleton.npz`), NOT in the tmp directory.
+The skinning step looks for it in `tmp/results/<skeleton_name>/predict_skeleton.npz`.
+
+**`rig-pet.py` handles this automatically.** If running manually, copy to BOTH locations:
 
 ```
 <input-dir>/<model-name>/predict_skeleton.npz
   → results/<model-name>_skeleton/predict_skeleton.npz
+  → tmp/results/<model-name>_skeleton/predict_skeleton.npz
 ```
 
-### 5.4 Known Issues
+### 6.5 Known Issues
 
 - `bpy` crash on exit (code 3221225477 / -1073741819): harmless, output is fine
-- `rig.ps1` has a `$Input` parameter conflict with PowerShell — run steps manually
+- `rig.ps1` has a `$Input` parameter conflict with PowerShell — use Python scripts instead
 - Seed: **12345** (default, consistent results)
 - faces_target_count for extract: **50000**
+- `--time` argument is required for extract step; `rig-pet.py` generates it automatically
 
-### 5.5 Expected Skeleton Output
+### 6.6 Expected Skeleton Output (Highpoly Strategy)
 
-UniRig produces ~8–20 bones named `bone_0` through `bone_N`. The exact count and
-hierarchy varies per model shape. Typical ranges:
+With the highpoly rig strategy, UniRig produces significantly more bones than
+rigging from lowpoly. Bones are named `bone_0` through `bone_N` plus `snout`.
 
-| Shape | Bones | Notes |
-|-------|-------|-------|
-| Quadruped (cat, dog, fox, panther) | 10–15 | Spine chain + limb branches |
-| Bird (owl, phoenix) | 8–14 | Spine + wing branches |
-| Biped (dragon sitting) | 8–12 | Spine + arm/leg stubs |
-| Amorphous (jellyfish, whale) | 8–14 | Long spine chain + appendage branches |
-| Aberrant (cronenberg) | 10–18 | Unpredictable branching |
+| Shape | Bones (lowpoly) | Bones (highpoly) | Improvement |
+|-------|-----------------|-------------------|-------------|
+| Quadruped (cat, dog, fox, panther) | 10–15 | 15–25 | More limb segments |
+| Bird (owl, phoenix) | 8–14 | 14–22 | Wing tip coverage |
+| Biped (dragon sitting) | 8–12 | 12–18 | Arm/leg chains |
+| Fish/shark (tralalero) | 10 | 17 | Both fins, more dorsal segments |
+| Amorphous (jellyfish, whale) | 8–14 | 12–20 | More appendage branches |
 
-### 5.6 File Convention
+### 6.7 Post-Rig Bone Validation & Manual Fixes
+
+UniRig auto-places bones based on mesh shape. It often misses thin appendages
+(wings, fins, antennae) or places too few bones in key areas.
+
+**After every rig, validate:**
+```bash
+blender --background --python memories/3d-experiments/validate-bones.py -- <rigged.glb>
+```
+
+**If bones are missing, add them:**
+```bash
+blender --background --python memories/3d-experiments/add-bones.py -- <rigged.glb> <output.glb> <bones.json>
+```
+
+The `bones.json` specifies new bones with head/tail positions and optional parent.
+The script auto-parents to the nearest existing bone and re-calculates vertex weights.
+
+**Common missing bones by shape:**
+
+| Shape | Often Missing | Fix |
+|-------|--------------|-----|
+| Winged creature | Wing tip bones | Add 1-2 bones along wing edge |
+| Fish/shark | Fin bones, nose bone | Add bone along each fin, snout |
+| Humanoid | Finger/toe bones | Use higher poly (600-800 faces) + T-pose concept art |
+| Crocodilian | Head bone, spine segments | Add head bone, fill spine gaps |
+
+### 6.8 File Convention
 
 - Rigged output: `memories/3d-experiments/{name}-game-340_rigged.glb`
 - Expected size: rigged GLB is ~5–15% larger than decimated GLB
-- **Next step:** import into Roblox Studio and animate in **Luau** (§6). Do not require Blender batch animation for shipping.
+- **Next step:** import into Roblox Studio and animate in **Luau** (§7). Do not require Blender batch animation for shipping.
 
 ---
 
-## 6. Animation — Roblox Studio (Canonical)
+## 7. Animation — Roblox Studio (Canonical)
 
 **Production animation is in the game client**, not in Blender. Offline pipeline output is a **rigged GLB**; after import into Studio, **`PetAnimator.luau`** drives `Bone.Transform` each frame.
 
-### 6.1 Standard States
+### 7.1 Standard States
 
 | State | When |
 |-------|------|
@@ -218,14 +365,14 @@ hierarchy varies per model shape. Typical ranges:
 | **walk** | Player moving |
 | **float** | Driving / roof-ride, or flying locomotion pets |
 
-### 6.2 Implementation
+### 7.2 Implementation
 
 | Module | Role |
 |--------|------|
 | `DACReplicatedStorage/PetAnimator.luau` | Registry (`_generic`, `jellyfish`, `whale`, …), `osc()` in Luau, skeleton analysis, `start` / `setAnim` / `stop` |
 | `DACStarterPlayerScripts/Controllers/PetController.luau` | V-formation, roof-ride, calls PetAnimator |
 
-### 6.3 The `osc()` Helper (Luau)
+### 7.3 The `osc()` Helper (Luau)
 
 Same math as the old Blender reference; time is continuous (`os.clock()`), not frame index:
 
@@ -235,17 +382,26 @@ local function osc(t: number, cycles: number, amplitude: number, phase: number?)
 end
 ```
 
-### 6.4 Jellyfish and Custom Sets
+### 7.4 Scale Breathing
+
+All pets have a subtle squishy scale pulse applied by `PetAnimator`:
+- **Speed**: 1.2 Hz (gentle, not frantic)
+- **Amount**: 3% scale oscillation around base size
+- Uses `Model:ScaleTo()` — one call per frame, very cheap
+- Base scale is stored on start and restored on stop (no drift)
+- This applies to ALL pets globally, not just specific species
+
+### 7.5 Jellyfish and Custom Sets
 
 Per-pet overrides live in **`PetAnimator`** `ANIM_REGISTRY` (e.g. slower tendril motion for jellyfish). Add a new entry there when a species needs bespoke motion.
 
-### 6.5 Legacy Blender Scripts (Non-Shipping)
+### 7.6 Legacy Blender Scripts (Non-Shipping)
 
 The repo may still contain `memories/3d-experiments/universal-animate.py`, `batch-animate.py`, and related files from an earlier **Blender keyframe** experiment. **Do not** document them as part of the shipping pipeline or require them for new pets. They are optional historical reference only.
 
 ---
 
-## 7. Batch Pipeline Scripts
+## 8. Batch Pipeline Scripts
 
 All in `memories/3d-experiments/`:
 
@@ -254,13 +410,17 @@ All in `memories/3d-experiments/`:
 | `batch-submit.py` | Submit images to Hunyuan3D v3, saves request IDs to `batch-tracker.json` |
 | `batch-fetch.py` | Poll and download all completed GLBs |
 | `batch-decimate.py` | Decimate all highpoly GLBs to 340 faces |
-| `batch-rig.py` | Auto-rig all decimated models with UniRig |
+| `rig-pet.py` | **Production rig**: highpoly rig → lowpoly merge → auto snout bone |
+| `add-snout.py` | Standalone snout bone addition |
+| `rig-brainrot.py` | Legacy batch rigging (lowpoly only, superseded by `rig-pet.py`) |
+| `polish-pet.py` | Texture polish: saturation, contrast, brightness, AO bake |
+| `polish-all-brainrot.py` | Batch decimate + polish + open for review |
 | `batch-animate.py` | *(legacy; optional)* — old Blender NLA experiment; **not** shipping |
 | `batch-tracker.json` | Central state tracker (may still list legacy `animated` steps) |
 
 ---
 
-## 8. File Naming Convention
+## 9. File Naming Convention
 
 ```
 {name}-concept.png          → Concept art (in assets/)
@@ -275,7 +435,7 @@ All 3D files live in `memories/3d-experiments/`.
 
 ---
 
-## 9. Quality Targets
+## 10. Quality Targets
 
 | Metric | Target | Acceptable Range |
 |--------|--------|-----------------|
@@ -287,7 +447,7 @@ All 3D files live in `memories/3d-experiments/`.
 
 ---
 
-## 10. Roblox Integration
+## 11. Roblox Integration
 
 ### Model Location
 
@@ -332,7 +492,7 @@ visually spawned. Applies to both local and remote pet displays.
 
 ---
 
-## 11. Pet Following System
+## 12. Pet Following System
 
 ### V-Formation
 
@@ -384,7 +544,7 @@ All VFX from the original pet system are preserved:
 
 ---
 
-## 12. Produced Pet Inventory
+## 13. Produced Pet Inventory
 
 | # | Pet | Rarity | Faces | Rigged GLB (~) | Roblox Model | Bones | Status |
 |---|-----|--------|-------|----------------|-------------|-------|--------|

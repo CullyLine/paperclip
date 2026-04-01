@@ -118,8 +118,8 @@ end
 ]]
 function PetService.getEffectivePetTrainingModifier(player: Player, equippedPets: { { power: number } }): number
 	local base = Utils.calculatePetModifier(equippedPets)
-	if GamePassService.hasPass(player, "pet_magnet") then
-		return base * 1.1
+	if GamePassService.hasPass(player, "training_boost") then
+		return base * 1.15
 	end
 	return base
 end

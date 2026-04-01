@@ -31,13 +31,13 @@ FirstTimeConfig.FirstPetHatched = {
 	"BONDED! {PetName} will never leave your side. Let's GO!",
 }
 
--- Matches RebirthConfig.ResetOnRebirth: coins + eggs + per-car levels reset; cars & pets kept.
+-- Matches RebirthConfig.ResetOnRebirth: coins + trained power reset; cars, pets & eggs kept.
 FirstTimeConfig.FirstRebirth = {
-	"REBORN! Coins, egg stash, and car upgrades reset — your permanent rebirth stats just jumped!",
-	"FIRST REBIRTH! Garage & pets stay; coins, eggs, and per-car upgrades reset — Gas, Power, and Speed bonuses are forever!",
+	"REBORN! Coins and training power reset — your permanent rebirth stats just jumped!",
+	"FIRST REBIRTH! Garage, pets & eggs stay; coins and trained power reset — permanent bonuses are forever!",
 	"ASCENSION BEGINS! You traded a coin stack for stats that never go away!",
 	"REBIRTH COMPLETE! Welcome to the elite — every future rebirth stacks more permanent power!",
-	"RESET. RISE. You kept your garage and pets — egg inventory and per-car levels refreshed — plus permanent speed juice!",
+	"RESET. RISE. You kept your garage, pets, and eggs — coins and training power refresh — plus permanent juice!",
 }
 
 FirstTimeConfig.FirstWorldUnlocked = {

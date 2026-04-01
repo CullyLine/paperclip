@@ -55,7 +55,7 @@ Repo root script: `decimate.py`
 Uses **voxel remesh** (watertight) then **iterative collapse decimate** until face count is near target, then **diffuse bake** from high-poly to low-poly, exports GLB.
 
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" --background --python "decimate.py" -- `
+& "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background --python "decimate.py" -- `
   "memories\3d-experiments\model-highpoly.glb" `
   "memories\3d-experiments\model-game.glb" `
   <target_faces> `
@@ -84,7 +84,14 @@ Uses **voxel remesh** (watertight) then **iterative collapse decimate** until fa
 
 ## Full pipeline (through rigged GLB)
 
-After v3 + decimate, run **UniRig** to produce a **rigged GLB** (see **roblox-3d-asset-pipeline**). **Animation is not done in Blender** for shipping — import the rigged model into **Roblox Studio** and drive bones with **`PetAnimator.luau`** (see `PermanentDesignSpecs.md`).
+After v3 + decimate, the full pipeline is:
+
+1. **Manual cleanup** (if needed) — remove problematic geometry in Blender, merge vertices
+2. **Visual polish** — `polish-pet.py` applies saturation +40%, contrast +15%, brightness +5%, AO bake (texture only, NO geometry smoothing — corrective smooth will explode decimated meshes)
+3. **UniRig** — auto-rig with GPU eager attention config (close all GPU apps first)
+4. **Import to Roblox Studio** — drive bones with **`PetAnimator.luau`**
+
+See **roblox-3d-asset-pipeline** skill and `PermanentDesignSpecs.md` for full details.
 
 ## Example outputs (Tabby Cat)
 

@@ -1,0 +1,534 @@
+{
+  "pet": "tungtung",
+  "anymate": {
+    "bone_count": 41,
+    "root_count": 1,
+    "root_names": [
+      "9"
+    ],
+    "leaf_count": 12,
+    "max_chain_depth": 12,
+    "total_verts": 376,
+    "weighted_verts": 376,
+    "weight_coverage": 100.0,
+    "bones": [
+      {
+        "name": "9",
+        "parent": null,
+        "children_count": 2,
+        "length": 0.0678
+      },
+      {
+        "name": "17",
+        "parent": "9",
+        "children_count": 1,
+        "length": 0.2447
+      },
+      {
+        "name": "26",
+        "parent": "17",
+        "children_count": 1,
+        "length": 0.0846
+      },
+      {
+        "name": "5",
+        "parent": "26",
+        "children_count": 1,
+        "length": 0.118
+      },
+      {
+        "name": "12",
+        "parent": "5",
+        "children_count": 1,
+        "length": 0.3026
+      },
+      {
+        "name": "18",
+        "parent": "12",
+        "children_count": 0,
+        "length": 0.0997
+      },
+      {
+        "name": "40",
+        "parent": "9",
+        "children_count": 2,
+        "length": 0.0448
+      },
+      {
+        "name": "6",
+        "parent": "40",
+        "children_count": 1,
+        "length": 0.2501
+      },
+      {
+        "name": "14",
+        "parent": "6",
+        "children_count": 1,
+        "length": 0.0997
+      },
+      {
+        "name": "4",
+        "parent": "14",
+        "children_count": 2,
+        "length": 0.0776
+      },
+      {
+        "name": "20",
+        "parent": "4",
+        "children_count": 1,
+        "length": 0.2955
+      },
+      {
+        "name": "33",
+        "parent": "20",
+        "children_count": 0,
+        "length": 0.1072
+      },
+      {
+        "name": "37",
+        "parent": "4",
+        "children_count": 0,
+        "length": 0.3602
+      },
+      {
+        "name": "34",
+        "parent": "40",
+        "children_count": 1,
+        "length": 0.0667
+      },
+      {
+        "name": "28",
+        "parent": "34",
+        "children_count": 1,
+        "length": 0.1046
+      },
+      {
+        "name": "13",
+        "parent": "28",
+        "children_count": 3,
+        "length": 0.1236
+      },
+      {
+        "name": "0",
+        "parent": "13",
+        "children_count": 2,
+        "length": 0.1093
+      },
+      {
+        "name": "1",
+        "parent": "0",
+        "children_count": 2,
+        "length": 0.4553
+      },
+      {
+        "name": "35",
+        "parent": "1",
+        "children_count": 1,
+        "length": 0.128
+      },
+      {
+        "name": "32",
+        "parent": "35",
+        "children_count": 1,
+        "length": 0.1275
+      },
+      {
+        "name": "19",
+        "parent": "32",
+        "children_count": 2,
+        "length": 0.1115
+      },
+      {
+        "name": "7",
+        "parent": "19",
+        "children_count": 0,
+        "length": 0.1598
+      },
+      {
+        "name": "16",
+        "parent": "19",
+        "children_count": 2,
+        "length": 0.0707
+      },
+      {
+        "name": "2",
+        "parent": "16",
+        "children_count": 0,
+        "length": 0.0538
+      },
+      {
+        "name": "38",
+        "parent": "16",
+        "children_count": 0,
+        "length": 0.1099
+      },
+      {
+        "name": "39",
+        "parent": "1",
+        "children_count": 0,
+        "length": 0.0812
+      },
+      {
+        "name": "30",
+        "parent": "0",
+        "children_count": 2,
+        "length": 0.5686
+      },
+      {
+        "name": "10",
+        "parent": "30",
+        "children_count": 1,
+        "length": 0.168
+      },
+      {
+        "name": "24",
+        "parent": "10",
+        "children_count": 1,
+        "length": 0.1254
+      },
+      {
+        "name": "25",
+        "parent": "24",
+        "children_count": 1,
+        "length": 0.0502
+      },
+      {
+        "name": "3",
+        "parent": "25",
+        "children_count": 0,
+        "length": 0.1041
+      },
+      {
+        "name": "21",
+        "parent": "30",
+        "children_count": 0,
+        "length": 0.0576
+      },
+      {
+        "name": "8",
+        "parent": "13",
+        "children_count": 1,
+        "length": 0.0974
+      },
+      {
+        "name": "15",
+        "parent": "8",
+        "children_count": 1,
+        "length": 0.5117
+      },
+      {
+        "name": "27",
+        "parent": "15",
+        "children_count": 1,
+        "length": 0.4239
+      },
+      {
+        "name": "31",
+        "parent": "27",
+        "children_count": 1,
+        "length": 0.2874
+      },
+      {
+        "name": "11",
+        "parent": "31",
+        "children_count": 2,
+        "length": 0.1083
+      },
+      {
+        "name": "22",
+        "parent": "11",
+        "children_count": 0,
+        "length": 0.1979
+      },
+      {
+        "name": "29",
+        "parent": "11",
+        "children_count": 0,
+        "length": 0.0327
+      },
+      {
+        "name": "23",
+        "parent": "13",
+        "children_count": 1,
+        "length": 0.1597
+      },
+      {
+        "name": "36",
+        "parent": "23",
+        "children_count": 0,
+        "length": 0.0832
+      }
+    ]
+  },
+  "unirig": {
+    "bone_count": 42,
+    "root_count": 1,
+    "root_names": [
+      "bone_0"
+    ],
+    "leaf_count": 9,
+    "max_chain_depth": 10,
+    "total_verts": 794,
+    "weighted_verts": 752,
+    "weight_coverage": 94.7,
+    "bones": [
+      {
+        "name": "bone_0",
+        "parent": null,
+        "children_count": 4,
+        "length": 0.13
+      },
+      {
+        "name": "bone_1",
+        "parent": "bone_0",
+        "children_count": 1,
+        "length": 0.0807
+      },
+      {
+        "name": "bone_2",
+        "parent": "bone_1",
+        "children_count": 1,
+        "length": 0.0753
+      },
+      {
+        "name": "bone_3",
+        "parent": "bone_2",
+        "children_count": 0,
+        "length": 0.0753
+      },
+      {
+        "name": "bone_4",
+        "parent": "bone_0",
+        "children_count": 1,
+        "length": 0.0742
+      },
+      {
+        "name": "bone_5",
+        "parent": "bone_4",
+        "children_count": 1,
+        "length": 0.0757
+      },
+      {
+        "name": "bone_6",
+        "parent": "bone_5",
+        "children_count": 0,
+        "length": 0.0757
+      },
+      {
+        "name": "bone_7",
+        "parent": "bone_0",
+        "children_count": 1,
+        "length": 0.0938
+      },
+      {
+        "name": "bone_8",
+        "parent": "bone_7",
+        "children_count": 1,
+        "length": 0.1256
+      },
+      {
+        "name": "bone_9",
+        "parent": "bone_8",
+        "children_count": 3,
+        "length": 0.0494
+      },
+      {
+        "name": "bone_10",
+        "parent": "bone_9",
+        "children_count": 2,
+        "length": 0.0361
+      },
+      {
+        "name": "bone_11",
+        "parent": "bone_10",
+        "children_count": 1,
+        "length": 0.0153
+      },
+      {
+        "name": "bone_12",
+        "parent": "bone_11",
+        "children_count": 1,
+        "length": 0.0182
+      },
+      {
+        "name": "bone_13",
+        "parent": "bone_12",
+        "children_count": 1,
+        "length": 0.0159
+      },
+      {
+        "name": "bone_14",
+        "parent": "bone_13",
+        "children_count": 0,
+        "length": 0.0159
+      },
+      {
+        "name": "bone_19",
+        "parent": "bone_10",
+        "children_count": 1,
+        "length": 0.0165
+      },
+      {
+        "name": "bone_20",
+        "parent": "bone_19",
+        "children_count": 1,
+        "length": 0.0192
+      },
+      {
+        "name": "bone_21",
+        "parent": "bone_20",
+        "children_count": 1,
+        "length": 0.0225
+      },
+      {
+        "name": "bone_22",
+        "parent": "bone_21",
+        "children_count": 0,
+        "length": 0.0225
+      },
+      {
+        "name": "bone_15",
+        "parent": "bone_9",
+        "children_count": 1,
+        "length": 0.0296
+      },
+      {
+        "name": "bone_16",
+        "parent": "bone_15",
+        "children_count": 1,
+        "length": 0.0165
+      },
+      {
+        "name": "bone_17",
+        "parent": "bone_16",
+        "children_count": 1,
+        "length": 1.1219
+      },
+      {
+        "name": "bone_18",
+        "parent": "bone_17",
+        "children_count": 0,
+        "length": 1.1219
+      },
+      {
+        "name": "bone_37",
+        "parent": "bone_9",
+        "children_count": 1,
+        "length": 0.0367
+      },
+      {
+        "name": "bone_38",
+        "parent": "bone_37",
+        "children_count": 1,
+        "length": 0.0312
+      },
+      {
+        "name": "bone_39",
+        "parent": "bone_38",
+        "children_count": 1,
+        "length": 0.0182
+      },
+      {
+        "name": "bone_40",
+        "parent": "bone_39",
+        "children_count": 0,
+        "length": 0.0182
+      },
+      {
+        "name": "bone_23",
+        "parent": "bone_0",
+        "children_count": 1,
+        "length": 0.0859
+      },
+      {
+        "name": "bone_24",
+        "parent": "bone_23",
+        "children_count": 1,
+        "length": 0.1212
+      },
+      {
+        "name": "bone_25",
+        "parent": "bone_24",
+        "children_count": 2,
+        "length": 0.0709
+      },
+      {
+        "name": "bone_26",
+        "parent": "bone_25",
+        "children_count": 1,
+        "length": 0.0283
+      },
+      {
+        "name": "bone_27",
+        "parent": "bone_26",
+        "children_count": 1,
+        "length": 0.0187
+      },
+      {
+        "name": "bone_28",
+        "parent": "bone_27",
+        "children_count": 1,
+        "length": 0.0318
+      },
+      {
+        "name": "bone_29",
+        "parent": "bone_28",
+        "children_count": 1,
+        "length": 0.0165
+      },
+      {
+        "name": "bone_30",
+        "parent": "bone_29",
+        "children_count": 0,
+        "length": 0.0165
+      },
+      {
+        "name": "bone_31",
+        "parent": "bone_25",
+        "children_count": 1,
+        "length": 0.0283
+      },
+      {
+        "name": "bone_32",
+        "parent": "bone_31",
+        "children_count": 1,
+        "length": 0.0296
+      },
+      {
+        "name": "bone_33",
+        "parent": "bone_32",
+        "children_count": 1,
+        "length": 0.217
+      },
+      {
+        "name": "bone_34",
+        "parent": "bone_33",
+        "children_count": 1,
+        "length": 0.0132
+      },
+      {
+        "name": "bone_35",
+        "parent": "bone_34",
+        "children_count": 2,
+        "length": 0.0238
+      },
+      {
+        "name": "bone_36",
+        "parent": "bone_35",
+        "children_count": 0,
+        "length": 0.0238
+      },
+      {
+        "name": "snout",
+        "parent": "bone_35",
+        "children_count": 0,
+        "length": 0.0238
+      }
+    ]
+  },
+  "score": {
+    "anymate": 3,
+    "unirig": 2,
+    "ties": 1
+  }
+}

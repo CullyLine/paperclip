@@ -3,9 +3,9 @@ import os, subprocess, sys, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DECIMATE_SCRIPT = os.path.join(HERE, "..", "..", "decimate.py")
-BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe"
+BLENDER = r"F:\SteamLibrary\steamapps\common\Blender\blender.exe"
 TARGET_FACES = 340
-VOXEL_SIZE = 0.005
+VOXEL_SIZE = 0.032
 
 TRACKER = os.path.join(HERE, "batch-tracker.json")
 with open(TRACKER) as f:

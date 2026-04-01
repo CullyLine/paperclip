@@ -8,7 +8,7 @@ Usage: python batch-animate.py
 import os, subprocess, sys, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe"
+BLENDER = r"F:\SteamLibrary\steamapps\common\Blender\blender.exe"
 ANIM_SCRIPT = os.path.join(HERE, "universal-animate.py")
 
 TRACKER = os.path.join(HERE, "batch-tracker.json")

@@ -1,0 +1,21 @@
+---
+description: Always use Python instead of PowerShell for shell scripting
+alwaysApply: true
+---
+
+# Shell Scripting: Python Over PowerShell
+
+**ALWAYS use Python** for scripting, automation, file manipulation, and command orchestration. **NEVER use PowerShell** scripting (`.ps1` scripts, PowerShell-specific syntax, cmdlets like `Invoke-WebRequest`, `Get-ChildItem`, `Start-Process`, etc.).
+
+## Rules
+
+- For any task that requires more than a single simple command, write a Python script and run it with `python script.py`
+- For simple one-liners (like `cd`, `mkdir`, `ls`), plain shell commands are fine
+- Use Python's `subprocess`, `os`, `shutil`, `pathlib`, `urllib` instead of PowerShell equivalents
+- When launching GUI applications, use `subprocess.Popen` not `Start-Process`
+- When downloading files, use `urllib.request` or `requests`, not `Invoke-WebRequest` or `curl`
+- This applies to all shell tool calls, batch scripts, and automation
+
+## Why
+
+PowerShell has quoting/escaping issues that cause silent failures, especially with complex arguments, paths with spaces, and nested strings. Python is consistent, cross-platform, and debuggable.

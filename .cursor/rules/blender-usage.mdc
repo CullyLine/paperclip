@@ -1,0 +1,51 @@
+---
+description: Rules for using Blender correctly — preserving keybinds, opening models, avoiding factory resets
+globs: ["**/*.py", "**/*.glb", "**/*.blend"]
+---
+
+# Blender Usage Rules
+
+## Executable Path
+
+**Always use:** `F:\SteamLibrary\steamapps\common\Blender\blender.exe`
+
+**Never use:** `F:\CODE STUFF\tools\blender-5.0.1-windows-x64\blender.exe` (standalone, no user keybinds)
+
+## Opening Models for Inspection
+
+Always use the `open-glb.py` helper script:
+
+```python
+subprocess.Popen([BLENDER, "--python", "memories/3d-experiments/open-glb.py", "--", "<file.glb>"])
+```
+
+This script handles:
+- Deferred GLB import via timer (fixes Blender 5.x armature `bpy.context.object` crash)
+- Material Preview viewport shading
+- Pose Mode with Move tool active (if armature present)
+- Auto-frames the imported model
+- Preserves user keybinds and preferences
+
+## NEVER Do These
+
+- **Never call `bpy.ops.wm.read_factory_settings()`** — it destroys user keybinds, themes, and preferences
+- **Never open GLB files directly** (`blender file.glb`) — Blender can't open GLB as a blend file
+- **Never use `--factory-startup`** flag — same as factory reset
+
+## Clean Scene Without Losing Prefs
+
+Instead of factory reset, delete default objects:
+
+```python
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+```
+
+## Keybind Backup
+
+Backed up at: `memories/DriveACarSimulator/blender-config/`
+
+Restore after Blender updates:
+```bash
+python memories/DriveACarSimulator/blender-config/restore-blender-prefs.py 5.1
+```

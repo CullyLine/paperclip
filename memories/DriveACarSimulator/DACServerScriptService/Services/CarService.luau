@@ -92,9 +92,6 @@ function CarService.getEffectiveStats(player: Player, carId: string): { gas: num
 	if GamePassService.hasPass(player, "double_speed") then
 		power = power * 2
 	end
-	if GamePassService.hasPass(player, "gas_3x") then
-		gas = gas * 3
-	end
 	if GamePassService.hasPass(player, "infinite_gas") then
 		gas = math.huge
 	end

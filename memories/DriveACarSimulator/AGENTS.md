@@ -1,5 +1,9 @@
 # Drive a Car Simulator — Agent Guidelines
 
+## Shell Scripting: Python Over PowerShell
+
+**ALWAYS use Python** for scripting, automation, and command orchestration. **NEVER use PowerShell** (`.ps1` scripts, cmdlets like `Invoke-WebRequest`, `Get-ChildItem`, `Start-Process`). For anything beyond a single simple command, write a Python script. Use Python's `subprocess`, `os`, `shutil`, `pathlib`, `urllib` instead of PowerShell equivalents.
+
 ## UI Convention: Pre-Built Instances
 
 **All static UI must be pre-built as Instances in `StarterGui`, not generated at runtime by scripts.**

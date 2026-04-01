@@ -48,13 +48,13 @@ local function formatNumber(n: number): string
 end
 
 DailyRewardConfig.STREAK_REWARDS = {
-	{ rewards = { { currency = "coins", amount = 1000 } } },
-	{ rewards = { { currency = "coins", amount = 2500 } } },
-	{ rewards = { { currency = "coins", amount = 3000 } } },
-	{ rewards = { { currency = "coins", amount = 5000 } } },
-	{ rewards = { { currency = "coins", amount = 7500 } } },
-	{ rewards = { { currency = "coins", amount = 10000 } } },
-	{ rewards = { { currency = "coins", amount = 25000 } } },
+	{ rewards = { { currency = "coins", amount = 800 } } },
+	{ rewards = { { currency = "coins", amount = 2000 } } },
+	{ rewards = { { currency = "coins", amount = 3500 } } },
+	{ rewards = { { currency = "coins", amount = 5500 } } },
+	{ rewards = { { currency = "coins", amount = 8000 } } },
+	{ rewards = { { currency = "coins", amount = 12000 } } },
+	{ rewards = { { currency = "coins", amount = 28000 } } },
 } :: { DayReward }
 
 function DailyRewardConfig.getCycleMultiplier(dailyCycle: number): number

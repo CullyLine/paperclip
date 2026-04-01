@@ -1,4 +1,8 @@
 --!strict
+--[[
+	Shop prices are tuned to CheckpointConfig lap payouts (forest ~20k/lap baseline).
+	Within a world: cheaper cars first, top car approaches next world's entry grind.
+]]
 
 local CarConfig = {}
 
@@ -25,7 +29,7 @@ CarConfig.Cars = {
 		name = "Street Cruiser",
 		modelName = "Blue",
 		baseStats = { gas = 28, power = 45, acceleration = 25 },
-		price = 5_000,
+		price = 8_000,
 		currency = "coins",
 		worldId = "forest",
 		vfxTier = 1,
@@ -36,7 +40,7 @@ CarConfig.Cars = {
 		name = "Green Demon",
 		modelName = "Green",
 		baseStats = { gas = 22, power = 60, acceleration = 20 },
-		price = 25_000,
+		price = 28_000,
 		currency = "coins",
 		worldId = "forest",
 		vfxTier = 2,
@@ -58,7 +62,7 @@ CarConfig.Cars = {
 		name = "Tank Roller",
 		modelName = "Red",
 		baseStats = { gas = 45, power = 40, acceleration = 28 },
-		price = 50_000,
+		price = 45_000,
 		currency = "coins",
 		worldId = "forest",
 		vfxTier = 2,
@@ -70,7 +74,7 @@ CarConfig.Cars = {
 		name = "Sand Scorpion",
 		modelName = "Yellow",
 		baseStats = { gas = 30, power = 70, acceleration = 18 },
-		price = 200_000,
+		price = 180_000,
 		currency = "coins",
 		worldId = "desert",
 		vfxTier = 3,
@@ -81,7 +85,7 @@ CarConfig.Cars = {
 		name = "Inferno Rod",
 		modelName = "Purple",
 		baseStats = { gas = 16, power = 110, acceleration = 10 },
-		price = 500_000,
+		price = 450_000,
 		currency = "coins",
 		worldId = "desert",
 		vfxTier = 4,
@@ -93,7 +97,7 @@ CarConfig.Cars = {
 		name = "Frost Glider",
 		modelName = "White",
 		baseStats = { gas = 35, power = 85, acceleration = 16 },
-		price = 2_500_000,
+		price = 1_800_000,
 		currency = "coins",
 		worldId = "ice",
 		vfxTier = 2,
@@ -104,7 +108,7 @@ CarConfig.Cars = {
 		name = "Glacier Phantom",
 		modelName = "Silver",
 		baseStats = { gas = 25, power = 130, acceleration = 8 },
-		price = 5_000_000,
+		price = 4_500_000,
 		currency = "coins",
 		worldId = "ice",
 		vfxTier = 4,
@@ -127,7 +131,7 @@ CarConfig.Cars = {
 		name = "Void Runner",
 		modelName = "Black",
 		baseStats = { gas = 24, power = 220, acceleration = 5 },
-		price = 60_000_000,
+		price = 48_000_000,
 		currency = "coins",
 		worldId = "volcano",
 		vfxTier = 5,

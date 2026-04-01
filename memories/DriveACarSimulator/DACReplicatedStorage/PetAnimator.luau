@@ -20,6 +20,9 @@ local PET_ANIM_LOD_DISTANCE = 100
 
 local TWO_PI = 2 * math.pi
 
+local BREATHE_SPEED = 1.2
+local BREATHE_AMOUNT = 0.03
+
 local function osc(t: number, cycles: number, amplitude: number, phase: number?): number
 	return amplitude * math.sin(t * cycles * TWO_PI + (phase or 0))
 end
@@ -33,6 +36,7 @@ type AnimState = {
 	bones: BoneCache,
 	boneList: { Bone },
 	skeleton: SkeletonInfo,
+	baseScale: number,
 	startTime: number,
 	connection: RBXScriptConnection?,
 }
@@ -642,6 +646,8 @@ function PetAnimator.start(model: Model, animName: string, fullAnimation: boolea
 	local skeleton = analyzeSkeletonFromBones(bones, boneList)
 	local petName = resolvePetName(model)
 
+	local baseScale = model:GetScale()
+
 	local state: AnimState = {
 		model = model,
 		animName = animName,
@@ -649,6 +655,7 @@ function PetAnimator.start(model: Model, animName: string, fullAnimation: boolea
 		bones = bones,
 		boneList = boneList,
 		skeleton = skeleton,
+		baseScale = baseScale,
 		startTime = os.clock(),
 		connection = nil,
 	}
@@ -667,6 +674,10 @@ function PetAnimator.start(model: Model, animName: string, fullAnimation: boolea
 
 		local t = os.clock() - state.startTime
 		animFn(state, t)
+
+		-- Squishy toy breathing: subtle scale pulse
+		local breathe = 1 + math.sin(t * BREATHE_SPEED * TWO_PI) * BREATHE_AMOUNT
+		model:ScaleTo(baseScale * breathe)
 	end)
 
 	activeAnims[model] = state
@@ -735,6 +746,7 @@ function PetAnimator.stop(model: Model)
 		resetBone(bone)
 	end
 
+	model:ScaleTo(state.baseScale)
 	activeAnims[model] = nil
 end
 

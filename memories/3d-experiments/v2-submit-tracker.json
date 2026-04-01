@@ -1,0 +1,22 @@
+{
+  "cappuccino": {
+    "status": "IN_QUEUE",
+    "request_id": "019d47c2-cc90-7fe0-b8f9-96d2babe2b58",
+    "response_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-cc90-7fe0-b8f9-96d2babe2b58",
+    "status_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-cc90-7fe0-b8f9-96d2babe2b58/status",
+    "cancel_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-cc90-7fe0-b8f9-96d2babe2b58/cancel",
+    "logs": null,
+    "metrics": {},
+    "queue_position": 0
+  },
+  "tungtung": {
+    "status": "IN_QUEUE",
+    "request_id": "019d47c2-d31a-7ce1-a75a-d719f46ac2a6",
+    "response_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-d31a-7ce1-a75a-d719f46ac2a6",
+    "status_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-d31a-7ce1-a75a-d719f46ac2a6/status",
+    "cancel_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d47c2-d31a-7ce1-a75a-d719f46ac2a6/cancel",
+    "logs": null,
+    "metrics": {},
+    "queue_position": 0
+  }
+}

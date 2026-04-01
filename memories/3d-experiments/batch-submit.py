@@ -10,16 +10,11 @@ ASSETS = r"C:\Users\lineb\.cursor\projects\f-CODE-STUFF-Paperclip\assets"
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 PETS = [
-    ("puppy",      "pet-puppy-concept.png"),
-    ("fox",        "pet-fox-concept.png"),
-    ("owl",        "pet-owl-concept.png"),
-    ("dragon",     "pet-dragon-concept.png"),
-    ("phoenix",    "pet-phoenix-concept.png"),
-    ("unicorn",    "pet-unicorn-concept.png"),
-    ("panther",    "pet-panther-concept.png"),
-    ("jellyfish",  "pet-jellyfish-concept.png"),
-    ("cronenberg", "pet-cronenberg-concept.png"),
-    ("dachshund",  "pet-dachshund-concept.png"),
+    ("tungtung",    "pet-tungtung-concept-v3.png"),
+    ("bombombini",  "pet-bombombini-concept-v3.png"),
+    ("tralalero",   "pet-tralalero-concept-v4.png"),
+    ("bombardiro",  "pet-bombardiro-concept-v4.png"),
+    ("cappuccino",  "pet-cappuccino-concept-v3.png"),
 ]
 
 results = {}

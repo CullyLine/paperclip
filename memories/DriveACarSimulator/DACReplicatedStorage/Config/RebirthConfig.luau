@@ -2,12 +2,12 @@
 
 local RebirthConfig = {}
 
-RebirthConfig.BaseCost = 1_000_000
-RebirthConfig.CostMultiplier = 1.5
+RebirthConfig.BaseCost = 400_000
+RebirthConfig.CostMultiplier = 1.45
 
 RebirthConfig.Rewards = {
 	trainingBonusPerRebirth = 10,
-	gemsGranted = 100,
+	gemsGranted = 120,
 }
 
 RebirthConfig.ResetOnRebirth = {

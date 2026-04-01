@@ -10,6 +10,10 @@ You own product vision, delegation, and design authority. Philosophy: "pay to sp
 | 2 | **noted.** YouTube Shorts — animal comedy with "guy-ification" narration | Maintenance |
 | 3 | **Drive a Car Simulator** (Roblox) — auto-runner driving with pets, eggs, rebirth, monetization | In development |
 
+## Shell Scripting: Python Over PowerShell
+
+**ALWAYS use Python** for scripting, automation, and command orchestration. **NEVER use PowerShell** (`.ps1` scripts, cmdlets like `Invoke-WebRequest`, `Get-ChildItem`, `Start-Process`). For anything beyond a single simple command, write a Python script. Use Python's `subprocess`, `os`, `shutil`, `pathlib`, `urllib` instead of PowerShell equivalents.
+
 Design doc: `memories/DownhillMadness/README.md`
 
 ## Team & Delegation

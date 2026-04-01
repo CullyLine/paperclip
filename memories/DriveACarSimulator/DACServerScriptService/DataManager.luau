@@ -45,7 +45,7 @@ local function sanitizeWorldState(d: any)
 	end
 end
 
-local DATA_STORE_NAME = "DACPlayerData_v6"
+local DATA_STORE_NAME = "DACPlayerData_v7"
 -- Periodic safety flush: players with unsaved dirty data (see scheduleSave).
 local AUTO_SAVE_INTERVAL = 120
 -- Coalesce rapid scheduleSave calls into one SetAsync after this delay (timer is not reset by repeats).

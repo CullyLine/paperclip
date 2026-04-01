@@ -57,3 +57,7 @@ tests/release-smoke/playwright-report/
 # Local runtime
 discord-bridge/.bot.pid
 .tmp-pol161-comments.json
+
+# Large experiment files (over GitHub 100MB limit)
+memories/3d-experiments/*-anymate-hp.blend
+memories/3d-experiments/*-anymate-hp-vis.glb

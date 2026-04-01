@@ -12,7 +12,7 @@ GroupRewardConfig.groupId = 0
 -- Shown on join prompt button; must match groupId's public page
 GroupRewardConfig.groupPageUrl = "https://www.roblox.com/search/groups"
 
-GroupRewardConfig.joinRewardCoins = 10000
+GroupRewardConfig.joinRewardCoins = 12_000
 
 -- Extra multiplier on run coin payout for group members (5% => 0.05)
 GroupRewardConfig.coinBonusMultiplier = 0.05
@@ -22,7 +22,7 @@ GroupRewardConfig.runsBeforePrompt = 3
 
 -- Copy must match GroupRewardService: ongoing +5% run coins; one-time coins + gems + Group Pup pet (no cooldown — one claim per account).
 GroupRewardConfig.bannerHeadline = "Join our group: +5% run bonus + a one-time welcome bundle!"
-GroupRewardConfig.bannerSub = "Tap Join, join on Roblox, then rejoin this game once — we drop 10K coins & a bonus pet (one time per account)."
+GroupRewardConfig.bannerSub = "Tap Join, join on Roblox, then rejoin this game once — we drop a welcome coin bundle & a bonus pet (one time per account)."
 
 -- Server: TTL for caching Player:IsInGroup in GroupRewardService (default 120s if unset/invalid).
 GroupRewardConfig.membershipCacheTtlSeconds = 120
