@@ -228,23 +228,23 @@ local COLLISION_SFX_COOLDOWN = 0.5
 local HEAVY_COLLISION_SPEED = 58
 local HEAVY_COLLISION_SFX_DEBOUNCE = 1.0
 
-local CAR_TO_ENGINE: { [string]: string } = {
-	starter = "engine_sedan",
-	sedan = "engine_sedan",
-	muscle = "engine_racer",
-	sports = "engine_racer",
-	suv = "engine_sedan",
-	dune_buggy = "engine_buggy",
-	hot_rod = "engine_racer",
-	snowmobile = "engine_buggy",
-	ice_racer = "engine_racer",
-	cyber_car = "engine_supercar",
-	hyper_car = "engine_supercar",
-	midnight_drifter = "engine_racer",
-}
+local CAR_TO_ENGINE: { [string]: string } = {}
 
 local function engineSoundForCarId(carId: string): string
-	return CAR_TO_ENGINE[carId] or "engine_sedan"
+	local mapped = CAR_TO_ENGINE[carId]
+	if mapped then
+		return mapped
+	end
+	if carId == "delorean" or carId == "special" then
+		return "engine_supercar"
+	end
+	if carId == "hummer" then
+		return "engine_sedan"
+	end
+	if string.sub(carId, 1, 7) == "drifter" or string.sub(carId, 1, 5) == "sport" then
+		return "engine_racer"
+	end
+	return "engine_sedan"
 end
 
 local lastCollisionSfxClock = 0.0

@@ -1,6 +1,6 @@
 # Permanent Design Specifications — Drive A Car Simulator 3D Pets
 
-Canonical reference for the visual style, offline mesh pipeline (Hunyuan → decimate → UniRig),
+Canonical reference for the visual style, offline mesh pipeline (Hunyuan → decimate → Anymate rig),
 and **in-game** animation/following for 3D pets in Drive A Car Simulator. Any AI agent
 creating, modifying, or extending pet assets MUST follow these specifications exactly.
 
@@ -240,88 +240,97 @@ Polish is applied in-place to `{name}-game-340.glb`. No separate filename needed
 
 ---
 
-## 6. Auto-Rigging — UniRig
+## 6. Auto-Rigging — Anymate (Primary) + UniRig (Fallback)
 
-### 6.1 Location
+### 6.1 Anymate (Primary — HuggingFace API)
+
+**Anymate is the default rigging tool.** It runs on HuggingFace Spaces (`yfdeng/Anymate`),
+requires no local GPU, and produces superior rigs in every tested metric.
+
+- **API**: HuggingFace Spaces Gradio client (`gradio_client`)
+- **Auth**: `HF_TOKEN` env var (optional, for rate limits)
+- **Speed**: ~15 seconds per model (vs 2-5 minutes for UniRig)
+- **No local GPU required**: runs entirely on HuggingFace's serverless GPU
+
+#### Why Anymate over UniRig
+
+Tested 2026-03-31 on cappuccino, tungtung, tralalero (see `anymate-vs-unirig-report.md`):
+
+| Metric | Anymate | UniRig | Winner |
+|--------|---------|--------|--------|
+| Bone count | 40–41 | 17–42 | Anymate (2x on tricky shapes) |
+| Weight coverage | **100%** | 90–95% | Anymate |
+| Bone chain depth | 7–12 | 5–10 | Anymate |
+| Speed | ~15s | 2–5 min | Anymate |
+| GPU required | No | Yes (8GB+) | Anymate |
+
+**Overall: Anymate 11 wins — UniRig 6 wins — 1 tie.**
+
+### 6.2 Production Pipeline — Anymate (4 steps)
+
+**Production script:** `memories/3d-experiments/rig-anymate.py`
+
+```bash
+python memories/3d-experiments/rig-anymate.py <pet_name>       # single
+python memories/3d-experiments/rig-anymate.py pet1 pet2 pet3   # batch
+python memories/3d-experiments/rig-anymate.py --all            # all pets
+```
+
+Expects: `<pet>-game-340.glb` (decimated + polished)
+Produces: `<pet>-game-340_rigged.glb` (final rigged model)
+
+1. **Submit to Anymate API** — uploads game GLB to HuggingFace, runs 4 Gradio endpoints:
+   - `/process_input` — upload mesh
+   - `/get_all_results` — DBSCAN joint clustering (eps=0.03, min_samples=1)
+   - `/vis_all` — build visualization
+   - `/prepare_blender_file` — export `.blend` with armature + skinning
+   - Cached: reuses existing `<pet>-anymate.blend` on reruns
+2. **Merge armature onto game mesh** (Blender headless) — aligns Anymate armature
+   to game mesh coordinate space, transfers vertex weights via `DATA_TRANSFER`
+   modifier (`POLYINTERP_NEAREST` mapping)
+3. **Fix multiple roots + add snout bone** — Anymate sometimes produces 2-4 root
+   bones; script adds a master `root` parent. Snout bone auto-added for nose wiggle.
+4. **Validate** — checks bone count, root count, weight coverage %, snout bone presence
+
+### 6.3 Anymate Known Behaviors
+
+| Behavior | Impact | Handling |
+|----------|--------|----------|
+| Multiple root bones (2-4) | Roblox needs single root | Auto-fixed: master root bone added in step 3 |
+| Numeric bone names (`0`, `1`, `2`...) | Non-semantic but functional | Same as UniRig (`bone_0`...) — no real difference |
+| API dependency (HuggingFace Spaces) | Can't rig if Space is down | Fall back to UniRig (§6.5) |
+| Cached `.blend` files | Prevents re-submission | Delete `<pet>-anymate.blend` to force re-run |
+
+### 6.4 Expected Skeleton Output (Anymate)
+
+Anymate consistently produces high bone counts with 100% weight coverage.
+
+| Shape | Typical Bones | Coverage |
+|-------|--------------|----------|
+| Humanoid (cappuccino — coffee cup ninja) | 41 | 100% |
+| Biped (tungtung — stick figure) | 41 | 100% |
+| Fish/shark (tralalero — shark with sneakers) | 40 | 100% |
+| Quadruped (cat, dog, fox) | 35–45 | 100% |
+| Amorphous (jellyfish, whale) | 25–35 | 100% |
+
+### 6.5 Fallback — UniRig (Local GPU)
+
+If Anymate is unavailable, use UniRig as fallback.
 
 - UniRig root: `F:\CODE STUFF\tools\UniRig\`
 - Python venv: `F:\CODE STUFF\tools\UniRig\venv\`
 - Required env: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+- Production script: `memories/3d-experiments/rig-pet.py`
+- Uses **highpoly rig strategy**: rig from highpoly → merge skeleton onto lowpoly
+- Requires local GPU (8GB+), CUDA, closing other GPU apps first
+- Uses `eager` attention (NOT `flash_attention_2` — WDDM deadlocks on Windows)
 
-### 6.2 Pipeline — Highpoly Rig Strategy (6 steps)
+See `rig-pet.py` for the full 6-step UniRig pipeline. Only use when Anymate is down.
 
-**Key insight:** Rigging from the **highpoly** model (500K faces → UniRig's internal
-50K decimate) produces significantly better bones (15-20+ vs 8-12 from lowpoly). The
-skeleton is then **merged onto the lowpoly** game model.
+### 6.6 Post-Rig Bone Validation & Manual Fixes
 
-**Production script:** `memories/3d-experiments/rig-pet.py` (handles all 6 steps):
-
-```bash
-python memories/3d-experiments/rig-pet.py <pet_name>   # single
-python memories/3d-experiments/rig-pet.py --all         # all brainrot pets
-```
-
-1. **Extract** from highpoly (`src.data.extract`): Converts mesh to internal format
-2. **Skeleton** on highpoly (GPU, `run.py`): Predicts bone structure (~20–30s)
-   - Config: `configs/task/quick_inference_skeleton_articulationxl_ar_256_gpu_eager.yaml`
-   - Uses `eager` attention (NOT `flash_attention_2` — causes OOM/freezes on Windows WDDM)
-   - System config: `ar_inference_articulationxl_minvram` (num_beams=1 to reduce VRAM)
-3. **Copy NPZ** to both `results/` AND `tmp/results/` (fixes skinning path bug)
-4. **Skin** (GPU, `run.py`): Predicts skinning weights (~40–90s)
-   - Config: `configs/task/quick_inference_unirig_skin.yaml`
-   - Requires CUDA (spconv)
-5. **Merge** (`src.inference.merge`): Combines rig into **lowpoly** game model
-6. **Snout bone** (auto): Adds a snout bone for nose wiggle animation
-
-### 6.3 GPU Memory Management (CRITICAL for 8GB cards)
-
-| Rule | Reason |
-|------|--------|
-| Close Blender, Roblox Studio, Discord, browsers before rigging | Frees ~2-3 GB VRAM |
-| Use `eager` attention, never `flash_attention_2` | flash_attn causes WDDM deadlocks on Windows |
-| Use `num_beams=1` (minVRAM system config) | Reduces beam search memory from 3x to 1x |
-| Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | Reduces fragmentation |
-| Run skeleton on GPU, not CPU | CPU mode hits 2GB allocation limit on some systems |
-
-### 6.4 Critical Path Bridging (NPZ Fix)
-
-The skeleton step saves `predict_skeleton.npz` in a folder named after the **input
-filename** (e.g. `tralalero-highpoly/predict_skeleton.npz`), NOT in the tmp directory.
-The skinning step looks for it in `tmp/results/<skeleton_name>/predict_skeleton.npz`.
-
-**`rig-pet.py` handles this automatically.** If running manually, copy to BOTH locations:
-
-```
-<input-dir>/<model-name>/predict_skeleton.npz
-  → results/<model-name>_skeleton/predict_skeleton.npz
-  → tmp/results/<model-name>_skeleton/predict_skeleton.npz
-```
-
-### 6.5 Known Issues
-
-- `bpy` crash on exit (code 3221225477 / -1073741819): harmless, output is fine
-- `rig.ps1` has a `$Input` parameter conflict with PowerShell — use Python scripts instead
-- Seed: **12345** (default, consistent results)
-- faces_target_count for extract: **50000**
-- `--time` argument is required for extract step; `rig-pet.py` generates it automatically
-
-### 6.6 Expected Skeleton Output (Highpoly Strategy)
-
-With the highpoly rig strategy, UniRig produces significantly more bones than
-rigging from lowpoly. Bones are named `bone_0` through `bone_N` plus `snout`.
-
-| Shape | Bones (lowpoly) | Bones (highpoly) | Improvement |
-|-------|-----------------|-------------------|-------------|
-| Quadruped (cat, dog, fox, panther) | 10–15 | 15–25 | More limb segments |
-| Bird (owl, phoenix) | 8–14 | 14–22 | Wing tip coverage |
-| Biped (dragon sitting) | 8–12 | 12–18 | Arm/leg chains |
-| Fish/shark (tralalero) | 10 | 17 | Both fins, more dorsal segments |
-| Amorphous (jellyfish, whale) | 8–14 | 12–20 | More appendage branches |
-
-### 6.7 Post-Rig Bone Validation & Manual Fixes
-
-UniRig auto-places bones based on mesh shape. It often misses thin appendages
-(wings, fins, antennae) or places too few bones in key areas.
+Both Anymate and UniRig may occasionally miss thin appendages. The validation and
+manual fix workflow applies to either tool's output.
 
 **After every rig, validate:**
 ```bash
@@ -336,17 +345,9 @@ blender --background --python memories/3d-experiments/add-bones.py -- <rigged.gl
 The `bones.json` specifies new bones with head/tail positions and optional parent.
 The script auto-parents to the nearest existing bone and re-calculates vertex weights.
 
-**Common missing bones by shape:**
+### 6.7 File Convention
 
-| Shape | Often Missing | Fix |
-|-------|--------------|-----|
-| Winged creature | Wing tip bones | Add 1-2 bones along wing edge |
-| Fish/shark | Fin bones, nose bone | Add bone along each fin, snout |
-| Humanoid | Finger/toe bones | Use higher poly (600-800 faces) + T-pose concept art |
-| Crocodilian | Head bone, spine segments | Add head bone, fill spine gaps |
-
-### 6.8 File Convention
-
+- Anymate cache: `memories/3d-experiments/{name}-anymate.blend`
 - Rigged output: `memories/3d-experiments/{name}-game-340_rigged.glb`
 - Expected size: rigged GLB is ~5–15% larger than decimated GLB
 - **Next step:** import into Roblox Studio and animate in **Luau** (§7). Do not require Blender batch animation for shipping.
@@ -410,9 +411,11 @@ All in `memories/3d-experiments/`:
 | `batch-submit.py` | Submit images to Hunyuan3D v3, saves request IDs to `batch-tracker.json` |
 | `batch-fetch.py` | Poll and download all completed GLBs |
 | `batch-decimate.py` | Decimate all highpoly GLBs to 340 faces |
-| `rig-pet.py` | **Production rig**: highpoly rig → lowpoly merge → auto snout bone |
+| `rig-anymate.py` | **Production rig (primary)**: Anymate API → merge armature → fix roots → snout bone |
+| `submit-anymate.py` | Standalone Anymate submission (outputs .blend, no merge) |
+| `rig-pet.py` | **Fallback rig**: UniRig highpoly rig → lowpoly merge → snout bone (local GPU, use when Anymate is down) |
 | `add-snout.py` | Standalone snout bone addition |
-| `rig-brainrot.py` | Legacy batch rigging (lowpoly only, superseded by `rig-pet.py`) |
+| `rig-brainrot.py` | Legacy batch rigging (lowpoly only, superseded) |
 | `polish-pet.py` | Texture polish: saturation, contrast, brightness, AO bake |
 | `polish-all-brainrot.py` | Batch decimate + polish + open for review |
 | `batch-animate.py` | *(legacy; optional)* — old Blender NLA experiment; **not** shipping |
@@ -442,7 +445,7 @@ All 3D files live in `memories/3d-experiments/`.
 | Face count | 340 | 300–400 |
 | Texture resolution | 1024×1024 | 512–1024 |
 | Rigged GLB size | < 1.5 MB | Up to 2 MB |
-| Bone count | 8–18 | Whatever UniRig produces |
+| Bone count | 35–45 | Whatever Anymate produces (25–45 typical) |
 | In-game motion | idle / walk / float (Luau) | `PetAnimator` + `PetController` |
 
 ---
@@ -473,11 +476,16 @@ an `InitialPoses` folder, and an `AnimationController`.
 | shadow_panther | `"panther"` | ReplicatedStorage.PetModels.panther | 26 |
 | unicorn | `"unicorn"` | ReplicatedStorage.PetModels.unicorn | 24 |
 | cosmic_whale | `"whale"` | ReplicatedStorage.PetModels.whale | 11 |
+| tung_tung | `"tungtung"` | ReplicatedStorage.PetModels.tungtung | 41 |
+| tralalero | `"tralalero"` | ReplicatedStorage.PetModels.tralalero | 40 |
+| bombardiro | `"bombardiro"` | ReplicatedStorage.PetModels.bombardiro | — |
+| cappuccino | `"cappuccino"` | ReplicatedStorage.PetModels.cappuccino | 41 |
+| bombombini | `"bombombini"` | ReplicatedStorage.PetModels.bombombini | — |
 | group_member | `"puppy"` | (shares puppy model) | 25 |
 
 ### Runtime animation (see also §6)
 
-Animations are **procedural via Luau** (not published `Animation` assets). Implementation: **`PetAnimator.luau`** (bone transforms + registry) and **`PetController.luau`** (placement + LOD). API and `osc()` details: **§6**.
+Animations are **procedural via Luau** (not published `Animation` assets). Implementation: **`PetAnimator.luau`** (bone transforms + registry) and **`PetController.luau`** (placement + LOD). API and `osc()` details: **§7**.
 
 ### Locomotion Types
 
@@ -487,7 +495,7 @@ Each pet in `PetConfig.luau` has a `locomotion` field:
 
 ### MAX_FOLLOWING
 
-`PetConfig.MAX_FOLLOWING = 5`. Only the N strongest equipped pets (by power) are
+`PetConfig.MAX_FOLLOWING = 8`. Only the N strongest equipped pets (by power) are
 visually spawned. Applies to both local and remote pet displays.
 
 ---

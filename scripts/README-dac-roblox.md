@@ -1,5 +1,10 @@
 # DAC Roblox Studio helpers (vehicles + camera)
 
+> **Note:** These scripts are legacy `.ps1` PowerShell scripts that use Windows-specific
+> APIs (PrintWindow, SendKeys, clipboard). They predate the Python-first rule. New
+> automation scripts should be written in Python. These remain because they use
+> Win32 APIs that haven't been ported yet.
+
 These scripts support **agents and humans** when porting Drive A Car Simulator assets between two open Studio windows. **Luau cannot move instances across places**; use **clipboard** (or publish / Rojo) for the actual instance data.
 
 ## Scripts

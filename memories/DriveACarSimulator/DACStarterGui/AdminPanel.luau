@@ -18,6 +18,7 @@ local DAC = ReplicatedStorage:WaitForChild("DAC")
 local UILayerStack = require(DAC:WaitForChild("Config"):WaitForChild("UILayerStack"))
 local Remotes = require(DAC:WaitForChild("Remotes"))
 local GamePassConfig = require(DAC:WaitForChild("Config"):WaitForChild("GamePassConfig"))
+local PetDebugWidget = require(script.Parent:WaitForChild("PetDebugWidget"))
 
 local AdminPanel = {}
 
@@ -216,6 +217,32 @@ local function wirePetsPage(pg: Instance)
 	wireSimple(pg, "Btn_GiveAllPets", "give_all_pets")
 	wireSimple(pg, "Btn_MaxSlots", "max_pet_slots")
 	wireSimple(pg, "Btn_ClearPets", "clear_pets")
+
+	local labBtn = Instance.new("TextButton")
+	labBtn.Name = "Btn_PetLab"
+	labBtn.Text = "Pet Lab"
+	labBtn.Font = Enum.Font.GothamBold
+	labBtn.TextSize = 13
+	labBtn.TextColor3 = Color3.fromRGB(230, 230, 240)
+	labBtn.BackgroundColor3 = Color3.fromRGB(55, 45, 110)
+	labBtn.Size = UDim2.new(1, -24, 0, 32)
+	labBtn.AutoButtonColor = false
+	labBtn.LayoutOrder = 50
+	local ref = find(pg, "Btn_ClearPets") :: TextButton?
+	if ref then
+		labBtn.Position =
+			UDim2.new(ref.Position.X.Scale, ref.Position.X.Offset, ref.Position.Y.Scale, ref.Position.Y.Offset + ref.Size.Y.Offset + 8)
+	else
+		labBtn.Position = UDim2.new(0, 12, 0, 120)
+	end
+	labBtn.Parent = pg
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 5)
+	corner.Parent = labBtn
+	addHover(labBtn)
+	labBtn.MouseButton1Click:Connect(function()
+		PetDebugWidget.toggle()
+	end)
 end
 
 local function wireWorldPage(pg: Instance)
@@ -495,6 +522,7 @@ function AdminPanel.init()
 	if ok and result == true then authorized = true end
 	if not authorized then return end
 
+	PetDebugWidget.init()
 	wireUI()
 
 	UserInputService.InputBegan:Connect(function(input, processed)

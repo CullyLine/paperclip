@@ -18,8 +18,40 @@ local DAC = ReplicatedStorage:WaitForChild("DAC")
 local Constants = require(DAC:WaitForChild("Constants"))
 local Utils = require(DAC:WaitForChild("Utils"))
 local WorldConfig = require(DAC:WaitForChild("Config"):WaitForChild("WorldConfig"))
+local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
 
 local DataManager = {}
+
+--[[
+	After CarConfig catalog changes: drop unknown car ids, migrate legacy "starter" → hatchback,
+	and ensure equippedCar + ownership are valid.
+]]
+local function migrateCarCatalog(d: any)
+	if type(d) ~= "table" or type(d.cars) ~= "table" then
+		return
+	end
+	if d.cars["starter"] then
+		if not d.cars["hatchback"] then
+			d.cars["hatchback"] = { id = "hatchback" }
+		end
+		d.cars["starter"] = nil
+	end
+	if d.equippedCar == "starter" then
+		d.equippedCar = "hatchback"
+	end
+	for carId in pairs(table.clone(d.cars)) do
+		if not CarConfig.Cars[carId] then
+			d.cars[carId] = nil
+		end
+	end
+	if type(d.equippedCar) ~= "string" or not CarConfig.Cars[d.equippedCar] then
+		d.equippedCar = Constants.STARTING_CAR
+	end
+	if not d.cars[d.equippedCar] then
+		d.cars[Constants.STARTING_CAR] = { id = Constants.STARTING_CAR }
+		d.equippedCar = Constants.STARTING_CAR
+	end
+end
 
 -- POLA-516: strip invalid world ids from saves; keep currentWorld consistent with unlocks + WorldConfig.
 local function sanitizeWorldState(d: any)
@@ -337,6 +369,7 @@ function DataManager.load(player: Player): boolean
 	end
 
 	if d then
+		migrateCarCatalog(d)
 		sanitizeWorldState(d)
 	end
 

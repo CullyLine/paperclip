@@ -116,7 +116,7 @@ BattlePassConfig.Tiers = {
 	{ freeReward = N(), premiumReward = C(150000) },
 	{ freeReward = C(40000), premiumReward = C(500000) },
 	{ freeReward = N(), premiumReward = C(300000) },
-	{ freeReward = C(75000), premiumReward = CAR("midnight_drifter") },
+	{ freeReward = C(75000), premiumReward = CAR("special") },
 }
 
 function BattlePassConfig.tierStartXp(tier: number): number

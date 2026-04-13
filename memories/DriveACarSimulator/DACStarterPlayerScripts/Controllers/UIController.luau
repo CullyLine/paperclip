@@ -18,6 +18,7 @@ local SoundFacade = require(DAC:WaitForChild("SoundFacade"))
 local PetConfig = require(DAC:WaitForChild("Config"):WaitForChild("PetConfig"))
 local EggConfig = require(DAC:WaitForChild("Config"):WaitForChild("EggConfig"))
 local CarConfig = require(DAC:WaitForChild("Config"):WaitForChild("CarConfig"))
+local CarInventoryTemplate = require(DAC:WaitForChild("CarInventoryTemplate"))
 local RebirthConfig = require(DAC:WaitForChild("Config"):WaitForChild("RebirthConfig"))
 local NewPlayerCalmWindow = require(DAC:WaitForChild("NewPlayerCalmWindow"))
 local DrivingRunGate = require(DAC:WaitForChild("DrivingRunGate"))
@@ -998,6 +999,53 @@ local function findTemplate(scrollFrame: ScrollingFrame, templateName: string): 
 	return nil
 end
 
+--[[
+	Car list may nest CarTemplate under padding/frames; findTemplate only checks direct children.
+]]
+local function findCarTemplateForList(scroll: Instance): GuiObject?
+	local t = scroll:FindFirstChild("CarTemplate")
+	if not t then
+		t = scroll:FindFirstChild("CarTemplate", true)
+	end
+	if t and t:IsA("GuiObject") then
+		t.Visible = false
+		return t
+	end
+	return nil
+end
+
+local function clearPreviousCarListRows(scroll: Instance, template: GuiObject?)
+	for _, ch in scroll:GetChildren() do
+		if not ch:IsA("GuiObject") then
+			continue
+		end
+		if ch:IsA("UIGridLayout") or ch:IsA("UIListLayout") or ch:IsA("UIPadding") then
+			continue
+		end
+		if ch.Name == "CarTemplate" then
+			continue
+		end
+		if template and (ch == template or template:IsDescendantOf(ch)) then
+			continue
+		end
+		if ch:GetAttribute("DACCarListRow") == true then
+			ch:Destroy()
+			continue
+		end
+		if CarConfig.Cars[ch.Name] ~= nil then
+			ch:Destroy()
+		end
+	end
+end
+
+local function findCarUiLabel(root: Instance, name: string): TextLabel?
+	local t = root:FindFirstChild(name, true)
+	if t and t:IsA("TextLabel") then
+		return t
+	end
+	return nil
+end
+
 local applyHubPanelNarrowFit -- forward-declared; defined after helper block
 
 function UIController.registerPanel(id: string, frame: Frame)
@@ -1861,6 +1909,62 @@ function UIController.populateRebirth()
 	end
 end
 
+local function createFallbackCarRow(carId: string, carDef: any, trainedPower: number): Frame
+	local item = Instance.new("Frame")
+	item.Name = carId
+	item.Size = UDim2.new(1, -8, 0, 76)
+	item.BackgroundColor3 = Color3.fromRGB(245, 245, 250)
+	item.BorderSizePixel = 0
+	local cc = Instance.new("UICorner")
+	cc.CornerRadius = UDim.new(0, 8)
+	cc.Parent = item
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.Size = UDim2.new(1, -100, 0, 22)
+	nameLabel.Position = UDim2.new(0, 8, 0, 6)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 14
+	nameLabel.TextColor3 = Color3.fromRGB(30, 30, 30)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Text = carDef.name
+	nameLabel.Parent = item
+	local bs = carDef.baseStats
+	local stats = Instance.new("TextLabel")
+	stats.Name = "Stats"
+	stats.Size = UDim2.new(1, -100, 0, 40)
+	stats.Position = UDim2.new(0, 8, 0, 28)
+	stats.BackgroundTransparency = 1
+	stats.Font = Enum.Font.Gotham
+	stats.TextSize = 12
+	stats.TextColor3 = Color3.fromRGB(60, 60, 60)
+	stats.TextXAlignment = Enum.TextXAlignment.Left
+	stats.TextWrapped = true
+	stats.Text = string.format(
+		"Gas %s GAL | Power %s +%s | Accel %ss",
+		tostring(bs.gas),
+		tostring(bs.power),
+		tostring(trainedPower),
+		tostring(bs.acceleration)
+	)
+	stats.Parent = item
+	local equipBtn = Instance.new("TextButton")
+	equipBtn.Name = "Equip"
+	equipBtn.Size = UDim2.new(0, 88, 0, 32)
+	equipBtn.Position = UDim2.new(1, -10, 0.5, 0)
+	equipBtn.AnchorPoint = Vector2.new(1, 0.5)
+	equipBtn.Font = Enum.Font.GothamBold
+	equipBtn.TextSize = 14
+	equipBtn.TextColor3 = Color3.new(1, 1, 1)
+	equipBtn.BackgroundColor3 = Color3.fromRGB(80, 180, 80)
+	equipBtn.AutoButtonColor = true
+	local ec = Instance.new("UICorner")
+	ec.CornerRadius = UDim.new(0, 8)
+	ec.Parent = equipBtn
+	equipBtn.Parent = item
+	return item
+end
+
 function UIController.populateCars()
 	if not cachedData then return end
 	local invPanel = panels:FindFirstChild("Inventory")
@@ -1875,45 +1979,58 @@ function UIController.populateCars()
 		carScroll = main
 	end
 
-	local template = findTemplate(carScroll, "CarTemplate")
-	clearChildren(carScroll, "CarTemplate")
+	CarInventoryTemplate.ensureInScroll(carScroll)
+	local template = findCarTemplateForList(carScroll)
+	clearPreviousCarListRows(carScroll, template)
+	if not template then
+		warn("[DAC] Cars: CarTemplate could not be created or found — using fallback rows.")
+	end
 
 	local ownedCars = cachedData.cars or {}
 	local equippedCar = cachedData.equippedCar
+	local trainedPower = cachedData.trainedPower or 0
 
-	for carId, ownedCar in ownedCars do
+	for carId, _ownedCar in ownedCars do
 		local carDef = CarConfig.Cars[carId]
-		if not carDef then continue end
-		if not template then continue end
+		if not carDef then
+			continue
+		end
 
-		local item = template:Clone()
-		item.Name = carId
+		local item: GuiObject
+		if template then
+			item = template:Clone()
+			item.Name = carId
+		else
+			item = createFallbackCarRow(carId, carDef, trainedPower)
+		end
+		item:SetAttribute("DACCarListRow", true)
 		item.Visible = true
 
-		local nameLabel = item:FindFirstChild("Name") or item:FindFirstChild("TextLabel")
+		local nameLabel = findCarUiLabel(item, "Name") or item:FindFirstChild("TextLabel")
 		if nameLabel and nameLabel:IsA("TextLabel") then
 			nameLabel.Text = carDef.name
 		end
 
-		local gasLabel = item:FindFirstChild("Gas")
-		if gasLabel and gasLabel:IsA("TextLabel") then
+		local gasLabel = findCarUiLabel(item, "Gas")
+		if gasLabel then
 			gasLabel.Text = tostring(carDef.baseStats.gas) .. " GAL"
 		end
-		local powerLabel = item:FindFirstChild("Power")
-		if powerLabel and powerLabel:IsA("TextLabel") then
-			local effectivePower = carDef.baseStats.power + (cachedData.trainedPower or 0)
-			powerLabel.Text = tostring(carDef.baseStats.power) .. " +" .. tostring(cachedData.trainedPower or 0)
+		local powerLabel = findCarUiLabel(item, "Power")
+		if powerLabel then
+			powerLabel.Text = tostring(carDef.baseStats.power) .. " +" .. tostring(trainedPower)
 		end
-		local accelLabel = item:FindFirstChild("Acceleration")
-		if accelLabel and accelLabel:IsA("TextLabel") then
+		local accelLabel = findCarUiLabel(item, "Acceleration")
+		if accelLabel then
 			accelLabel.Text = tostring(carDef.baseStats.acceleration) .. "s"
 		end
 
 		local isEquipped = equippedCar == carId
-		local equipBtn = item:FindFirstChild("EquipButton") or item:FindFirstChild("Equip")
-		if equipBtn and equipBtn:IsA("TextButton") then
+		local equipBtn = item:FindFirstChild("EquipButton", true) or item:FindFirstChild("Equip", true)
+		if equipBtn and equipBtn:IsA("GuiButton") then
 			equipBtn.Text = isEquipped and "Equipped" or "Equip"
-			equipBtn.BackgroundColor3 = isEquipped and Color3.fromRGB(80, 80, 100) or Color3.fromRGB(80, 180, 80)
+			if equipBtn:IsA("TextButton") then
+				equipBtn.BackgroundColor3 = isEquipped and Color3.fromRGB(80, 80, 100) or Color3.fromRGB(80, 180, 80)
+			end
 			if not isEquipped then
 				local eid = carId
 				equipBtn.MouseButton1Click:Connect(function()

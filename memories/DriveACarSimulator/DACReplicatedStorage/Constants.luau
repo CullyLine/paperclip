@@ -11,7 +11,7 @@ Constants.REBIRTH_COST_MULTIPLIER = 1.45
 
 Constants.STARTING_COINS = 2_500
 Constants.STARTING_GEMS = 0
-Constants.STARTING_CAR = "starter"
+Constants.STARTING_CAR = "hatchback"
 Constants.STARTING_WORLD = "forest"
 
 Constants.PREMIUM_COIN_BONUS = 0.5

@@ -1,5 +1,9 @@
 # Cursor agent: screenshot → vision → click (no manual pixel hunting)
 
+> **Note:** This pipeline uses legacy .ps1 PowerShell scripts for Win32 clipboard/window
+> automation. These predate the Python-first rule and remain because they use Win32
+> APIs not yet ported to Python. New automation should always use Python.
+
 This is the **“you read the screenshot and click”** flow. The **human does not** type coordinates.
 
 ## What runs where

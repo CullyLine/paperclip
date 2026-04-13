@@ -4,6 +4,7 @@
 	Local pets follow in V-formation with procedural bone animation.
 	Remote players' pets are replicated via PetEquipSync and respect visibility/animation settings.
 	Pets ride on the car roof during driving runs.
+	While standing still, pets occasionally play random idle emotes (stretch / shake / playbow).
 ]]
 
 local Players = game:GetService("Players")
@@ -46,7 +47,9 @@ local idleSinceClock: number = os.clock()
 local petsAreSitting = false
 
 local FACE_MOVE_THRESHOLD = 0.12
-local SIT_IDLE_SECONDS = 15
+-- When true, pets switch to sit after standing still for SIT_IDLE_SECONDS. Off for now.
+local PET_AUTO_SIT_ENABLED = false
+local SIT_IDLE_SECONDS = 42
 
 -- Wider V: more lateral + deeper rows; base offset = first pet behind the player.
 local FORM_BASE_BACK = 4
@@ -120,6 +123,100 @@ local function getGroundY(worldPos: Vector3): number?
 	return nil
 end
 
+local function hashPetUid(uid: string): number
+	local h = 0
+	for i = 1, #uid do
+		h = (h * 131 + string.byte(uid, i)) % 100000
+	end
+	return h
+end
+
+-- Random procedural emotes while idle (client-only; no network).
+local IDLE_EMOTE_IDS = { "stretch", "shake", "playbow" }
+local IDLE_EMOTE_MIN_INTERVAL = 12
+local IDLE_EMOTE_MAX_INTERVAL = 34
+local MIN_STANDSTILL_BEFORE_IDLE_EMOTE = 2.5
+
+-- Set true to print when the idle emote timer fires / plays / is blocked (Output window in Studio).
+local DEBUG_IDLE_EMOTES = true
+local lastIdleEmoteDebugAt: { [string]: number } = {}
+local IDLE_EMOTE_DEBUG_THROTTLE_SEC = 3
+
+local localIdleEmoteNextAt: { [string]: number } = {}
+local remoteIdleEmoteNextAt: { [string]: number } = {}
+
+local function initialIdleEmoteDelay(key: string): number
+	local h = hashPetUid(key)
+	return 4 + (h % 150) * 0.1
+end
+
+local function scheduleNextIdleEmote(key: string, store: { [string]: number })
+	local h = hashPetUid(key .. "_next")
+	local span = IDLE_EMOTE_MAX_INTERVAL - IDLE_EMOTE_MIN_INTERVAL
+	store[key] = os.clock() + IDLE_EMOTE_MIN_INTERVAL + (h % 1000) / 1000 * span
+end
+
+local function maybePlayIdleEmote(model: Model, key: string, store: { [string]: number }, canPlay: boolean)
+	if not PetAnimator.isActive(model) then
+		return
+	end
+
+	local nextAt = store[key]
+	if nextAt == nil then
+		if canPlay then
+			store[key] = os.clock() + initialIdleEmoteDelay(key)
+			if DEBUG_IDLE_EMOTES then
+				print("[PetController][IdleEmote] scheduled first fire in ~" .. string.format("%.1f", store[key] - os.clock()) .. "s key=" .. key)
+			end
+		end
+		return
+	end
+
+	local now = os.clock()
+	if now < nextAt then
+		return
+	end
+
+	-- Timer deadline reached (may still wait for idle / clear emote overlap).
+	if not canPlay then
+		if DEBUG_IDLE_EMOTES then
+			local last = lastIdleEmoteDebugAt[key]
+			if last == nil or now - last >= IDLE_EMOTE_DEBUG_THROTTLE_SEC then
+				lastIdleEmoteDebugAt[key] = now
+				print(
+					"[PetController][IdleEmote] timer overdue but canPlay=false (move / roof / not still long enough) key="
+						.. key
+				)
+			end
+		end
+		return
+	end
+
+	if PetAnimator.isEmotePlaying(model) then
+		if DEBUG_IDLE_EMOTES then
+			print("[PetController][IdleEmote] timer fired but skipped (another emote playing) key=" .. key)
+		end
+		return
+	end
+
+	local pick = IDLE_EMOTE_IDS[math.random(1, #IDLE_EMOTE_IDS)]
+	PetAnimator.playEmote(model, pick)
+	scheduleNextIdleEmote(key, store)
+
+	if DEBUG_IDLE_EMOTES then
+		local waitSec = store[key] - os.clock()
+		print(
+			"[PetController][IdleEmote] FIRED emote="
+				.. pick
+				.. " key="
+				.. key
+				.. " nextTimerIn="
+				.. string.format("%.1f", waitSec)
+				.. "s"
+		)
+	end
+end
+
 local function getFormationOffset(index: number, petCount: number): (number, number)
 	if index == 0 then
 		return 0, 0
@@ -155,6 +252,7 @@ end
 local function destroyPetEntry(uid: string, entry: PetEntry)
 	VFXFacade.petOrbitGlow(uid, nil, nil, "unequip")
 	PetAnimator.stop(entry.model)
+	localIdleEmoteNextAt[uid] = nil
 	entry.model:Destroy()
 end
 
@@ -214,7 +312,7 @@ local function updateLocalPetPositions(dt: number)
 	if petsMoving then
 		idleSinceClock = os.clock()
 		petsAreSitting = false
-	elseif not petsAreSitting and (os.clock() - idleSinceClock >= SIT_IDLE_SECONDS) then
+	elseif PET_AUTO_SIT_ENABLED and not petsAreSitting and (os.clock() - idleSinceClock >= SIT_IDLE_SECONDS) then
 		petsAreSitting = true
 	end
 
@@ -242,7 +340,7 @@ local function updateLocalPetPositions(dt: number)
 
 		local locomotion = getPetLocomotion(entry.petId)
 		local isGround = locomotion == "ground"
-		local desiredAnim = chooseAnimForState(petsMoving, isRoofRiding, petsAreSitting, locomotion)
+		local desiredAnim = chooseAnimForState(petsMoving, isRoofRiding, petsAreSitting and PET_AUTO_SIT_ENABLED, locomotion)
 
 		local targetPos: Vector3
 		if isRoofRiding and carPrimary then
@@ -302,6 +400,11 @@ local function updateLocalPetPositions(dt: number)
 		if PetAnimator.getAnimName(model) ~= desiredAnim then
 			PetAnimator.setAnim(model, desiredAnim)
 		end
+
+		local canIdleEmote = desiredAnim == "idle"
+			and not isRoofRiding
+			and (os.clock() - idleSinceClock) >= MIN_STANDSTILL_BEFORE_IDLE_EMOTE
+		maybePlayIdleEmote(model, uid, localIdleEmoteNextAt, canIdleEmote)
 
 		index += 1
 	end
@@ -418,6 +521,10 @@ local function updateRemotePetPositions(dt: number)
 				PetAnimator.setFullAnimation(model, shouldFullAnim)
 			end
 
+			local emoteKey = `{userId}_{uid}`
+			local canRemoteIdleEmote = shouldFullAnim and not remoteMoving
+			maybePlayIdleEmote(model, emoteKey, remoteIdleEmoteNextAt, canRemoteIdleEmote)
+
 			index += 1
 		end
 	end
@@ -452,6 +559,7 @@ function PetController.spawnPet(petUid: string, petId: string, rarity: string?)
 	table.insert(localPetOrder, petUid)
 	VFXFacade.petOrbitGlow(petUid, petInstance, r, "equip")
 	PetAnimator.start(petInstance, "idle", true)
+	localIdleEmoteNextAt[petUid] = os.clock() + initialIdleEmoteDelay(petUid)
 end
 
 function PetController.despawnPet(petUid: string)
@@ -480,6 +588,7 @@ local function clearRemotePlayerPets(userId: number)
 	local pets = remotePets[userId]
 	if pets then
 		for uid, entry in pets do
+			remoteIdleEmoteNextAt[`{userId}_{uid}`] = nil
 			destroyPetEntry(uid, entry)
 		end
 	end
@@ -540,7 +649,10 @@ local function onPetEquipSync(ownerUserId: number, equippedList: { any })
 		count += 1
 
 		VFXFacade.petOrbitGlow(instanceName, petInstance, rarity, "equip")
-		PetAnimator.start(petInstance, "idle", settingOtherPetAnimations)
+		petInstance:SetAttribute("PetPersonalitySeed", hashPetUid(uid))
+		PetAnimator.start(petInstance, "idle", settingOtherPetAnimations, rarity)
+		local rk = `{ownerUserId}_{uid}`
+		remoteIdleEmoteNextAt[rk] = os.clock() + initialIdleEmoteDelay(rk)
 	end
 
 	if count > 0 then
@@ -575,14 +687,48 @@ function PetController.applySettings(settings: { [string]: any })
 	end
 end
 
+local lastCoinsSnapshot: number? = nil
+
+local function celebrateCoinsWithPets()
+	for i, uid in localPetOrder do
+		local entry = localPets[uid]
+		if entry then
+			local model = entry.model
+			task.delay((i - 1) * 0.045, function()
+				if model.Parent then
+					PetAnimator.playEmote(model, "coin")
+				end
+			end)
+		end
+	end
+end
+
 function PetController.init()
 	if petClientInitDone then
 		return
 	end
 	petClientInitDone = true
 
+	if DEBUG_IDLE_EMOTES then
+		warn("[PetController][IdleEmote] debug prints enabled — look for lines starting with [PetController][IdleEmote]")
+	end
+
 	RunService.RenderStepped:Connect(onRenderStep)
 	Remotes.getEvent("PetEquipSync").OnClientEvent:Connect(onPetEquipSync)
+
+	Remotes.getEvent("CurrencyUpdate").OnClientEvent:Connect(function(currencies: any)
+		if type(currencies) ~= "table" then
+			return
+		end
+		local c = currencies.coins
+		if type(c) ~= "number" then
+			return
+		end
+		if lastCoinsSnapshot ~= nil and c > lastCoinsSnapshot + 0.25 then
+			celebrateCoinsWithPets()
+		end
+		lastCoinsSnapshot = c
+	end)
 
 	Players.PlayerRemoving:Connect(function(leaving)
 		clearRemotePlayerPets(leaving.UserId)

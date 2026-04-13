@@ -20,7 +20,7 @@ sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 BLENDER = r"F:\SteamLibrary\steamapps\common\Blender\blender.exe"
 DIR = os.path.dirname(os.path.abspath(__file__))
 
-ALL_PETS = ["tungtung", "bombombini", "tralalero", "bombardiro", "cappuccino"]
+ALL_PETS = ["tungtung", "StoreTungTung", "bombombini", "tralalero", "bombardiro", "cappuccino"]
 
 
 # ---------------------------------------------------------------------------
