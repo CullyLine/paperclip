@@ -18,20 +18,29 @@ The Board operator runs a robloxstudio-mcp server on **port 58741**. All agents 
 
 ### How to Call Tools
 
-Every tool is available as a POST endpoint on `http://localhost:58741/mcp/<tool_name>`.
+**Preferred:** Use Cursor's built-in `CallMcpTool` with `server: "user-robloxstudio-mcp"`.
 
-Use `Invoke-RestMethod` in PowerShell (via the Shell tool):
+**Fallback (via Shell):** Every tool is also available as a POST endpoint on `http://localhost:58741/mcp/<tool_name>`. Use Python (never PowerShell):
 
-```powershell
+```python
+import urllib.request, json
+
+def mcp_call(tool, args=None):
+    data = json.dumps(args or {}).encode()
+    req = urllib.request.Request(
+        f"http://localhost:58741/mcp/{tool}",
+        data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    return json.loads(urllib.request.urlopen(req).read())
+
 # No arguments
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_place_info" -Method POST -ContentType "application/json" -Body "{}"
+print(mcp_call("get_place_info"))
 
 # With arguments
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/execute_luau" -Method POST -ContentType "application/json" -Body '{"code":"return game.Workspace:GetChildren()"}'
+print(mcp_call("execute_luau", {"code": "return game.Workspace:GetChildren()"}))
 
-# With complex arguments (use a variable to avoid escaping issues)
-$body = @{ instancePath = "Workspace"; propertyName = "Name" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_instance_properties" -Method POST -ContentType "application/json" -Body $body
+# Complex arguments
+print(mcp_call("get_instance_properties", {"instancePath": "Workspace", "propertyName": "Name"}))
 ```
 
 The response is JSON with a `content` array. Each entry has `type` (usually `"text"`) and `text` (the result, often JSON-encoded).
@@ -40,8 +49,10 @@ The response is JSON with a `content` array. Each entry has `type` (usually `"te
 
 Before calling tools, verify the MCP server is up and Studio is connected:
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:58741/health" -Method GET
+```python
+import urllib.request, json
+resp = json.loads(urllib.request.urlopen("http://localhost:58741/health").read())
+print(resp)
 ```
 
 Look for `"pluginConnected": true`. If false, the Studio plugin hasn't connected yet -- wait and retry. If the health check itself fails, the Board's MCP server is not running. Report this on your Paperclip issue and move on to non-Studio work.
@@ -171,46 +182,48 @@ Requires `ROBLOX_OPEN_CLOUD_API_KEY` environment variable.
 
 ### Inspect the instance tree
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_instance_children" -Method POST -ContentType "application/json" -Body '{"instancePath":"Workspace"}'
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_instance_children" -Method POST -ContentType "application/json" -Body '{"instancePath":"ReplicatedStorage"}'
+```python
+print(mcp_call("get_instance_children", {"instancePath": "Workspace"}))
+print(mcp_call("get_instance_children", {"instancePath": "ReplicatedStorage"}))
 ```
 
 ### Read and modify a script
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_script_source" -Method POST -ContentType "application/json" -Body '{"instancePath":"ServerScriptService.MainServer"}'
+```python
+print(mcp_call("get_script_source", {"instancePath": "ServerScriptService.MainServer"}))
 
-$body = @{ instancePath = "ServerScriptService.MainServer"; startLine = 10; endLine = 15; newContent = "-- replaced" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/edit_script_lines" -Method POST -ContentType "application/json" -Body $body
+mcp_call("edit_script_lines", {
+    "instancePath": "ServerScriptService.MainServer",
+    "startLine": 10, "endLine": 15, "newContent": "-- replaced"
+})
 ```
 
 ### Create a Part with properties
 
-```powershell
-$body = @{
-    className = "Part"
-    parent = "Workspace"
-    name = "MyPart"
-    properties = @{ Size = @(4, 1, 4); Position = @(0, 10, 0); Anchored = $true; BrickColor = "Bright blue" }
-} | ConvertTo-Json -Depth 3
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/create_object" -Method POST -ContentType "application/json" -Body $body
+```python
+mcp_call("create_object", {
+    "className": "Part",
+    "parent": "Workspace",
+    "name": "MyPart",
+    "properties": {"Size": [4, 1, 4], "Position": [0, 10, 0], "Anchored": True, "BrickColor": "Bright blue"}
+})
 ```
 
 ### Run a Luau query
 
-```powershell
-$body = @{ code = 'local count = 0; for _, v in game:GetDescendants() do if v:IsA("Part") then count += 1 end end; return "Parts: " .. count' } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/execute_luau" -Method POST -ContentType "application/json" -Body $body
+```python
+code = 'local count = 0; for _, v in game:GetDescendants() do if v:IsA("Part") then count += 1 end end; return "Parts: " .. count'
+print(mcp_call("execute_luau", {"code": code}))
 ```
 
 ### Playtest cycle
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/start_playtest" -Method POST -ContentType "application/json" -Body '{"mode":"play"}'
-Start-Sleep -Seconds 5
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_playtest_output" -Method POST -ContentType "application/json" -Body '{}'
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/stop_playtest" -Method POST -ContentType "application/json" -Body '{}'
+```python
+import time
+mcp_call("start_playtest", {"mode": "play"})
+time.sleep(5)
+print(mcp_call("get_playtest_output"))
+mcp_call("stop_playtest")
 ```
 
 ## Concurrency Rules
@@ -226,18 +239,28 @@ All agents share one MCP server (port 58741). Follow these rules:
 
 To confirm MCP access is working, run these in order:
 
-```powershell
+```python
+import urllib.request, json
+
+def mcp_call(tool, args=None):
+    data = json.dumps(args or {}).encode()
+    req = urllib.request.Request(
+        f"http://localhost:58741/mcp/{tool}",
+        data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    return json.loads(urllib.request.urlopen(req).read())
+
 # 1. Health check — should show pluginConnected: true
-Invoke-RestMethod -Uri "http://localhost:58741/health" -Method GET
+print(json.loads(urllib.request.urlopen("http://localhost:58741/health").read()))
 
-# 2. Place info — should return place name and game ID
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_place_info" -Method POST -ContentType "application/json" -Body "{}"
+# 2. Place info
+print(mcp_call("get_place_info"))
 
-# 3. Services — should return the list of Roblox services
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/get_services" -Method POST -ContentType "application/json" -Body "{}"
+# 3. Services
+print(mcp_call("get_services"))
 
 # 4. Luau execution — should return "Hello from MCP"
-Invoke-RestMethod -Uri "http://localhost:58741/mcp/execute_luau" -Method POST -ContentType "application/json" -Body '{"code":"return \"Hello from MCP\""}'
+print(mcp_call("execute_luau", {"code": 'return "Hello from MCP"'}))
 ```
 
 If the health check fails, the Board's MCP server is not running. Report on your Paperclip issue and move on to non-Studio work.

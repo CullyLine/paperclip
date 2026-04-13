@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scheduleAiNewsDigest, postAiNewsDigest } from "./ai-news-digest.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +46,8 @@ const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const ISSUE_CHANNEL_ID = process.env.DISCORD_ISSUE_CHANNEL_ID;
 const APPROVALS_CHANNEL_ID = process.env.DISCORD_APPROVALS_CHANNEL_ID;
 const ADMIN_CHANNEL_ID = process.env.DISCORD_ADMIN_CHANNEL_ID;
+/** Daily AI news digest (default channel if env unset) */
+const AI_NEWS_CHANNEL_ID = process.env.DISCORD_AI_NEWS_CHANNEL_ID || "1491171200137957697";
 const API_URL = process.env.PAPERCLIP_API_URL || "http://localhost:3100";
 const COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID;
 
@@ -133,6 +136,14 @@ client.once(Events.ClientReady, async (c) => {
   } catch (err) {
     console.error(`[discord] Could not access admin channel ${ADMIN_CHANNEL_ID}: ${err.message}`);
     console.error("[discord] Make sure the bot has been invited to your server and can see that channel.");
+  }
+
+  try {
+    const aiCh = await client.channels.fetch(AI_NEWS_CHANNEL_ID);
+    console.log(`[discord] AI news digest channel: #${aiCh.name} (${AI_NEWS_CHANNEL_ID})`);
+    scheduleAiNewsDigest(client, AI_NEWS_CHANNEL_ID);
+  } catch (err) {
+    console.error(`[discord] AI news channel ${AI_NEWS_CHANNEL_ID}: ${err.message} — digest not scheduled`);
   }
 });
 
@@ -453,7 +464,8 @@ async function sendAdminPanel() {
       "`REBOOT` / `START` — Reboot all agents\n" +
       "`STATUS` — Refresh the panel\n" +
       "`GOAL Fix all bugs and polish the game` — Set goal for all agents\n" +
-      "`CLEARGOAL` — Clear the current goal"
+      "`CLEARGOAL` — Clear the current goal\n" +
+      "`AINEWS` — Post today's AI news digest to #ai-news"
     );
 
   const embeds = [helpEmbed, embed];
@@ -584,6 +596,16 @@ client.on(Events.MessageCreate, async (message) => {
     const count = await clearGoalForAllAgents(message.author.tag);
     await message.reply(`✖ Goal cleared for **${count} agent(s)**.`);
     await sendAdminPanel();
+  } else if (cmd === "AINEWS" || cmd === "AI NEWS") {
+    await message.reply("📰 Fetching and ranking stories…");
+    try {
+      const ch = await client.channels.fetch(AI_NEWS_CHANNEL_ID);
+      if (!ch?.isTextBased()) throw new Error("AI news channel not text-based");
+      await postAiNewsDigest(ch);
+      await message.reply("✅ AI news digest posted.");
+    } catch (e) {
+      await message.reply(`❌ Digest failed: ${e.message}`);
+    }
   }
 });
 
@@ -756,6 +778,7 @@ console.log(`  Company: ${COMPANY_ID}`);
 console.log(`  Issue channel: ${ISSUE_CHANNEL_ID}`);
 console.log(`  Approvals channel: ${APPROVALS_CHANNEL_ID}`);
 console.log(`  Admin channel: ${ADMIN_CHANNEL_ID}`);
+console.log(`  AI news channel: ${AI_NEWS_CHANNEL_ID} (cron ${process.env.DISCORD_AI_NEWS_CRON || "0 18 * * *"}, ${process.env.DISCORD_AI_NEWS_TIMEZONE || "America/New_York"})`);
 
 await refreshCaches();
 

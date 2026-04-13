@@ -10,11 +10,13 @@ alwaysApply: false
 
 # Permanent Design Specs
 
-All 3D pet assets for Drive A Car Simulator follow a strict, documented design system.
+3D assets now follow a style-based system. Use memories/3d-assets/styles/ (full-character is default). Chibi pets must explicitly use --style chibi-pets or the chibi-pets profile.
 
-**Before creating or modifying any pet asset, read the full spec:**
+**Before creating any 3D asset, determine the style and read the appropriate files:**
 
-`memories/DriveACarSimulator/PermanentDesignSpecs.md`
+- Style profiles: `memories/3d-assets/styles/full-character.json` (default) or `chibi-pets.json`
+- For pets: `memories/DriveACarSimulator/PermanentDesignSpecs.md`
+- Central pipeline: `memories/3d-assets/pipeline.py --style <name>`
 
 This spec covers:
 
@@ -23,7 +25,7 @@ This spec covers:
 - Visual identity of produced pets
 - Hunyuan3D v3 settings (NEVER use v2)
 - Decimation parameters (340 faces, voxel/bake settings)
-- UniRig rigging pipeline (CPU skeleton, GPU skin, path bridging) — **offline end product: rigged GLB**
+- Anymate rigging (primary, HuggingFace API) + UniRig fallback — **offline end product: rigged GLB**
 - **In-game** animation: `PetAnimator.luau` + `PetController.luau` (idle / walk / float; procedural Luau)
 - Pet following, replication, settings
 - File naming conventions through **`{name}-game-340_rigged.glb`** (no Blender animation export required)

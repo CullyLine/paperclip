@@ -1,25 +1,46 @@
-# 3D UniRig Rigging
+# 3D Auto-Rigging
 
-Automatic skeleton + skinning weight generation for 3D models using [VAST-AI-Research/UniRig](https://github.com/VAST-AI-Research/UniRig) (SIGGRAPH 2025).
+## Primary: Anymate (HuggingFace API)
 
-## Location
+**Anymate is the default rigging tool** as of 2026-03-31. Runs on HuggingFace Spaces
+(`yfdeng/Anymate`), ~15 seconds per model, no local GPU needed, 100% weight coverage.
+
+### Quick Command
+
+```bash
+python memories/3d-experiments/rig-anymate.py <pet_name>
+```
+
+### Why Anymate
+
+Tested against UniRig on 3 pets — Anymate won 11-6 overall. 2x more bones on tricky
+shapes, 100% weight coverage (UniRig: 90-95%), deeper bone chains, 15s vs 2-5 min.
+See `memories/3d-experiments/anymate-vs-unirig-report.md`.
+
+---
+
+## Fallback: UniRig (Local GPU)
+
+Automatic skeleton + skinning weight generation using [VAST-AI-Research/UniRig](https://github.com/VAST-AI-Research/UniRig) (SIGGRAPH 2025). **Only use when Anymate is down.**
+
+### Location
 
 `F:\CODE STUFF\tools\UniRig\` -- cloned repo with venv and custom configs.
 
-## Quick Command
+### Quick Command
 
-```powershell
-& "F:\CODE STUFF\tools\UniRig\rig.ps1" -Input "path\to\model.glb"
+```bash
+python memories/3d-experiments/rig-pet.py <pet_name>
 ```
 
-Options: `-Output`, `-Seed`, `-SkeletonOnly`, `-FacesTarget`
+### Pipeline (6 steps via rig-pet.py)
 
-## Pipeline (4 steps)
-
-1. **Extract mesh** (bpy) -- instant, bpy crashes on cleanup but output is fine
-2. **Skeleton prediction** (CPU, eager attention, 3-beam search) -- ~30-40s
-3. **Skinning weights** (GPU, bf16-mixed, spconv) -- ~10s
-4. **Merge** rig back into original GLB/FBX -- instant
+1. **Extract mesh** from highpoly (bpy) -- bpy crashes on cleanup but output is fine
+2. **Skeleton prediction** (GPU, eager attention) -- ~20-30s
+3. **Copy NPZ** to bridge path bug between skeleton/skinning steps
+4. **Skinning weights** (GPU, spconv) -- ~40-90s
+5. **Merge** rig onto lowpoly game model
+6. **Snout bone** auto-addition
 
 ## Key Setup Details
 
