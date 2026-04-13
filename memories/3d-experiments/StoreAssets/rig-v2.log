@@ -1,0 +1,38 @@
+﻿============================================================
+  HIGHPOLY ANYMATE RIG: StoreTungTung-tpose
+============================================================
+  Highpoly: StoreTungTung-tpose-rig-5k.glb
+  Lowpoly:  StoreTungTung-tpose-game-500-polished.glb
+  Output:   StoreTungTung-tpose-game-500_rigged.glb
+
+  [1/4] Submitting HIGHPOLY to Anymate API...
+Loaded as API: https://yfdeng-anymate.hf.space
+python : Traceback (most recent call last):
+At C:\Users\lineb\AppData\Local\Temp\ps-script-59bfe002-c0e8-479a-a8cd-32456c132a1a.ps1:89 char:1
++ python "memories\3d-experiments\rig-anymate-highpoly.py" StoreTungTun ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "F:\CODE STUFF\Paperclip\memories\3d-experiments\rig-anymate-highpoly.py", line 60, in <module>
+    client.predict(eps=0.03, min_samples=1, api_name="/get_all_results")
+  File "C:\Users\lineb\AppData\Roaming\Python\Python311\site-packages\gradio_client\client.py", line 499, in predict
+    ).result()
+      ^^^^^^^^
+  File "C:\Users\lineb\AppData\Roaming\Python\Python311\site-packages\gradio_client\client.py", line 1484, in result
+    return super().result(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\concurrent\futures\_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\concurrent\futures\_base.py", line 401, in __get_result
+    raise self._exception
+  File "C:\Python311\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\lineb\AppData\Roaming\Python\Python311\site-packages\gradio_client\client.py", line 1080, in _inner
+    predictions = _predict(*data, **kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\lineb\AppData\Roaming\Python\Python311\site-packages\gradio_client\client.py", line 1200, in _predict
+    raise AppError(message=message, **result)
+gradio_client.exceptions.AppError: You have exceeded your GPU quota (60s requested vs. 0s left). Try again in 0:00:00

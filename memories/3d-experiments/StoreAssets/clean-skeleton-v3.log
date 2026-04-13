@@ -1,0 +1,81 @@
+﻿=== Build Clean Skeleton ===
+22:16:54 | INFO: Data are loaded, start creating Blender stuff
+22:16:54 | INFO: Blender create Mesh node material.001
+22:16:54 | INFO: glTF import finished in 0.01s
+Mesh bounds: x=[-0.541, 0.540] y=[-0.180, 0.183] z=[-0.000, 1.129]
+Height: 1.129, Width: 1.081
+Faces: 1298, Verts: 1237
+  Arm Z detected from 8 wide slices, range [0.620, 0.690]
+
+Landmarks:
+  Arm Z: 0.655
+  Left arm tip X: -0.541
+  Right arm tip X: 0.540
+  Left leg X: -0.084
+  Right leg X: 0.086
+  Body center Y: -0.008
+  Torso half-width at arm Z: 0.270, shoulder offset: 0.243
+
+Bone positions:
+  Hips Z: 0.361
+  Chest Z: 0.655
+  Neck Z: 0.790
+  Head top Z: 1.129
+
+Creating bones:
+  + hips: (-0.000, -0.008, 0.361) -> (-0.000, -0.008, 0.508)
+  + spine: (-0.000, -0.008, 0.508) -> (-0.000, -0.008, 0.655)
+  + chest: (-0.000, -0.008, 0.655) -> (-0.000, -0.008, 0.790)
+  + neck: (-0.000, -0.008, 0.790) -> (-0.000, -0.008, 0.846)
+  + head: (-0.000, -0.008, 0.846) -> (-0.000, -0.008, 1.129)
+  + upper_arm_L: (-0.244, -0.008, 0.655) -> (-0.378, -0.008, 0.655)
+  + forearm_L: (-0.378, -0.008, 0.655) -> (-0.467, -0.008, 0.655)
+  + hand_L: (-0.467, -0.008, 0.655) -> (-0.541, -0.008, 0.655)
+  + upper_arm_R: (0.243, -0.008, 0.655) -> (0.377, -0.008, 0.655)
+  + forearm_R: (0.377, -0.008, 0.655) -> (0.466, -0.008, 0.655)
+  + hand_R: (0.466, -0.008, 0.655) -> (0.540, -0.008, 0.655)
+  + upper_leg_L: (-0.084, -0.008, 0.361) -> (-0.084, -0.008, 0.169)
+  + lower_leg_L: (-0.084, -0.008, 0.169) -> (-0.084, -0.008, 0.045)
+  + foot_L: (-0.084, -0.008, 0.045) -> (-0.084, -0.068, -0.000)
+  + upper_leg_R: (0.086, -0.008, 0.361) -> (0.086, -0.008, 0.169)
+  + lower_leg_R: (0.086, -0.008, 0.169) -> (0.086, -0.008, 0.045)
+  + foot_R: (0.086, -0.008, 0.045) -> (0.086, -0.068, -0.000)
+
+Created 17 bones
+
+Assigning vertex weights...
+Weight coverage: 1237/1237 (100.0%)
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+22:16:55 | INFO: Starting glTF 2.0 export
+22:16:55 | INFO: Extracting primitive: material.001
+22:16:55 | INFO: Primitives created: 1
+22:16:55 | INFO: Finished glTF 2.0 export in 0.09569048881530762 s
+
+
+=== RESULT ===
+Bones: 17
+Faces: 1298
+Vertices: 1237
+File: memories\3d-experiments\StoreAssets\StoreTungTung-tpose-FINAL.glb (1180 KB)
+
+Bone hierarchy:
+  hips <- ROOT
+  spine <- hips
+  chest <- spine
+  neck <- chest
+  head <- neck
+  upper_arm_L <- chest
+  forearm_L <- upper_arm_L
+  hand_L <- forearm_L
+  upper_arm_R <- chest
+  forearm_R <- upper_arm_R
+  hand_R <- forearm_R
+  upper_leg_L <- hips
+  lower_leg_L <- upper_leg_L
+  foot_L <- lower_leg_L
+  upper_leg_R <- hips
+  lower_leg_R <- upper_leg_R
+  foot_R <- lower_leg_R
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit

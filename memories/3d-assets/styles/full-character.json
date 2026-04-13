@@ -1,0 +1,78 @@
+{
+  "name": "full-character",
+  "description": "High-quality, faithful 3D assets for Roblox Creator Store. Close to reference, clean topology, smooth edges, realistic proportions (non-chibi). Higher detail allowed. Optimized for commercial sale.",
+  "default": true,
+  "hunyuan_prompt_modifiers": "highly detailed realistic character, clean smooth edges, accurate anatomy and proportions to reference, T-pose, full body, product photography, pure white background, studio lighting, professional game asset, no chibi, no toy style, no oversized head",
+  "negative_prompt": "chibi, super deformed, stubby limbs, toy, funko, pet simulator, cartoon, low detail, deformed anatomy",
+  "reference_generation": {
+    "model": "fal-ai/flux-pro/v1.1",
+    "prompt_template": "{description}, low poly 3D game asset style, smooth surface, no visible wood grain, no texture lines, centered on pure white background, full length visible, soft even lighting, matte finish",
+    "image_size": {"width": 512, "height": 768},
+    "num_images": 4,
+    "output_format": "png",
+    "safety_tolerance": "5",
+    "note": "Generate 4 variants and let the user pick. Avoid photorealistic keywords."
+  },
+  "target_faces": 1200,
+  "voxel_size": 0.012,
+  "voxel_size_note": "0.012 preserves hand/finger detail on T-pose characters. Do NOT use 0.05+ or thin features will split apart. 0.02 keeps limbs connected but blurs hands.",
+  "decimation_strategy": "highpoly_first",
+  "polish_settings": {
+    "saturation": 10,
+    "contrast": 5,
+    "brightness": 0,
+    "ao_strength": 0.6
+  },
+  "rigging": "anymate_via_5k_intermediate",
+  "rigging_intermediate_faces": 5000,
+  "rigging_intermediate_voxel": 0.006,
+  "rigging_fallback": "custom_skeleton",
+  "rigging_fallback_script": "memories/3d-experiments/StoreAssets/_build_clean_skeleton.py",
+  "rigging_fallback_note": "Use when Anymate quota is exceeded, skeleton has extra/misplaced bones, or weight bleed is severe. Builds 17 humanoid bones from mesh landmarks with cubic falloff weights.",
+  "tpose_conversion": {
+    "model": "fal-ai/flux-pro/kontext",
+    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position. Keep everything else about the character exactly the same - same face, same body, same texture, same proportions, same style. Arms fully extended outward with clear separation from the body. White background.",
+    "guidance_scale": 3.5,
+    "safety_tolerance": "5"
+  },
+  "prop_extraction": {
+    "model": "fal-ai/sam-3/image",
+    "apply_mask": true,
+    "note": "Use text prompts to extract weapons/accessories. If occluded, generate standalone reference with FLUX Pro instead of inpainting."
+  },
+  "thumbnail": {
+    "resolution": [1024, 1024],
+    "background_color": [0.25, 0.25, 0.28],
+    "camera_lens_mm": 50,
+    "render_engine": "CYCLES",
+    "render_samples": 128,
+    "lighting": "3-point (key, fill, rim)",
+    "text_overlay": {
+      "font": "arialbd.ttf",
+      "font_size": 72,
+      "position": "bottom-center",
+      "style": "white bold text on dark rounded pill"
+    },
+    "scripts": {
+      "render": "memories/3d-experiments/StoreAssets/_render_thumbnail.py",
+      "text_overlay": "memories/3d-experiments/StoreAssets/_add_text_overlay.py"
+    }
+  },
+  "store_listing": {
+    "title_template": "{character_name} + {accessory} | Low-Poly Rigged Character",
+    "price_range_individual": "$1.99-$4.99",
+    "price_range_bundle": "$9.99-$14.99",
+    "recommended_starting_price": "$2.99",
+    "tags": ["character name", "meme/franchise name", "low poly", "rigged", "game ready", "character model"],
+    "key_selling_points": [
+      "Total poly count lower than most Roblox accessories",
+      "Mobile-friendly",
+      "Named bones for easy animation",
+      "No scripts included — model only"
+    ],
+    "platform": "Roblox Creator Store",
+    "promotion_note": "Ads Manager only supports Experiences. Use DevForum, social media, and Discord for promotion."
+  },
+  "post_process": ["tpose_via_kontext", "name_bones", "symmetrize_if_possible", "foot_hand_cleanup", "proper_pivots"],
+  "roblox_rules": "Clean hierarchy, named bones where possible, commercial use ready, good LOD potential, proper scale and orientation"
+}

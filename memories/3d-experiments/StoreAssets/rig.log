@@ -1,0 +1,23 @@
+﻿============================================================
+  HIGHPOLY ANYMATE RIG: StoreTungTung-tpose
+============================================================
+  Highpoly: StoreTungTung-tpose-rig-5k.glb
+  Lowpoly:  StoreTungTung-tpose-game-500-polished.glb
+  Output:   StoreTungTung-tpose-game-500_rigged.glb
+
+  [1/4] Submitting HIGHPOLY to Anymate API...
+Loaded as API: https://yfdeng-anymate.hf.space
+  [1/4] Done (16.7s) -> StoreTungTung-tpose-anymate-hp.blend
+  [2/4] Merging HIGHPOLY armature onto LOWPOLY game mesh...
+  [2/4] Done (1.3s, 771 KB)
+  [3/4] Validating...
+    Bones: 43
+    Roots: 1
+    Vertices: 879
+    Weight coverage: 100.0%
+    Snout bone: True
+  [4/4] Complete: StoreTungTung-tpose-game-500_rigged.glb
+
+============================================================
+DONE
+============================================================

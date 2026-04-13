@@ -1,0 +1,62 @@
+﻿21:18:36 | INFO: Data are loaded, start creating Blender stuff
+21:18:36 | INFO: Blender create Mesh node material.002
+21:18:36 | INFO: glTF import finished in 0.02s
+Armature: Armature (43 bones)
+Mesh bounds: x=[-0.951, 0.951] z=[-1.000, 1.000]
+Mesh center X: 0.000, height: 2.000
+
+Renaming 43 bones:
+          24 -> chest
+          12 -> finger_1
+          16 -> finger_1_2
+          35 -> finger_1_L
+          18 -> finger_2
+          32 -> finger_2_2
+           8 -> finger_3
+           5 -> forearm
+          38 -> forearm_2
+          10 -> forearm_3
+           4 -> forearm_L
+           7 -> forearm_R
+          27 -> hand
+          19 -> hand_2
+          25 -> hand_3
+          20 -> hand_L
+          21 -> hand_R
+          39 -> head
+          40 -> head_extra_L
+           2 -> head_extra_L_2
+          26 -> head_extra_R
+          30 -> head_extra_R_2
+          41 -> hips
+          15 -> neck
+          17 -> shoulder
+           9 -> shoulder_2
+           0 -> shoulder_3
+          22 -> shoulder_4
+           6 -> shoulder_L
+          36 -> shoulder_R
+       snout -> snout
+          29 -> spine
+          31 -> spine_10
+          34 -> spine_7
+          11 -> spine_8
+          23 -> spine_9
+          37 -> spine_lower
+          13 -> spine_upper
+          28 -> upper_arm
+           1 -> upper_arm_2
+          33 -> upper_arm_3
+          14 -> upper_arm_L
+           3 -> upper_arm_R
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+21:18:36 | INFO: Starting glTF 2.0 export
+21:18:36 | INFO: Extracting primitive: material.002
+21:18:36 | INFO: Primitives created: 1
+21:18:36 | INFO: Finished glTF 2.0 export in 0.1063230037689209 s
+
+
+Exported with named bones: memories\3d-experiments\StoreAssets\StoreTungTung-tpose-FINAL.glb (1143 KB)
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit

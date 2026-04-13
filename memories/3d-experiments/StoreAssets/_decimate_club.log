@@ -1,0 +1,39 @@
+﻿Loading highpoly: F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\StoreTungTung-club-highpoly.glb
+00:00:38 | INFO: Data are loaded, start creating Blender stuff
+00:00:38 | INFO: Blender create Mesh node material
+00:00:40 | INFO: glTF import finished in 1.44s
+Found 1 mesh(es)
+Highpoly: 499874 faces
+Voxel remesh at 0.025...
+After voxel: 834 faces
+  Pass 0: 834 -> 372 (ratio=0.300)
+  Pass 1: 372 -> 170 (ratio=0.403)
+  Pass 2: 170 -> 148 (ratio=0.882)
+Final lowpoly: 148 faces, 90 verts
+UV unwrapping lowpoly...
+Setting up bake...
+blender.exe : F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\_decimate_club.py:74: DeprecationWarning: 
+'Material.use_nodes' is expected to be removed in Blender 6.0
+At C:\Users\lineb\AppData\Local\Temp\ps-script-96206741-91c4-4b9e-81c7-36bf78c6d983.ps1:86 char:1
++ & "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (F:\CODE STUFF\P... in Blender 6.0:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  mat.use_nodes = True
+Baking texture from highpoly -> lowpoly...
+Info: Circular dependency for image "BakeTexture" from object "LowPoly"
+Info: Baking map saved to internal image, save it externally or pack it
+Bake complete.
+Texture saved: F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\club_baked_texture.png
+Exporting: F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\StoreTungTung-club-game.glb
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+00:00:44 | INFO: Starting glTF 2.0 export
+00:00:44 | INFO: Extracting primitive: material.001
+00:00:44 | INFO: Primitives created: 1
+00:00:44 | INFO: Finished glTF 2.0 export in 0.03374075889587402 s
+
+Done: F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\StoreTungTung-club-game.glb (131 KB, 148 faces, 90 verts)
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit

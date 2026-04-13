@@ -1,0 +1,10 @@
+{
+  "status": "IN_QUEUE",
+  "request_id": "019d7eba-2163-7602-819c-91b825b964e5",
+  "response_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d7eba-2163-7602-819c-91b825b964e5",
+  "status_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d7eba-2163-7602-819c-91b825b964e5/status",
+  "cancel_url": "https://queue.fal.run/fal-ai/hunyuan3d-v3/requests/019d7eba-2163-7602-819c-91b825b964e5/cancel",
+  "logs": null,
+  "metrics": {},
+  "queue_position": 0
+}

@@ -1,0 +1,10 @@
+{
+  "status": "IN_QUEUE",
+  "request_id": "019d7fc2-c90a-7ad1-9607-d287e31d80f9",
+  "response_url": "https://queue.fal.run/fal-ai/sam-3/requests/019d7fc2-c90a-7ad1-9607-d287e31d80f9",
+  "status_url": "https://queue.fal.run/fal-ai/sam-3/requests/019d7fc2-c90a-7ad1-9607-d287e31d80f9/status",
+  "cancel_url": "https://queue.fal.run/fal-ai/sam-3/requests/019d7fc2-c90a-7ad1-9607-d287e31d80f9/cancel",
+  "logs": null,
+  "metrics": {},
+  "queue_position": 0
+}

@@ -1,0 +1,43 @@
+{
+  "name": "prop",
+  "description": "Weapons, tools, and accessories sold alongside characters on Roblox Creator Store. Low-poly, no rigging, simple geometry. Designed to be attached to character hand bones by the buyer.",
+  "default": false,
+  "hunyuan_prompt_modifiers": "simple 3D game prop, clean smooth surface, centered, product photography, pure white background, studio lighting, single object, no hands, no characters",
+  "negative_prompt": "realistic, photorealistic, detailed wood grain, complex textures, multiple objects, hands holding, character",
+  "reference_generation": {
+    "model": "fal-ai/flux-pro/v1.1",
+    "prompt_template": "{description}, low poly 3D game asset style, smooth surface, no visible texture lines, centered on pure white background, full length visible, soft even lighting, simple game prop, matte finish, no knots, no realistic textures",
+    "image_size": {"width": 512, "height": 768},
+    "num_images": 4,
+    "output_format": "png",
+    "safety_tolerance": "5",
+    "note": "Generate 4 variants and let the user pick. Match color/style to the character it belongs to."
+  },
+  "extraction": {
+    "model": "fal-ai/sam-3/image",
+    "apply_mask": true,
+    "note": "Use SAM 3 to extract the prop from a character reference if available. If occluded, generate standalone with FLUX Pro instead of inpainting."
+  },
+  "target_faces": 150,
+  "voxel_size": 0.025,
+  "voxel_size_note": "0.025 works well for simple cylindrical/blocky props like bats, clubs, swords. Adjust down to 0.015 for props with fine detail.",
+  "decimation_strategy": "highpoly_first",
+  "polish_settings": {
+    "saturation": 10,
+    "contrast": 5,
+    "brightness": 0,
+    "ao_strength": 0.6
+  },
+  "rigging": "none",
+  "rigging_note": "Props ship with NO armature. Do not add bones. Buyers attach to character hand bones themselves.",
+  "tpose_conversion": null,
+  "post_process": ["verify_no_armature", "proper_pivots"],
+  "scripts": {
+    "generate_reference": "memories/3d-experiments/StoreAssets/_generate_club.py",
+    "extract_from_character": "memories/3d-experiments/StoreAssets/_extract_club_sam.py",
+    "submit_hunyuan": "memories/3d-experiments/StoreAssets/_pipeline_club.py",
+    "decimate": "memories/3d-experiments/StoreAssets/_decimate_club.py",
+    "polish": "memories/3d-experiments/StoreAssets/_polish_club.py"
+  },
+  "roblox_rules": "No armature, clean single mesh, proper scale, commercial use ready, attach-friendly pivot point at grip/handle"
+}

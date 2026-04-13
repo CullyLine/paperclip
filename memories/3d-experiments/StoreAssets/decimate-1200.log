@@ -1,0 +1,49 @@
+﻿=== Decimate T-Pose ===
+Input:  memories\3d-experiments\StoreAssets\StoreTungTung-tpose-highpoly.glb
+Output: memories\3d-experiments\StoreAssets\StoreTungTung-tpose-game-1200.glb
+Target: 1200 faces
+Voxel:  0.012
+
+[1/6] Loading GLB...
+21:34:07 | INFO: Data are loaded, start creating Blender stuff
+21:34:07 | INFO: Blender create Mesh node material
+21:34:09 | INFO: glTF import finished in 1.54s
+  Loaded.
+  Found 1 mesh(es)
+
+[2/6] Mesh: material ΓÇö 500000 faces, 278742 verts
+
+[3/6] Voxel remesh (size=0.012)...
+  After voxel: 10808 faces
+
+[4/6] Collapse decimation to ~1200...
+  Pass 1: 2218 faces (ratio=0.1110)
+  Pass 2: 1250 faces (ratio=0.5410)
+
+[5/6] UV project + texture bake...
+blender.exe : F:\CODE STUFF\Paperclip\memories\3d-experiments\StoreAssets\_decimate_tpose.py:95: DeprecationWarning: 
+'Material.use_nodes' is expected to be removed in Blender 6.0
+At C:\Users\lineb\AppData\Local\Temp\ps-script-ce152234-11ee-4dda-a906-faea4285b818.ps1:91 char:1
++ & $BLENDER --background --python "memories\3d-experiments\StoreAssets ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (F:\CODE STUFF\P... in Blender 6.0:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  mat.use_nodes = True
+  Baking textures...
+Info: Circular dependency for image "BakedTexture" from object "material_lowpoly"
+Info: Baking map saved to internal image, save it externally or pack it
+  Bake complete.
+
+[6/6] Final: 1250 faces with baked texture
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+21:34:15 | INFO: Starting glTF 2.0 export
+21:34:15 | INFO: Extracting primitive: material.001
+21:34:15 | INFO: Primitives created: 1
+21:34:15 | INFO: Finished glTF 2.0 export in 0.018124818801879883 s
+
+
+Exported to memories\3d-experiments\StoreAssets\StoreTungTung-tpose-game-1200.glb
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit

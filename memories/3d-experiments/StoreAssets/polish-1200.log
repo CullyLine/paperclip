@@ -1,0 +1,31 @@
+﻿21:36:23 | INFO: Data are loaded, start creating Blender stuff
+21:36:23 | INFO: Blender create Mesh node material.001
+21:36:23 | INFO: glTF import finished in 0.01s
+blender.exe : F:\CODE STUFF\Paperclip\memories\3d-experiments\polish-fullcharacter.py:48: DeprecationWarning: 
+'Material.use_nodes' is expected to be removed in Blender 6.0
+At C:\Users\lineb\AppData\Local\Temp\ps-script-bbb76db9-9580-4e57-a9b7-11f535b272d8.ps1:89 char:1
++ & $BLENDER --background --python "memories\3d-experiments\polish-full ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (F:\CODE STUFF\P... in Blender 6.0:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  if not mat or not mat.use_nodes:
+
+Polishing (full-character) material: 1298 faces
+  [1] Shade smooth: done
+  [2] Texture: saturation +10%, contrast +5%, no brightness boost
+Info: Baking map saved to internal image, save it externally or pack it
+  [3] AO bake: done
+  [3] AO multiply: applied (40% floor, 0.6 strength)
+  Final: 1298 faces
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+21:36:28 | INFO: Starting glTF 2.0 export
+21:36:28 | INFO: Extracting primitive: material.001
+21:36:28 | INFO: Primitives created: 1
+21:36:28 | INFO: Finished glTF 2.0 export in 0.017722129821777344 s
+
+
+Exported polished model to memories\3d-experiments\StoreAssets\StoreTungTung-tpose-game-1200-polished.glb
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit

@@ -1,0 +1,19 @@
+{
+  "name": "chibi-pets",
+  "description": "Chibi super-deformed Roblox pet toy style for Drive A Car Simulator. Oversized head, stubby limbs, vibrant toy-like appearance. Matches PermanentDesignSpecs.md exactly.",
+  "default": false,
+  "hunyuan_prompt_modifiers": "ONE SINGLE adorable chibi super-deformed Roblox collectible pet toy figure, oversized head (40-50% of body), very stubby short limbs, T-pose, Funko Pop or Pet Simulator X style, vibrant saturated colors, smooth toy-like surfaces, pure white background, product photography lighting, front three-quarter view",
+  "negative_prompt": "realistic, full body proportions, tall, lanky, weapons, text, logos",
+  "target_faces": 500,
+  "voxel_size": 0.032,
+  "decimation_strategy": "lowpoly_pet",
+  "polish_settings": {
+    "saturation": 40,
+    "contrast": 15,
+    "brightness": 5,
+    "ao_strength": 0.3
+  },
+  "rigging": "anymate_or_unirig_highpoly",
+  "post_process": ["add_snout_bone", "v_formation_ready"],
+  "roblox_rules": "Use with PetAnimator.luau and PetController.luau. Follow rarity color system and PermanentDesignSpecs.md"
+}

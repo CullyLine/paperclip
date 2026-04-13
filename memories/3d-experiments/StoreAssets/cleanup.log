@@ -1,0 +1,154 @@
+﻿=== Skeleton Cleanup ===
+21:55:11 | INFO: Data are loaded, start creating Blender stuff
+21:55:11 | INFO: Blender create Mesh node material.002
+21:55:11 | INFO: glTF import finished in 0.02s
+Mesh: x=[-0.951, 0.951] z=[-1.000, 1.000]
+Before: 43 bones
+
+Root: 41 at z=0.445
+Spine chain: 7 bones
+  41: z=0.445 (72%)
+  37: z=0.472 (74%)
+  29: z=0.518 (76%)
+  13: z=0.563 (78%)
+  24: z=0.618 (81%)
+  15: z=0.674 (84%)
+  0: z=0.730 (87%)
+
+Leg roots: ['6', '17', '1']
+Arm roots: ['36', '9', '22', '39']
+
+Leg L: 4 bones kept (from 6)
+  6 -> upper_leg_L (z=0.445, len=0.060)
+  14 -> lower_leg_L (z=0.437, len=0.144)
+  4 -> foot_L (z=0.286, len=0.183)
+  20 -> toe_L (z=0.093, len=0.124)
+
+Leg L: 4 bones kept (from 17)
+  17 -> upper_leg_L (z=0.445, len=0.061)
+  28 -> lower_leg_L (z=0.419, len=0.118)
+  5 -> foot_L (z=0.295, len=0.035)
+  27 -> toe_L (z=0.259, len=0.151)
+
+Leg L: 4 bones kept (from 1)
+  1 -> upper_leg_L (z=0.672, len=0.084)
+  38 -> lower_leg_L (z=0.658, len=0.111)
+  19 -> foot_L (z=0.648, len=0.138)
+  16 -> toe_L (z=0.645, len=0.033)
+
+Arm R: 3 bones kept (from 36)
+  36 -> shoulder_R (x=0.429, len=0.038)
+  26 -> upper_arm_R (x=0.435, len=0.032)
+  30 -> forearm_R (x=0.410, len=0.032)
+
+Skipping short non-extending arm chain from 9 (not a real arm)
+
+Replacing arm R with longer chain from 22
+
+Arm R: 4 bones kept (from 22)
+  22 -> shoulder_R (x=0.001, len=0.097)
+  33 -> upper_arm_R (x=0.044, len=0.082)
+  10 -> forearm_R (x=0.128, len=0.111)
+  25 -> hand_R (x=0.245, len=0.111)
+
+Arm L: 4 bones kept (from 39)
+  39 -> shoulder_L (x=0.001, len=0.029)
+  34 -> upper_arm_L (x=0.002, len=0.040)
+  11 -> forearm_L (x=-0.000, len=0.077)
+  23 -> hand_L (x=0.003, len=0.127)
+
+--- Removing 16 redundant bones ---
+  REMOVE: 35
+  REMOVE: snout
+  REMOVE: 12
+  REMOVE: 18
+  REMOVE: 36
+  REMOVE: 3
+  REMOVE: 7
+  REMOVE: 21
+  REMOVE: 26
+  REMOVE: 30
+  REMOVE: 9
+  REMOVE: 32
+  REMOVE: 8
+  REMOVE: 40
+  REMOVE: 2
+  REMOVE: 31
+
+--- Renaming 27 bones ---
+  24 -> chest
+  4 -> foot_L
+  5 -> foot_L_2
+  19 -> foot_L_2
+  11 -> forearm_L
+  10 -> forearm_R
+  23 -> hand_L
+  25 -> hand_R
+  0 -> head
+  41 -> hips
+  14 -> lower_leg_L
+  28 -> lower_leg_L_2
+  38 -> lower_leg_L_2
+  15 -> neck
+  39 -> shoulder_L
+  22 -> shoulder_R
+  29 -> spine
+  37 -> spine_lower
+  13 -> spine_upper
+  20 -> toe_L
+  27 -> toe_L_2
+  16 -> toe_L_2
+  34 -> upper_arm_L
+  33 -> upper_arm_R
+  6 -> upper_leg_L
+  17 -> upper_leg_L_2
+  1 -> upper_leg_L_2
+
+Fixing unweighted vertices: 42 unweighted
+  After fix: 42/42 (100.0%)
+
+=== RESULT ===
+Bones: 27
+Faces: 80
+Vertices: 42
+Weight coverage: 42/42 (100.0%)
+
+Final bone list:
+  chest (parent=spine_upper)
+  foot_L (parent=lower_leg_L)
+  foot_L_2 (parent=lower_leg_L_2)
+  foot_L_2.001 (parent=lower_leg_L_2.001)
+  forearm_L (parent=upper_arm_L)
+  forearm_R (parent=upper_arm_R)
+  hand_L (parent=forearm_L)
+  hand_R (parent=forearm_R)
+  head (parent=neck)
+  hips (parent=ROOT)
+  lower_leg_L (parent=upper_leg_L)
+  lower_leg_L_2 (parent=upper_leg_L_2)
+  lower_leg_L_2.001 (parent=upper_leg_L_2.001)
+  neck (parent=chest)
+  shoulder_L (parent=neck)
+  shoulder_R (parent=neck)
+  spine (parent=spine_lower)
+  spine_lower (parent=hips)
+  spine_upper (parent=spine)
+  toe_L (parent=foot_L)
+  toe_L_2 (parent=foot_L_2)
+  toe_L_2.001 (parent=foot_L_2.001)
+  upper_arm_L (parent=shoulder_L)
+  upper_arm_R (parent=shoulder_R)
+  upper_leg_L (parent=hips)
+  upper_leg_L_2 (parent=hips)
+  upper_leg_L_2.001 (parent=head)
+INFO Draco mesh compression is available, use library at F:\SteamLibrary\steamapps\common\Blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+21:55:11 | INFO: Starting glTF 2.0 export
+21:55:11 | INFO: Extracting primitive: material.002
+21:55:11 | INFO: Primitives created: 1
+21:55:11 | INFO: Finished glTF 2.0 export in 0.12177824974060059 s
+
+
+Exported: memories\3d-experiments\StoreAssets\StoreTungTung-tpose-FINAL.glb (1186 KB)
+Blender 5.1.0 (hash adfe2921d5f3 built 2026-03-17 01:37:32)
+
+Blender quit
