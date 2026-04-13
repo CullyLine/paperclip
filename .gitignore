@@ -58,6 +58,21 @@ tests/release-smoke/playwright-report/
 discord-bridge/.bot.pid
 .tmp-pol161-comments.json
 
-# Large experiment files (over GitHub 100MB limit)
-memories/3d-experiments/*-anymate-hp.blend
-memories/3d-experiments/*-anymate-hp-vis.glb
+# 3D experiments working directory (large binaries, keep local only)
+memories/3d-experiments/*.glb
+memories/3d-experiments/*.blend
+memories/3d-experiments/*.json
+memories/3d-experiments/*-highpoly/
+memories/3d-experiments/StoreAssets/*.blend
+memories/3d-experiments/StoreAssets/*.blend1
+memories/3d-experiments/StoreAssets/*-highpoly.glb
+
+# OSRS asset references (large image sets, keep local only)
+assets/osrs-creature-refs/
+assets/osrs-npc-refs/
+assets/osrs-pets-chibi/
+assets/osrs-refs/
+assets/osrs-creatures-concept-sheet.png
+assets/osrs-npcs-concept-sheet-v2.png
+assets/osrs-pets-concept-sheet-v2.png
+assets/osrs-pets-concept-sheet.png
