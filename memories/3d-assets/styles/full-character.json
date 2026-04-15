@@ -23,15 +23,29 @@
     "brightness": 0,
     "ao_strength": 0.6
   },
-  "rigging": "anymate_via_5k_intermediate",
-  "rigging_intermediate_faces": 5000,
-  "rigging_intermediate_voxel": 0.006,
-  "rigging_fallback": "custom_skeleton",
-  "rigging_fallback_script": "memories/3d-experiments/StoreAssets/_build_clean_skeleton.py",
-  "rigging_fallback_note": "Use when Anymate quota is exceeded, skeleton has extra/misplaced bones, or weight bleed is severe. Builds 17 humanoid bones from mesh landmarks with cubic falloff weights.",
+  "rigging": "mixamo_recommended",
+  "rigging_strategy": {
+    "humanoid": {
+      "primary": "mixamo",
+      "note": "Upload mesh-only FBX to mixamo.com. Download T-Pose 'with skin' for skeleton+weights, animations 'without skin'. 25-bone industry-standard skeleton, thousands of free animations.",
+      "bundle_script": "memories/3d-experiments/StoreAssets/_build_mixamo_bundle.py"
+    },
+    "creature": {
+      "primary": "anymate",
+      "note": "For non-humanoid models (4-legged, winged, etc.) that Mixamo cannot process. May need manual bone cleanup. Not extensively tested on all creature types.",
+      "intermediate_faces": 5000,
+      "intermediate_voxel": 0.006
+    },
+    "fallback": {
+      "tool": "custom_skeleton",
+      "script": "memories/3d-experiments/StoreAssets/_build_clean_skeleton.py",
+      "note": "Builds 22 Mixamo-named bones from mesh landmarks. Use when Mixamo upload isn't feasible or Anymate fails."
+    }
+  },
   "tpose_conversion": {
     "model": "fal-ai/flux-pro/kontext",
-    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position. Keep everything else about the character exactly the same - same face, same body, same texture, same proportions, same style. Arms fully extended outward with clear separation from the body. White background.",
+    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position, with palms facing downward toward the ground. Keep everything else about the character exactly the same - same face, same body, same texture, same proportions, same style. Arms fully extended outward with clear separation from the body. Palms down. White background.",
+    "palm_direction": "MUST face downward. Palms up will break animation retargeting from Mixamo and SMPL-based sources.",
     "guidance_scale": 3.5,
     "safety_tolerance": "5"
   },
@@ -73,6 +87,21 @@
     "platform": "Roblox Creator Store",
     "promotion_note": "Ads Manager only supports Experiences. Use DevForum, social media, and Discord for promotion."
   },
-  "post_process": ["tpose_via_kontext", "name_bones", "symmetrize_if_possible", "foot_hand_cleanup", "proper_pivots"],
-  "roblox_rules": "Clean hierarchy, named bones where possible, commercial use ready, good LOD potential, proper scale and orientation"
+  "animation": {
+    "bundle_script": "memories/3d-experiments/StoreAssets/_build_mixamo_bundle.py",
+    "apply_single_script": "memories/3d-experiments/StoreAssets/_apply_mixamo_anim.py",
+    "ai_generation_script": "memories/3d-experiments/StoreAssets/_generate_animation.py",
+    "mixamo_download_rules": {
+      "tpose": "with skin (mesh + skeleton + weights)",
+      "animations": "without skin (skeleton + animation only)"
+    },
+    "roblox_limitations": {
+      "no_keyframe_sequences_in_sold_models": true,
+      "animations_account_locked": true,
+      "animation_editor_requires_motor6d": true,
+      "strategy": "Sell rigged model only on Roblox. Bundle animations for other platforms (Sketchfab, itch.io)."
+    }
+  },
+  "post_process": ["tpose_via_kontext", "mixamo_rig_or_custom_skeleton", "symmetrize_if_possible", "foot_hand_cleanup", "proper_pivots"],
+  "roblox_rules": "Clean hierarchy, Mixamo-standard bone names, commercial use ready, good LOD potential, proper scale and orientation. NO KeyframeSequences in models listed for sale."
 }

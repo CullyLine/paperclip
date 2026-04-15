@@ -23,7 +23,8 @@ description: >
 | Track | Use case | target_faces | voxel_size | Rigging |
 |-------|----------|--------------|------------|---------|
 | **Pet / follower** | In-game companions (DAC) | 340 | 0.032 | Anymate auto-rig |
-| **Commercial character** | Roblox Creator Store / sale | 1000–1500 | 0.012 | Anymate or custom skeleton |
+| **Commercial humanoid** | Roblox Creator Store / sale | 1000–1500 | 0.012 | **Mixamo** (recommended) or custom skeleton |
+| **Creature (non-humanoid)** | 4+ legged, unusual topology | 1000–1500 | 0.012 | Anymate (untested on all creature types) |
 | **Prop / accessory** | Weapons, tools, items for sale | 100–200 | 0.025 | None |
 
 ## Reference image
@@ -57,11 +58,13 @@ Before submitting a character to Hunyuan3D, run the reference through **FLUX.1 K
 - T-pose gives Anymate much better bone placement on arms/hands
 - Kontext preserves the character's exact appearance while only changing the pose
 
+**CRITICAL: Palms must face DOWNWARD (toward the ground).** This is the standard T-pose convention required by Mixamo, SMPL, and all animation retargeting systems. Palms facing up will cause twisted wrists and backwards joint bending in every animation. Always include "palms facing downward" in the prompt.
+
 ```python
 # fal-ai/flux-pro/kontext — image-to-image pose change
 payload = {
     "image_url": "<reference image URL or data URL>",
-    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position. Keep everything else about the character exactly the same. White background.",
+    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position, with palms facing downward toward the ground. Keep everything else about the character exactly the same. White background.",
     "guidance_scale": 3.5,
     "safety_tolerance": "5",
 }
@@ -142,27 +145,51 @@ Commercial/prop polish: write a custom script per `memories/3d-experiments/Store
 ### Track A: Pets and simple characters — Anymate (primary)
 `python memories/3d-experiments/rig-anymate.py <name>` (~15s via HuggingFace API, no local GPU needed, 100% weight coverage). Falls back to **UniRig** (`rig-pet.py`) if Anymate is unavailable.
 
-### Track B: Commercial characters — Anymate with 5K intermediate
+### Track B: Commercial humanoids — Mixamo (recommended)
+
+Mixamo produces a 25-bone industry-standard skeleton with perfect weights and is compatible with thousands of free animations. Best for any humanoid character that needs precise, editable bones.
+
+1. Export mesh-only FBX (no armature, no rotation applied)
+2. Upload to [mixamo.com](https://mixamo.com) — place markers (chin, wrists, elbows, knees, groin)
+3. Download T-Pose **"with skin"** (mesh + skeleton + weights)
+4. Download animations **"without skin"** (skeleton + animation only)
+5. Bundle using `_build_mixamo_bundle.py`:
+
+```bash
+& "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background --python _build_mixamo_bundle.py -- our_mesh.glb T-Pose.fbx anim_folder/ output.glb
+```
+
+The script takes Mixamo's rigged mesh + your texture + all animation FBXs → single GLB with all animations.
+
+**Key rules:**
+- Do NOT rotate the mesh before Mixamo upload
+- Download T-Pose "with skin", all others "without skin"
+- Script uses Mixamo's mesh/weights directly, applies your baked texture on top
+
+### Track C: Creatures (non-humanoid) — Anymate
+
+For 4-legged creatures, dragons, spiders, etc. that Mixamo cannot process:
+
 1. Decimate highpoly to **5000 faces** at voxel **0.006** (intermediate mesh)
 2. Rig the 5K intermediate via Anymate (better bone placement on detailed mesh)
 3. Transfer armature to the game mesh (1000-1500 faces)
-4. Run `memories/3d-experiments/name-bones.py` to rename numeric bones to human-readable names (hips, spine, upper_arm_L, etc.)
+4. Run `memories/3d-experiments/name-bones.py` to rename numeric bones
 
-### Track C: Custom skeleton (fallback)
-When Anymate fails (quota exceeded, bad skeleton, extra/misplaced bones, severe weight bleed):
+**Note:** Anymate on creatures has not been extensively tested. May produce extra/misplaced bones requiring manual cleanup. Good enough for game polish and procedural animation, but not as precise as Mixamo is for humanoids.
+
+### Track D: Custom skeleton (fallback for humanoids)
+When Mixamo upload isn't feasible or Anymate fails:
 
 Use `memories/3d-experiments/StoreAssets/_build_clean_skeleton.py`:
-- Builds 17 humanoid bones from mesh geometric landmarks
-- Dynamic shoulder detection (finds where mesh width expands)
-- Side isolation (left bones only affect left-side vertices)
-- Cubic falloff weights (1/d³) with 0.15 threshold to prevent bleed
-- Human-readable bone names built-in
+- Builds 22 Mixamo-named bones from mesh geometric landmarks
+- Dynamic shoulder detection, side isolation, cubic falloff weights
+- Mixamo-compatible bone names (Hips, Spine, LeftArm, etc.)
 
 ```bash
 & "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background --python _build_clean_skeleton.py -- input-game.glb output-rigged.glb
 ```
 
-### Track D: Props — No rigging
+### Track E: Props — No rigging
 Props (weapons, tools, accessories) ship with **no armature**. Skip rigging entirely.
 
 ## Step 6 — Thumbnail (commercial assets)
@@ -174,7 +201,22 @@ For Creator Store listings, render a thumbnail using Blender + PIL:
 2. **PIL text overlay**: Add character name in Unity Asset Store style (white bold text on dark rounded pill)  
    See `memories/3d-experiments/StoreAssets/_add_text_overlay.py`
 
-## Step 7 — Creator Store listing (commercial assets)
+## Step 7 — Animation (commercial humanoids, optional)
+
+### Mixamo animations
+With a Mixamo-rigged model, browse [mixamo.com](https://mixamo.com) for free animations (idle, walk, dance, attack, etc.) and download as FBX "without skin". Bundle into GLB with `_build_mixamo_bundle.py`.
+
+### AI-generated animations
+**HY-Motion** (`fal-ai/hunyuan-motion`) generates text-to-skeleton animations. Outputs SMPL 22-joint FBX. Requires retargeting to your skeleton — works but is lossy between different skeleton proportions. Mixamo pre-made animations generally give better results.
+
+### Roblox animation limitations (CRITICAL)
+- **Roblox Creator Store does NOT allow KeyframeSequences in sold models** — the model will be rejected
+- **Roblox animations are account-locked** — buyers cannot use your published animation IDs in their games
+- **Roblox Animation Editor requires Motor6Ds** — skinned mesh GLB imports don't have these
+- **For Roblox:** sell rigged model only (no animations). Include KeyframeSequences only if model is NOT for sale
+- **For other platforms** (Sketchfab, itch.io, Unity Asset Store): GLB with embedded animations works perfectly
+
+## Step 8 — Creator Store listing (commercial assets)
 
 **Title formula:** `"[Character Name] + [Accessory] | Low-Poly Rigged Character"`  
 **Price range:** $1.99–$4.99 individual, $9.99–$14.99 bundles  
@@ -185,7 +227,7 @@ For Creator Store listings, render a thumbnail using Blender + PIL:
 [Character Name] — fully rigged character with [accessory] accessory.
 
 WHAT'S INCLUDED:
-- Rigged [character] (17 named bones, game-ready)
+- Rigged [character] (25 Mixamo-standard bones, game-ready)
 - Separate [accessory] prop (no armature, attach to hand bone)
 - Baked textures on both assets
 
@@ -224,7 +266,10 @@ OPTIMIZED FOR ROBLOX:
 | `memories/3d-experiments/fetch-result.py` | Download GLB from completed job |
 | `memories/3d-experiments/name-bones.py` | Rename numeric Anymate bones to human-readable names |
 | `memories/3d-experiments/rig-anymate.py` | Auto-rig via HuggingFace Anymate API |
-| `memories/3d-experiments/StoreAssets/_build_clean_skeleton.py` | Custom 17-bone humanoid skeleton from mesh landmarks |
+| `memories/3d-experiments/StoreAssets/_build_clean_skeleton.py` | Custom 22-bone Mixamo-named skeleton from mesh landmarks |
+| `memories/3d-experiments/StoreAssets/_build_mixamo_bundle.py` | Bundle Mixamo T-Pose + texture + animations → single GLB |
+| `memories/3d-experiments/StoreAssets/_apply_mixamo_anim.py` | Apply single Mixamo FBX animation to rigged GLB |
+| `memories/3d-experiments/StoreAssets/_generate_animation.py` | Generate AI animation via HY-Motion (fal.ai) |
 | `memories/3d-experiments/StoreAssets/_decimate_tpose.py` | Custom decimation for T-pose characters |
 | `memories/3d-experiments/StoreAssets/_decimate_club.py` | Custom decimation for props |
 | `memories/3d-experiments/StoreAssets/_polish_club.py` | Texture polish for props |

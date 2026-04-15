@@ -64,12 +64,20 @@ Before submitting a character reference to Hunyuan3D, run it through **FLUX.1 Ko
 - T-pose gives Anymate much better bone placement on arms/hands
 - Kontext preserves the character's exact appearance while only changing the pose
 
+### T-Pose Requirements (CRITICAL)
+
+- Arms stretched straight out horizontally
+- **Palms MUST face DOWN (toward the ground)** — NOT up toward the sky
+- This is required for Mixamo compatibility and correct animation retargeting
+- If palms face up, every animation will have twisted wrists and wrong joint bending
+- Include "palms facing downward" explicitly in the Kontext prompt
+
 The prompt template is stored in `full-character.json` under `tpose_conversion`.
 
 ```python
 payload = {
     "image_url": "<reference image URL or data URL>",
-    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position. Keep everything else about the character exactly the same. White background.",
+    "prompt": "Change the pose of this character so both arms are stretched straight out horizontally to the sides in a T-pose position, palms facing downward. Keep everything else about the character exactly the same. White background.",
     "guidance_scale": 3.5,
     "safety_tolerance": "5",
 }
@@ -103,6 +111,50 @@ This table was built from hard-won experimentation. Follow it strictly.
 | **0.032** | Chibi pets (300-400 faces) | Standard for pet pipeline |
 | **0.05+** | **NEVER on thin features** | **Limbs and fingers WILL split apart. Do NOT use on T-pose characters.** |
 
+## Rigging Strategy: Mixamo vs Anymate
+
+Choosing the right rigging approach depends on the model type:
+
+| Model type | Rigging tool | Why |
+|------------|-------------|-----|
+| **Humanoid character (commercial)** | **Mixamo** (recommended) | 25-bone industry-standard skeleton, perfect weights, compatible with thousands of free animations. Precise, human-readable, editable bones. |
+| **Humanoid character (fallback)** | Custom skeleton script | When Mixamo upload isn't feasible. Builds 22 Mixamo-named bones from mesh landmarks. |
+| **Creatures (4+ legs, non-humanoid)** | **Anymate** | Handles arbitrary topologies (dragons, spiders, etc.) that Mixamo can't process. Good enough for game polish and procedural animation. Not tested extensively yet — may need manual cleanup. |
+| **Pets (chibi, in-game)** | **Anymate** | Quick auto-rig, good enough for DAC's procedural PetAnimator. Doesn't need precise bones. |
+| **Props** | **None** | No rigging. Ship as raw mesh. |
+
+### Mixamo Workflow (humanoid characters)
+
+**Best results for characters that need animations:**
+
+1. Build initial mesh (Hunyuan3D → decimate → polish)
+2. Export mesh-only FBX (no armature, no rotation): `_build_mixamo_bundle.py` or manual export
+3. Upload to [mixamo.com](https://mixamo.com) — let Mixamo auto-rig (place chin, wrists, elbows, knees, groin markers)
+4. Download T-Pose **"with skin"** — this gives you Mixamo's skeleton + perfect weights on your mesh
+5. Download any animations **"without skin"** — just skeleton + animation data
+6. Bundle everything: `_build_mixamo_bundle.py` takes the T-Pose FBX (with skin), your textured GLB, and animation FBXs → outputs a single GLB with all animations
+
+```bash
+& "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background --python memories/3d-experiments/StoreAssets/_build_mixamo_bundle.py -- our_mesh.glb T-Pose.fbx anim_folder/ output.glb
+```
+
+**Mixamo gives you 25 bones:** the 22-joint SMPL standard plus HeadTop_End, LeftToe_End, RightToe_End.
+
+**Key rules:**
+- Do NOT rotate the mesh before uploading to Mixamo — let Mixamo handle orientation
+- Download T-Pose "with skin" for weights, all other animations "without skin"
+- The bundle script uses Mixamo's mesh + weights directly, applies YOUR texture on top
+
+### Anymate Workflow (creatures, pets)
+
+For non-humanoid models where Mixamo won't work:
+
+```bash
+python memories/3d-experiments/rig-anymate.py <name>
+```
+
+Anymate typically produces 30-50+ bones with numeric names. Run `name-bones.py` afterward to rename. Quality varies — may need manual bone cleanup in Blender.
+
 ## Custom Skeleton (fallback rigging)
 
 When Anymate produces a bad skeleton (extra/misplaced bones, severe weight bleed, quota exceeded), use the custom skeleton builder:
@@ -112,22 +164,56 @@ When Anymate produces a bad skeleton (extra/misplaced bones, severe weight bleed
 ```
 
 What it does:
-- Builds **17 humanoid bones** from mesh geometric landmarks (not from AI prediction)
+- Builds **22 Mixamo-compatible bones** from mesh geometric landmarks (not from AI prediction)
+- Uses **Mixamo bone names** (Hips, Spine, Spine1, Spine2, LeftArm, RightUpLeg, etc.)
 - Detects shoulder line by finding where mesh width expands significantly
 - Calculates shoulder offset dynamically from torso half-width
 - **Side isolation**: left bones only affect left-side vertices, and vice versa
 - **Cubic falloff weights** (1/d³) with 0.15 threshold to prevent bleed between limbs
-- Human-readable bone names built-in (hips, spine, chest, neck, head, upper_arm_L, etc.)
 
-**When to use:**
+### 22-Bone Skeleton (Mixamo-compatible)
+
+The skeleton matches the SMPL/Mixamo 22-joint standard exactly:
+
+| Bone | Parent | Purpose |
+|------|--------|---------|
+| Hips | ROOT | Root/pelvis |
+| Spine | Hips | Lower spine |
+| Spine1 | Spine | Mid spine |
+| Spine2 | Spine1 | Chest |
+| Neck | Spine2 | Neck |
+| Head | Neck | Head |
+| LeftShoulder / RightShoulder | Spine2 | Collar bones |
+| LeftArm / RightArm | Shoulder | Upper arms |
+| LeftForeArm / RightForeArm | Arm | Forearms |
+| LeftHand / RightHand | ForeArm | Hands |
+| LeftUpLeg / RightUpLeg | Hips | Thighs |
+| LeftLeg / RightLeg | UpLeg | Shins |
+| LeftFoot / RightFoot | Leg | Feet |
+| LeftToeBase / RightToeBase | Foot | Toes |
+
+**Why Mixamo names matter:** Any animation downloaded from Mixamo, or any SMPL-based AI animation, will map directly to these bones with zero retargeting.
+
+### Applying Mixamo Animations
+
+```bash
+& "F:\SteamLibrary\steamapps\common\Blender\blender.exe" --background --python memories/3d-experiments/StoreAssets/_apply_mixamo_anim.py -- character.glb animation.fbx output.glb
+```
+
+The script strips the `mixamorig:` prefix and applies the action directly. Works with Blender 5.x layered actions.
+
+**When to use custom skeleton:**
 1. Anymate GPU quota exceeded
 2. Anymate skeleton has extra/misplaced leg joints or foot bones
 3. Arm joints are positioned too high or too far into the torso
 4. Weight bleed: rotating one limb moves adjacent limbs
 
-## Bone Naming
-
-After rigging with Anymate, run `memories/3d-experiments/name-bones.py` to auto-rename numeric bones into human-readable names (hips, spine, upper_arm_L, etc.). This is **required** for commercial Asset Store models.
+**Recommended workflow for best animation results:**
+1. Build skeleton with `_build_clean_skeleton.py`
+2. Manually adjust bone positions in Blender if needed
+3. Export mesh-only FBX (no armature) for Mixamo upload
+4. Let Mixamo auto-rig and apply animation
+5. Download FBX "with skin" and use directly
 
 ## Prop Pipeline (no rigging)
 
@@ -197,13 +283,15 @@ STATS:
 - Total file size: ~[X] MB
 
 RIGGING:
-- [N] human-readable bone names (hips, spine, chest, head, upper_arm_L, etc.)
-- Clean weight painting with minimal bleed between limbs
+- 25 Mixamo-standard bone names (Hips, Spine, Spine1, Spine2, LeftArm, RightUpLeg, etc.)
+- Clean weight painting (Mixamo auto-weights)
 - T-pose default — easy to animate
+- Compatible with industry-standard animation tools
 
 IMPORTANT:
-- This is a 3D MODEL ONLY — no scripts, no code, no animations included
-- You provide your own scripts and animations
+- This is a 3D MODEL ONLY — no scripts, no code included
+- Roblox version: no animations (Roblox Creator Store does not allow KeyframeSequences in sold models)
+- Other platforms (Sketchfab, itch.io): animations can be bundled in the GLB
 
 OPTIMIZED FOR ROBLOX:
 - Ultra low-poly, runs great even on mobile
@@ -211,6 +299,14 @@ OPTIMIZED FOR ROBLOX:
 - Clean hierarchy, proper scale and orientation
 - Ready to drop into any game
 ```
+
+### Animation distribution
+- **Roblox Creator Store does NOT allow selling models with KeyframeSequences** — the model will be blocked from sale
+- **Roblox animations are account-locked** — other players cannot use your published animation IDs
+- **Roblox Animation Editor requires Motor6Ds** — skinned mesh imports from GLB don't have these
+- **For Roblox:** sell the rigged model only (no animations). Animations must be distributed separately (Google Drive link, or sold on other platforms)
+- **For other platforms** (Sketchfab, Unity Asset Store, itch.io): sell the GLB with all animations embedded — it just works
+- **Mixamo workflow:** Download animations "without skin" from Mixamo, bundle into GLB using `_build_mixamo_bundle.py`. The 22-bone Mixamo-compatible skeleton ensures direct compatibility
 
 ### Promotion strategy
 - Roblox Ads Manager only supports Experiences, not Creator Store models
@@ -230,4 +326,4 @@ OPTIMIZED FOR ROBLOX:
 
 This system allows us to support both the existing Roblox game **and** a line of sellable 3D assets without conflict.
 
-Last updated: April 13, 2026
+Last updated: April 14, 2026

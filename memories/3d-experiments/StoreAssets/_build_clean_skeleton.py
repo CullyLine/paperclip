@@ -1,9 +1,9 @@
-"""Build a clean humanoid skeleton from scratch for a T-pose mesh.
+"""Build a clean 22-bone SMPL-compatible humanoid skeleton for a T-pose mesh.
 
-Analyzes mesh geometry to place bones at correct positions:
-  hips → spine → chest → neck → head
-  hips → upper_leg_L/R → lower_leg_L/R → foot_L/R
-  chest → upper_arm_L/R → forearm_L/R → hand_L/R
+Analyzes mesh geometry to place bones at correct positions (Mixamo naming):
+  Hips → Spine → Spine1 → Spine2 → Neck → Head
+  Hips → LeftUpLeg/RightUpLeg → LeftLeg/RightLeg → LeftFoot/RightFoot → LeftToeBase/RightToeBase
+  Spine2 → LeftShoulder/RightShoulder → LeftArm/RightArm → LeftForeArm/RightForeArm → LeftHand/RightHand
 
 Usage: blender --background --python _build_clean_skeleton.py -- <input.glb> <output.glb>
 """
@@ -102,7 +102,8 @@ print(f"  Right leg X: {right_leg_x:.3f}", flush=True)
 print(f"  Body center Y: {cy_body:.3f}", flush=True)
 
 hips_z = mesh_min.z + height * 0.32
-spine_z = mesh_min.z + height * 0.45
+spine_z = mesh_min.z + height * 0.42
+spine2_z = mesh_min.z + height * 0.50
 chest_z = mesh_min.z + height * 0.58
 neck_z = mesh_min.z + height * 0.70
 head_base_z = mesh_min.z + height * 0.75
@@ -111,6 +112,7 @@ head_top_z = mesh_max.z
 knee_z = mesh_min.z + height * 0.15
 ankle_z = mesh_min.z + height * 0.04
 toe_z = mesh_min.z
+toe_forward = 0.08
 
 torso_verts_at_arm_z = [v for v in verts
                          if abs(v.z - arm_z) < height * 0.05
@@ -151,51 +153,65 @@ def add_bone(name, head, tail, parent_name=None):
 
 print("\nCreating bones:", flush=True)
 
-add_bone("hips", (cx, cy_body, hips_z), (cx, cy_body, spine_z))
-add_bone("spine", (cx, cy_body, spine_z), (cx, cy_body, chest_z), "hips")
-add_bone("chest", (cx, cy_body, chest_z), (cx, cy_body, neck_z), "spine")
-add_bone("neck", (cx, cy_body, neck_z), (cx, cy_body, head_base_z), "chest")
-add_bone("head", (cx, cy_body, head_base_z), (cx, cy_body, head_top_z), "neck")
+add_bone("Hips", (cx, cy_body, hips_z), (cx, cy_body, spine_z))
+add_bone("Spine", (cx, cy_body, spine_z), (cx, cy_body, spine2_z), "Hips")
+add_bone("Spine1", (cx, cy_body, spine2_z), (cx, cy_body, chest_z), "Spine")
+add_bone("Spine2", (cx, cy_body, chest_z), (cx, cy_body, neck_z), "Spine1")
+add_bone("Neck", (cx, cy_body, neck_z), (cx, cy_body, head_base_z), "Spine2")
+add_bone("Head", (cx, cy_body, head_base_z), (cx, cy_body, head_top_z), "Neck")
 
-add_bone("upper_arm_L",
-         (cx - shoulder_offset, cy_body, arm_z),
-         (elbow_x_L, cy_body, arm_z), "chest")
-add_bone("forearm_L",
+collar_len = shoulder_offset * 0.5
+add_bone("LeftShoulder",
+         (cx, cy_body, arm_z),
+         (cx - collar_len, cy_body, arm_z), "Spine2")
+add_bone("LeftArm",
+         (cx - collar_len, cy_body, arm_z),
+         (elbow_x_L, cy_body, arm_z), "LeftShoulder")
+add_bone("LeftForeArm",
          (elbow_x_L, cy_body, arm_z),
-         (wrist_x_L, cy_body, arm_z), "upper_arm_L")
-add_bone("hand_L",
+         (wrist_x_L, cy_body, arm_z), "LeftArm")
+add_bone("LeftHand",
          (wrist_x_L, cy_body, arm_z),
-         (left_tip_x, cy_body, arm_z), "forearm_L")
+         (left_tip_x, cy_body, arm_z), "LeftForeArm")
 
-add_bone("upper_arm_R",
-         (cx + shoulder_offset, cy_body, arm_z),
-         (elbow_x_R, cy_body, arm_z), "chest")
-add_bone("forearm_R",
+add_bone("RightShoulder",
+         (cx, cy_body, arm_z),
+         (cx + collar_len, cy_body, arm_z), "Spine2")
+add_bone("RightArm",
+         (cx + collar_len, cy_body, arm_z),
+         (elbow_x_R, cy_body, arm_z), "RightShoulder")
+add_bone("RightForeArm",
          (elbow_x_R, cy_body, arm_z),
-         (wrist_x_R, cy_body, arm_z), "upper_arm_R")
-add_bone("hand_R",
+         (wrist_x_R, cy_body, arm_z), "RightArm")
+add_bone("RightHand",
          (wrist_x_R, cy_body, arm_z),
-         (right_tip_x, cy_body, arm_z), "forearm_R")
+         (right_tip_x, cy_body, arm_z), "RightForeArm")
 
-add_bone("upper_leg_L",
+add_bone("LeftUpLeg",
          (left_leg_x, cy_body, hips_z),
-         (left_leg_x, cy_body, knee_z), "hips")
-add_bone("lower_leg_L",
+         (left_leg_x, cy_body, knee_z), "Hips")
+add_bone("LeftLeg",
          (left_leg_x, cy_body, knee_z),
-         (left_leg_x, cy_body, ankle_z), "upper_leg_L")
-add_bone("foot_L",
+         (left_leg_x, cy_body, ankle_z), "LeftUpLeg")
+add_bone("LeftFoot",
          (left_leg_x, cy_body, ankle_z),
-         (left_leg_x, cy_body - 0.06, toe_z), "lower_leg_L")
+         (left_leg_x, cy_body - 0.06, toe_z), "LeftLeg")
+add_bone("LeftToeBase",
+         (left_leg_x, cy_body - 0.06, toe_z),
+         (left_leg_x, cy_body - 0.06 - toe_forward, toe_z), "LeftFoot")
 
-add_bone("upper_leg_R",
+add_bone("RightUpLeg",
          (right_leg_x, cy_body, hips_z),
-         (right_leg_x, cy_body, knee_z), "hips")
-add_bone("lower_leg_R",
+         (right_leg_x, cy_body, knee_z), "Hips")
+add_bone("RightLeg",
          (right_leg_x, cy_body, knee_z),
-         (right_leg_x, cy_body, ankle_z), "upper_leg_R")
-add_bone("foot_R",
+         (right_leg_x, cy_body, ankle_z), "RightUpLeg")
+add_bone("RightFoot",
          (right_leg_x, cy_body, ankle_z),
-         (right_leg_x, cy_body - 0.06, toe_z), "lower_leg_R")
+         (right_leg_x, cy_body - 0.06, toe_z), "RightLeg")
+add_bone("RightToeBase",
+         (right_leg_x, cy_body - 0.06, toe_z),
+         (right_leg_x, cy_body - 0.06 - toe_forward, toe_z), "RightFoot")
 
 bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -217,9 +233,9 @@ bpy.ops.object.mode_set(mode='OBJECT')
 for bname, _, _ in bone_positions:
     mesh_obj.vertex_groups.new(name=bname)
 
-left_bones = {n for n, _, _ in bone_positions if n.endswith('_L')}
-right_bones = {n for n, _, _ in bone_positions if n.endswith('_R')}
-center_bones = {n for n, _, _ in bone_positions if not n.endswith('_L') and not n.endswith('_R')}
+left_bones = {n for n, _, _ in bone_positions if n.startswith('Left')}
+right_bones = {n for n, _, _ in bone_positions if n.startswith('Right')}
+center_bones = {n for n, _, _ in bone_positions if not n.startswith('Left') and not n.startswith('Right')}
 
 SIDE_MARGIN = 0.02
 
