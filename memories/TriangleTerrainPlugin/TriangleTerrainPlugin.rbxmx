@@ -1,0 +1,3108 @@
+<roblox version="4">
+	<External>null</External>
+	<External>nil</External>
+		<Item class="Script" referent="RBX0">
+			<Properties>
+				<string name="Name">TriangleTerrainPlugin</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	Triangle Terrain Plugin
+	A modern triangle-based terrain editor for Roblox Studio.
+	Uses a DockWidget UI with mode-based workflow, persistent
+	node/triangle data, sculpt tools, and auto-triangulation.
+]]
+
+local TerrainState    = require(script.TerrainState)
+local NodeManager     = require(script.NodeManager)
+local InputHandler    = require(script.InputHandler)
+local AutoTriangulate = require(script.AutoTriangulate)
+local WidgetUI        = require(script.WidgetUI)
+
+------------------------------------------------------------------------
+-- Plugin toolbar
+------------------------------------------------------------------------
+local toolbar = plugin:CreateToolbar("Triangle Terrain")
+local toggleBtn = toolbar:CreateButton(
+	"TriTerrainToggle",
+	"Open the Triangle Terrain editor",
+	"rbxassetid://6034818372",
+	"Triangle Terrain"
+)
+
+------------------------------------------------------------------------
+-- DockWidget
+------------------------------------------------------------------------
+local widgetInfo = DockWidgetPluginGuiInfo.new(
+	Enum.InitialDockState.Float,
+	false,
+	false,
+	340, 550,
+	320, 400
+)
+
+local widget = plugin:CreateDockWidgetPluginGui("TriangleTerrain", widgetInfo)
+widget.Title = "Triangle Terrain"
+widget.Name = "TriangleTerrain"
+widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+------------------------------------------------------------------------
+-- Core systems
+------------------------------------------------------------------------
+local state = TerrainState.new()
+local nodeManager = NodeManager.new(state)
+local mouse = plugin:GetMouse()
+local inputHandler = InputHandler.new(state, nodeManager, mouse)
+
+------------------------------------------------------------------------
+-- Callbacks for WidgetUI
+------------------------------------------------------------------------
+local callbacks = {
+	onAutoTriangulate = function()
+		local visibleNodes = {}
+		for nodeId, nodeData in state.nodes do
+			if nodeManager:NodePassesFilter(nodeId) then
+				table.insert(visibleNodes, {
+					nodeId = nodeId,
+					position = nodeData.position,
+				})
+			end
+		end
+
+		if #visibleNodes < 3 then
+			warn("[TriTerrain] Need at least 3 visible nodes to auto-triangulate.")
+			return
+		end
+
+		local triangles = AutoTriangulate.triangulate(visibleNodes)
+
+		local created = 0
+		for _, tri in triangles do
+			local id = nodeManager:CreateTriangle(tri[1], tri[2], tri[3])
+			if id then created += 1 end
+		end
+
+		print(string.format("[TriTerrain] Auto-triangulated: %d triangles from %d nodes.", created, #visibleNodes))
+	end,
+
+	onDeleteSelected = function()
+		for _, nodeId in state.selectedNodes do
+			nodeManager:DeleteNode(nodeId)
+		end
+		for _, triId in state.selectedTriangles do
+			nodeManager:DeleteTriangle(triId)
+		end
+		state:SelectNode(nil)
+	end,
+}
+
+------------------------------------------------------------------------
+-- UI
+------------------------------------------------------------------------
+local ui = WidgetUI.new(widget, state, nodeManager, callbacks)
+
+------------------------------------------------------------------------
+-- Activation
+------------------------------------------------------------------------
+local function onActivate()
+	plugin:Activate(true)
+	inputHandler:Activate()
+end
+
+local function onDeactivate()
+	plugin:Deactivate()
+	inputHandler:Deactivate()
+end
+
+widget:GetPropertyChangedSignal("Enabled"):Connect(function()
+	if widget.Enabled then
+		onActivate()
+	else
+		onDeactivate()
+	end
+end)
+
+toggleBtn.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+end)
+
+------------------------------------------------------------------------
+-- Load persisted data from workspace
+------------------------------------------------------------------------
+nodeManager:LoadFromWorkspace()
+
+if widget.Enabled then
+	onActivate()
+end
+
+------------------------------------------------------------------------
+-- Tag filter reactivity
+------------------------------------------------------------------------
+state.tagFilterChanged:Connect(function()
+	nodeManager:ApplyTagFilter()
+end)
+
+------------------------------------------------------------------------
+-- Cleanup
+------------------------------------------------------------------------
+plugin.Unloading:Connect(function()
+	inputHandler:Destroy()
+	ui:Destroy()
+	nodeManager:Destroy()
+end)
+]]></ProtectedString>
+			</Properties>
+		<Item class="ModuleScript" referent="RBX1">
+			<Properties>
+				<string name="Name">Signal</string>
+				<ProtectedString name="Source"><![CDATA[local Signal = {}
+Signal.__index = Signal
+
+function Signal.new()
+	return setmetatable({ _listeners = {} }, Signal)
+end
+
+function Signal:Connect(fn: (...any) -> ())
+	local conn = { _fn = fn, Connected = true }
+	function conn:Disconnect()
+		conn.Connected = false
+	end
+	table.insert(self._listeners, conn)
+	return conn
+end
+
+function Signal:Fire(...)
+	for i = #self._listeners, 1, -1 do
+		local c = self._listeners[i]
+		if c.Connected then
+			task.spawn(c._fn, ...)
+		else
+			table.remove(self._listeners, i)
+		end
+	end
+end
+
+function Signal:Once(fn: (...any) -> ())
+	local conn
+	conn = self:Connect(function(...)
+		conn:Disconnect()
+		fn(...)
+	end)
+	return conn
+end
+
+function Signal:DisconnectAll()
+	for _, c in self._listeners do
+		c.Connected = false
+	end
+	table.clear(self._listeners)
+end
+
+return Signal
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX2">
+			<Properties>
+				<string name="Name">Theme</string>
+				<ProtectedString name="Source"><![CDATA[local Studio = settings().Studio
+
+local Theme = {}
+
+function Theme.get()
+	local theme = Studio.Theme
+	local isDark = theme.Name == "Dark"
+
+	return {
+		IsDark = isDark,
+
+		Colors = {
+			Background      = theme:GetColor(Enum.StudioStyleGuideColor.MainBackground),
+			Surface         = theme:GetColor(Enum.StudioStyleGuideColor.InputFieldBackground),
+			Border          = theme:GetColor(Enum.StudioStyleGuideColor.Border),
+			Text            = theme:GetColor(Enum.StudioStyleGuideColor.MainText),
+			TextDim         = theme:GetColor(Enum.StudioStyleGuideColor.DimmedText),
+			TextBright      = theme:GetColor(Enum.StudioStyleGuideColor.BrightText),
+			ButtonNormal    = theme:GetColor(Enum.StudioStyleGuideColor.Button),
+			ButtonHover     = theme:GetColor(Enum.StudioStyleGuideColor.Button, Enum.StudioStyleGuideModifier.Hover),
+			ButtonPressed   = theme:GetColor(Enum.StudioStyleGuideColor.Button, Enum.StudioStyleGuideModifier.Pressed),
+			ButtonSelected  = theme:GetColor(Enum.StudioStyleGuideColor.Button, Enum.StudioStyleGuideModifier.Selected),
+			ScrollBar       = theme:GetColor(Enum.StudioStyleGuideColor.ScrollBar),
+			Separator       = theme:GetColor(Enum.StudioStyleGuideColor.Separator),
+			Accent          = Color3.fromRGB(0, 162, 255),
+			Positive        = Color3.fromRGB(60, 180, 75),
+			Negative        = Color3.fromRGB(220, 60, 60),
+			Warning         = Color3.fromRGB(240, 180, 40),
+			TagDefault      = Color3.fromRGB(100, 140, 200),
+		},
+
+		Sizes = {
+			ToolbarHeight  = 36,
+			TagBarHeight   = 30,
+			StatusHeight   = 24,
+			ButtonSize     = 28,
+			IconSize       = 18,
+			Padding        = 6,
+			CornerRadius   = UDim.new(0, 6),
+			SmallCorner    = UDim.new(0, 4),
+			FontSizeNormal = 14,
+			FontSizeSmall  = 12,
+			FontSizeLarge  = 16,
+		},
+
+		Fonts = {
+			Default = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Regular),
+			Bold    = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold),
+			Semi    = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.SemiBold),
+		},
+	}
+end
+
+return Theme
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX3">
+			<Properties>
+				<string name="Name">TerrainState</string>
+				<ProtectedString name="Source"><![CDATA[local Signal = require(script.Parent.Signal)
+
+export type Mode = "Place" | "Draw" | "Paint" | "Sculpt" | "Select"
+
+export type NodeData = {
+	id: string,
+	part: BasePart,
+	position: Vector3,
+}
+
+export type TriData = {
+	id: string,
+	model: Model,
+	nodeA: string,
+	nodeB: string,
+	nodeC: string,
+	color: Color3,
+	material: Enum.Material,
+}
+
+local TerrainState = {}
+TerrainState.__index = TerrainState
+
+function TerrainState.new()
+	local self = setmetatable({}, TerrainState)
+
+	self.nodes = {} :: { [string]: NodeData }
+	self.triangles = {} :: { [string]: TriData }
+
+	self.activeMode = "Place" :: Mode
+	self.activeTag = nil :: string?
+	self.tags = {} :: { string }
+
+	self.selectedNodes = {} :: { string }
+	self.selectedTriangles = {} :: { string }
+
+	self.drawSelection = {} :: { string }
+
+	self.settings = {
+		gridSize = 4,
+		snapEnabled = true,
+		nodeSize = 1.5,
+		nodeTransparency = 0.3,
+		brushRadius = 20,
+		brushStrength = 2,
+		brushFalloff = "Smooth",
+		paintColor = Color3.fromRGB(74, 124, 63),
+		paintMaterial = Enum.Material.Grass,
+		sculptTool = "Raise",
+		showGrid = false,
+		triangleThickness = 0.1,
+		workPlaneEnabled = false,
+		workPlaneYOffset = 20,
+	}
+
+	-- Signals
+	self.modeChanged = Signal.new()
+	self.nodeAdded = Signal.new()
+	self.nodeRemoved = Signal.new()
+	self.nodeMoved = Signal.new()
+	self.triangleAdded = Signal.new()
+	self.triangleRemoved = Signal.new()
+	self.triangleUpdated = Signal.new()
+	self.selectionChanged = Signal.new()
+	self.drawSelectionChanged = Signal.new()
+	self.tagFilterChanged = Signal.new()
+	self.tagsChanged = Signal.new()
+	self.settingsChanged = Signal.new()
+	self.stateLoaded = Signal.new()
+
+	self._nextNodeId = 1
+	self._nextTriId = 1
+
+	return self
+end
+
+------------------------------------------------------------------------
+-- Mode
+------------------------------------------------------------------------
+function TerrainState:SetMode(mode: Mode)
+	if self.activeMode == mode then return end
+	self.activeMode = mode
+	self.drawSelection = {}
+	self.modeChanged:Fire(mode)
+end
+
+------------------------------------------------------------------------
+-- Nodes
+------------------------------------------------------------------------
+function TerrainState:GenerateNodeId(): string
+	local id = string.format("Node_%04d", self._nextNodeId)
+	self._nextNodeId += 1
+	while self.nodes[id] do
+		id = string.format("Node_%04d", self._nextNodeId)
+		self._nextNodeId += 1
+	end
+	return id
+end
+
+function TerrainState:RegisterNode(id: string, part: BasePart, position: Vector3)
+	local data: NodeData = { id = id, part = part, position = position }
+	self.nodes[id] = data
+	self.nodeAdded:Fire(id, data)
+end
+
+function TerrainState:UnregisterNode(id: string)
+	if not self.nodes[id] then return end
+	self.nodes[id] = nil
+	self.nodeRemoved:Fire(id)
+end
+
+function TerrainState:UpdateNodePosition(id: string, position: Vector3)
+	local node = self.nodes[id]
+	if not node then return end
+	node.position = position
+	self.nodeMoved:Fire(id, position)
+end
+
+------------------------------------------------------------------------
+-- Triangles
+------------------------------------------------------------------------
+function TerrainState:GenerateTriId(): string
+	local id = string.format("Tri_%04d", self._nextTriId)
+	self._nextTriId += 1
+	while self.triangles[id] do
+		id = string.format("Tri_%04d", self._nextTriId)
+		self._nextTriId += 1
+	end
+	return id
+end
+
+function TerrainState:RegisterTriangle(id: string, model: Model, nodeA: string, nodeB: string, nodeC: string, color: Color3, material: Enum.Material)
+	local data: TriData = {
+		id = id,
+		model = model,
+		nodeA = nodeA,
+		nodeB = nodeB,
+		nodeC = nodeC,
+		color = color,
+		material = material,
+	}
+	self.triangles[id] = data
+	self.triangleAdded:Fire(id, data)
+end
+
+function TerrainState:UnregisterTriangle(id: string)
+	if not self.triangles[id] then return end
+	self.triangles[id] = nil
+	self.triangleRemoved:Fire(id)
+end
+
+function TerrainState:UpdateTriangleAppearance(id: string, color: Color3?, material: Enum.Material?)
+	local tri = self.triangles[id]
+	if not tri then return end
+	if color then tri.color = color end
+	if material then tri.material = material end
+	self.triangleUpdated:Fire(id, tri)
+end
+
+------------------------------------------------------------------------
+-- Draw selection (accumulates 3 nodes)
+------------------------------------------------------------------------
+function TerrainState:ToggleDrawNode(nodeId: string)
+	local idx = table.find(self.drawSelection, nodeId)
+	if idx then
+		table.remove(self.drawSelection, idx)
+	else
+		if #self.drawSelection < 3 then
+			table.insert(self.drawSelection, nodeId)
+		end
+	end
+	self.drawSelectionChanged:Fire(self.drawSelection)
+end
+
+function TerrainState:ClearDrawSelection()
+	table.clear(self.drawSelection)
+	self.drawSelectionChanged:Fire(self.drawSelection)
+end
+
+function TerrainState:IsDrawReady(): boolean
+	return #self.drawSelection == 3
+end
+
+------------------------------------------------------------------------
+-- Selection
+------------------------------------------------------------------------
+function TerrainState:SelectNode(nodeId: string?, additive: boolean?)
+	if not additive then
+		table.clear(self.selectedNodes)
+		table.clear(self.selectedTriangles)
+	end
+	if nodeId then
+		local idx = table.find(self.selectedNodes, nodeId)
+		if idx and additive then
+			table.remove(self.selectedNodes, idx)
+		elseif not idx then
+			table.insert(self.selectedNodes, nodeId)
+		end
+	end
+	self.selectionChanged:Fire()
+end
+
+function TerrainState:SelectTriangle(triId: string?, additive: boolean?)
+	if not additive then
+		table.clear(self.selectedNodes)
+		table.clear(self.selectedTriangles)
+	end
+	if triId then
+		local idx = table.find(self.selectedTriangles, triId)
+		if idx and additive then
+			table.remove(self.selectedTriangles, idx)
+		elseif not idx then
+			table.insert(self.selectedTriangles, triId)
+		end
+	end
+	self.selectionChanged:Fire()
+end
+
+------------------------------------------------------------------------
+-- Tags
+------------------------------------------------------------------------
+function TerrainState:SetTagFilter(tag: string?)
+	self.activeTag = tag
+	self.tagFilterChanged:Fire(tag)
+end
+
+function TerrainState:RefreshTags(tagList: { string })
+	self.tags = tagList
+	self.tagsChanged:Fire(tagList)
+end
+
+------------------------------------------------------------------------
+-- Settings
+------------------------------------------------------------------------
+function TerrainState:SetSetting(key: string, value: any)
+	self.settings[key] = value
+	self.settingsChanged:Fire(key, value)
+end
+
+------------------------------------------------------------------------
+-- Counts
+------------------------------------------------------------------------
+function TerrainState:GetNodeCount(): number
+	local c = 0
+	for _ in self.nodes do c += 1 end
+	return c
+end
+
+function TerrainState:GetTriangleCount(): number
+	local c = 0
+	for _ in self.triangles do c += 1 end
+	return c
+end
+
+------------------------------------------------------------------------
+-- Node neighbor queries
+------------------------------------------------------------------------
+function TerrainState:GetConnectedTriangles(nodeId: string): { TriData }
+	local result = {}
+	for _, tri in self.triangles do
+		if tri.nodeA == nodeId or tri.nodeB == nodeId or tri.nodeC == nodeId then
+			table.insert(result, tri)
+		end
+	end
+	return result
+end
+
+function TerrainState:GetNeighborNodes(nodeId: string): { string }
+	local neighbors = {}
+	local seen = {}
+	for _, tri in self.triangles do
+		local refs = { tri.nodeA, tri.nodeB, tri.nodeC }
+		local isConnected = false
+		for _, r in refs do
+			if r == nodeId then isConnected = true; break end
+		end
+		if isConnected then
+			for _, r in refs do
+				if r ~= nodeId and not seen[r] then
+					seen[r] = true
+					table.insert(neighbors, r)
+				end
+			end
+		end
+	end
+	return neighbors
+end
+
+------------------------------------------------------------------------
+-- Sync IDs from existing instances (for persistence loading)
+------------------------------------------------------------------------
+function TerrainState:SyncIdCounters()
+	for id in self.nodes do
+		local num = tonumber(id:match("Node_(%d+)"))
+		if num and num >= self._nextNodeId then
+			self._nextNodeId = num + 1
+		end
+	end
+	for id in self.triangles do
+		local num = tonumber(id:match("Tri_(%d+)"))
+		if num and num >= self._nextTriId then
+			self._nextTriId = num + 1
+		end
+	end
+end
+
+return TerrainState
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX4">
+			<Properties>
+				<string name="Name">TriangleEngine</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	TriangleEngine
+	Draws a 3D triangle from three Vector3 points using two WedgeParts.
+	Based on EgoMoose's algorithm.
+]]
+
+local TriangleEngine = {}
+
+local WEDGE_TEMPLATE = Instance.new("WedgePart")
+WEDGE_TEMPLATE.Anchored = true
+WEDGE_TEMPLATE.CanCollide = true
+WEDGE_TEMPLATE.CastShadow = true
+WEDGE_TEMPLATE.TopSurface = Enum.SurfaceType.Smooth
+WEDGE_TEMPLATE.BottomSurface = Enum.SurfaceType.Smooth
+
+function TriangleEngine.draw(a: Vector3, b: Vector3, c: Vector3, thickness: number?): (WedgePart, WedgePart)
+	local t = thickness or 0.1
+
+	local edges = {
+		{ longest = c - b, other = a - b, position = b },
+		{ longest = a - c, other = b - c, position = c },
+		{ longest = b - a, other = c - a, position = a },
+	}
+	table.sort(edges, function(x, y) return x.longest.Magnitude > y.longest.Magnitude end)
+
+	local edge = edges[1]
+	local longest = edge.longest
+	local other = edge.other
+
+	local theta = math.acos(math.clamp(longest.Unit:Dot(other.Unit), -1, 1))
+	local w1 = math.cos(theta) * other.Magnitude
+	local w2 = longest.Magnitude - w1
+	local h = math.sin(theta) * other.Magnitude
+
+	print(string.format("[TriEngine] a=%s b=%s c=%s | h=%.2f w1=%.2f w2=%.2f", tostring(a), tostring(b), tostring(c), h, w1, w2))
+
+	if h < 0.001 then
+		warn("[TriEngine] Degenerate triangle, height near zero")
+		local wedge1 = WEDGE_TEMPLATE:Clone()
+		wedge1.Size = Vector3.new(t, 0.01, 0.01)
+		wedge1.CFrame = CFrame.new(a)
+		local wedge2 = WEDGE_TEMPLATE:Clone()
+		wedge2.Size = Vector3.new(t, 0.01, 0.01)
+		wedge2.CFrame = CFrame.new(a)
+		return wedge1, wedge2
+	end
+
+	local right = longest:Cross(other).Unit
+	local up = right:Cross(longest).Unit
+	local back = longest.Unit
+
+	local p1 = edge.position + other * 0.5
+	local p2 = edge.position + longest + (other - longest) * 0.5
+
+	local cf1 = CFrame.new(
+		p1.X, p1.Y, p1.Z,
+		-right.X, up.X, back.X,
+		-right.Y, up.Y, back.Y,
+		-right.Z, up.Z, back.Z
+	)
+	local cf2 = CFrame.new(
+		p2.X, p2.Y, p2.Z,
+		right.X, up.X, -back.X,
+		right.Y, up.Y, -back.Y,
+		right.Z, up.Z, -back.Z
+	)
+
+	local wedge1 = WEDGE_TEMPLATE:Clone()
+	wedge1.Size = Vector3.new(t, h, w1)
+	wedge1.CFrame = cf1
+
+	local wedge2 = WEDGE_TEMPLATE:Clone()
+	wedge2.Size = Vector3.new(t, h, w2)
+	wedge2.CFrame = cf2
+
+	return wedge1, wedge2
+end
+
+function TriangleEngine.updateTriangle(model: Model, a: Vector3, b: Vector3, c: Vector3, thickness: number?)
+	local wedge1 = model:FindFirstChild("Wedge1")
+	local wedge2 = model:FindFirstChild("Wedge2")
+	if not wedge1 or not wedge2 then return end
+
+	local t = thickness or 0.1
+
+	local edges = {
+		{ longest = c - b, other = a - b, position = b },
+		{ longest = a - c, other = b - c, position = c },
+		{ longest = b - a, other = c - a, position = a },
+	}
+	table.sort(edges, function(x, y) return x.longest.Magnitude > y.longest.Magnitude end)
+
+	local edge = edges[1]
+	local longest = edge.longest
+	local other = edge.other
+
+	local theta = math.acos(math.clamp(longest.Unit:Dot(other.Unit), -1, 1))
+	local w1 = math.cos(theta) * other.Magnitude
+	local w2 = longest.Magnitude - w1
+	local h = math.sin(theta) * other.Magnitude
+
+	if h < 0.001 then return end
+
+	local right = longest:Cross(other).Unit
+	local up = right:Cross(longest).Unit
+	local back = longest.Unit
+
+	local p1 = edge.position + other * 0.5
+	local p2 = edge.position + longest + (other - longest) * 0.5
+
+	wedge1.Size = Vector3.new(t, h, w1)
+	wedge1.CFrame = CFrame.new(
+		p1.X, p1.Y, p1.Z,
+		-right.X, up.X, back.X,
+		-right.Y, up.Y, back.Y,
+		-right.Z, up.Z, back.Z
+	)
+	wedge2.Size = Vector3.new(t, h, w2)
+	wedge2.CFrame = CFrame.new(
+		p2.X, p2.Y, p2.Z,
+		right.X, up.X, -back.X,
+		right.Y, up.Y, -back.Y,
+		right.Z, up.Z, -back.Z
+	)
+end
+
+function TriangleEngine.setAppearance(model: Model, color: Color3, material: Enum.Material)
+	for _, child in model:GetChildren() do
+		if child:IsA("WedgePart") then
+			child.Color = color
+			child.Material = material
+		end
+	end
+end
+
+function TriangleEngine.getNormal(a: Vector3, b: Vector3, c: Vector3): Vector3
+	local ab = b - a
+	local ac = c - a
+	return ab:Cross(ac).Unit
+end
+
+return TriangleEngine
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX5">
+			<Properties>
+				<string name="Name">NodeManager</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	NodeManager
+	Creates, deletes, moves, and manages terrain node Parts.
+	Handles persistence folder structure and loading on startup.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
+local TriangleEngine = require(script.Parent.TriangleEngine)
+
+local TAG_PREFIX = "TT_"
+local ROOT_NAME = "TriangleTerrain"
+local NODES_FOLDER = "Nodes"
+local MESH_FOLDER = "Mesh"
+local SETTINGS_NAME = "Settings"
+
+local NodeManager = {}
+NodeManager.__index = NodeManager
+
+function NodeManager.new(state)
+	local self = setmetatable({}, NodeManager)
+	self._state = state
+	self._root = nil
+	self._nodesFolder = nil
+	self._meshFolder = nil
+	self._settingsObj = nil
+	self._moveConns = {} -- per-node connections for detecting manual moves
+	return self
+end
+
+------------------------------------------------------------------------
+-- Folder structure
+------------------------------------------------------------------------
+function NodeManager:EnsureFolders()
+	self._root = workspace:FindFirstChild(ROOT_NAME)
+	if not self._root then
+		self._root = Instance.new("Folder")
+		self._root.Name = ROOT_NAME
+		self._root.Parent = workspace
+	end
+
+	self._nodesFolder = self._root:FindFirstChild(NODES_FOLDER)
+	if not self._nodesFolder then
+		self._nodesFolder = Instance.new("Folder")
+		self._nodesFolder.Name = NODES_FOLDER
+		self._nodesFolder.Parent = self._root
+	end
+
+	self._meshFolder = self._root:FindFirstChild(MESH_FOLDER)
+	if not self._meshFolder then
+		self._meshFolder = Instance.new("Folder")
+		self._meshFolder.Name = MESH_FOLDER
+		self._meshFolder.Parent = self._root
+	end
+
+	self._settingsObj = self._root:FindFirstChild(SETTINGS_NAME)
+	if not self._settingsObj then
+		self._settingsObj = Instance.new("Configuration")
+		self._settingsObj.Name = SETTINGS_NAME
+		self._settingsObj.Parent = self._root
+	end
+end
+
+------------------------------------------------------------------------
+-- Load existing data from workspace
+------------------------------------------------------------------------
+function NodeManager:LoadFromWorkspace()
+	self:EnsureFolders()
+
+	-- Load nodes
+	for _, part in self._nodesFolder:GetChildren() do
+		if part:IsA("BasePart") then
+			local nodeId = part:GetAttribute("NodeId") or part.Name
+			self._state:RegisterNode(nodeId, part, part.Position)
+			self:_watchNodeMovement(nodeId, part)
+		end
+	end
+
+	-- Load triangles
+	for _, model in self._meshFolder:GetChildren() do
+		if model:IsA("Model") then
+			local triId = model:GetAttribute("TriId") or model.Name
+			local nodeA = model:GetAttribute("NodeA")
+			local nodeB = model:GetAttribute("NodeB")
+			local nodeC = model:GetAttribute("NodeC")
+			local colorAttr = model:GetAttribute("Color")
+			local matAttr = model:GetAttribute("Material")
+
+			local color = if typeof(colorAttr) == "Color3" then colorAttr else Color3.fromRGB(74, 124, 63)
+			local material = Enum.Material.Grass
+			if matAttr then
+				local ok, mat = pcall(function() return Enum.Material[matAttr] end)
+				if ok and mat then material = mat end
+			end
+
+			if nodeA and nodeB and nodeC then
+				self._state:RegisterTriangle(triId, model, nodeA, nodeB, nodeC, color, material)
+			end
+		end
+	end
+
+	-- Load tags
+	self:RefreshTagList()
+
+	self._state:SyncIdCounters()
+	self._state.stateLoaded:Fire()
+end
+
+------------------------------------------------------------------------
+-- Node CRUD
+------------------------------------------------------------------------
+function NodeManager:CreateNode(position: Vector3): string
+	self:EnsureFolders()
+
+	local recording = ChangeHistoryService:TryBeginRecording("PlaceNode")
+
+	local nodeId = self._state:GenerateNodeId()
+
+	local part = Instance.new("Part")
+	part.Name = nodeId
+	part.Shape = Enum.PartType.Ball
+	part.Size = Vector3.one * self._state.settings.nodeSize
+	part.Position = position
+	part.Anchored = true
+	part.CanCollide = false
+	part.CastShadow = false
+	part.Transparency = self._state.settings.nodeTransparency
+	part.Color = Color3.fromRGB(255, 255, 100)
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part:SetAttribute("NodeId", nodeId)
+	part.Parent = self._nodesFolder
+
+	-- Auto-tag with active tag filter
+	if self._state.activeTag then
+		CollectionService:AddTag(part, TAG_PREFIX .. self._state.activeTag)
+	end
+
+	self._state:RegisterNode(nodeId, part, position)
+	self:_watchNodeMovement(nodeId, part)
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+
+	return nodeId
+end
+
+function NodeManager:DeleteNode(nodeId: string)
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return end
+
+	local recording = ChangeHistoryService:TryBeginRecording("DeleteNode")
+
+	-- Remove connected triangles first
+	local connected = self._state:GetConnectedTriangles(nodeId)
+	for _, tri in connected do
+		self:DeleteTriangle(tri.id)
+	end
+
+	-- Disconnect move watcher
+	if self._moveConns[nodeId] then
+		self._moveConns[nodeId]:Disconnect()
+		self._moveConns[nodeId] = nil
+	end
+
+	if nodeData.part and nodeData.part.Parent then
+		nodeData.part:Destroy()
+	end
+
+	self._state:UnregisterNode(nodeId)
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+function NodeManager:MoveNode(nodeId: string, newPosition: Vector3)
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return end
+
+	nodeData.part.Position = newPosition
+	self._state:UpdateNodePosition(nodeId, newPosition)
+
+	-- Update connected triangles in real time
+	local connected = self._state:GetConnectedTriangles(nodeId)
+	for _, tri in connected do
+		self:_refreshTriangleGeometry(tri.id)
+	end
+end
+
+------------------------------------------------------------------------
+-- Triangle CRUD
+------------------------------------------------------------------------
+function NodeManager:CreateTriangle(nodeA: string, nodeB: string, nodeC: string): string?
+	local nA = self._state.nodes[nodeA]
+	local nB = self._state.nodes[nodeB]
+	local nC = self._state.nodes[nodeC]
+	if not nA or not nB or not nC then return nil end
+
+	-- Check for duplicate
+	for _, tri in self._state.triangles do
+		local refs = { tri.nodeA, tri.nodeB, tri.nodeC }
+		local check = { nodeA, nodeB, nodeC }
+		table.sort(refs)
+		table.sort(check)
+		if refs[1] == check[1] and refs[2] == check[2] and refs[3] == check[3] then
+			return nil
+		end
+	end
+
+	self:EnsureFolders()
+	local recording = ChangeHistoryService:TryBeginRecording("DrawTriangle")
+
+	local triId = self._state:GenerateTriId()
+	local color = self._state.settings.paintColor
+	local material = self._state.settings.paintMaterial
+	local thickness = self._state.settings.triangleThickness
+
+	local w1, w2 = TriangleEngine.draw(nA.position, nB.position, nC.position, thickness)
+	w1.Name = "Wedge1"
+	w2.Name = "Wedge2"
+	w1.Color = color
+	w2.Color = color
+	w1.Material = material
+	w2.Material = material
+
+	local model = Instance.new("Model")
+	model.Name = triId
+	model:SetAttribute("TriId", triId)
+	model:SetAttribute("NodeA", nodeA)
+	model:SetAttribute("NodeB", nodeB)
+	model:SetAttribute("NodeC", nodeC)
+	model:SetAttribute("Color", color)
+	model:SetAttribute("Material", material.Name)
+
+	w1.Parent = model
+	w2.Parent = model
+	model.Parent = self._meshFolder
+
+	self._state:RegisterTriangle(triId, model, nodeA, nodeB, nodeC, color, material)
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+
+	return triId
+end
+
+function NodeManager:DeleteTriangle(triId: string)
+	local triData = self._state.triangles[triId]
+	if not triData then return end
+
+	if triData.model and triData.model.Parent then
+		triData.model:Destroy()
+	end
+
+	self._state:UnregisterTriangle(triId)
+end
+
+function NodeManager:PaintTriangle(triId: string, color: Color3?, material: Enum.Material?)
+	local triData = self._state.triangles[triId]
+	if not triData then return end
+
+	local recording = ChangeHistoryService:TryBeginRecording("PaintTriangle")
+
+	if color then
+		triData.model:SetAttribute("Color", color)
+	end
+	if material then
+		triData.model:SetAttribute("Material", material.Name)
+	end
+
+	TriangleEngine.setAppearance(
+		triData.model,
+		color or triData.color,
+		material or triData.material
+	)
+
+	self._state:UpdateTriangleAppearance(triId, color, material)
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+------------------------------------------------------------------------
+-- Tag operations
+------------------------------------------------------------------------
+function NodeManager:AddTagToNode(nodeId: string, tagName: string)
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return end
+	CollectionService:AddTag(nodeData.part, TAG_PREFIX .. tagName)
+	self:RefreshTagList()
+end
+
+function NodeManager:RemoveTagFromNode(nodeId: string, tagName: string)
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return end
+	CollectionService:RemoveTag(nodeData.part, TAG_PREFIX .. tagName)
+	self:RefreshTagList()
+end
+
+function NodeManager:GetNodeTags(nodeId: string): { string }
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return {} end
+	local tags = {}
+	for _, tag in CollectionService:GetTags(nodeData.part) do
+		if tag:sub(1, #TAG_PREFIX) == TAG_PREFIX then
+			table.insert(tags, tag:sub(#TAG_PREFIX + 1))
+		end
+	end
+	return tags
+end
+
+function NodeManager:RefreshTagList()
+	local seen = {}
+	local tags = {}
+	for _, nodeData in self._state.nodes do
+		if nodeData.part then
+			for _, tag in CollectionService:GetTags(nodeData.part) do
+				if tag:sub(1, #TAG_PREFIX) == TAG_PREFIX then
+					local name = tag:sub(#TAG_PREFIX + 1)
+					if not seen[name] then
+						seen[name] = true
+						table.insert(tags, name)
+					end
+				end
+			end
+		end
+	end
+	table.sort(tags)
+	self._state:RefreshTags(tags)
+end
+
+function NodeManager:NodePassesFilter(nodeId: string): boolean
+	if not self._state.activeTag then return true end
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return false end
+	return CollectionService:HasTag(nodeData.part, TAG_PREFIX .. self._state.activeTag)
+end
+
+function NodeManager:SetNodeVisibility(nodeId: string, visible: boolean)
+	local nodeData = self._state.nodes[nodeId]
+	if not nodeData then return end
+	nodeData.part.Transparency = if visible then self._state.settings.nodeTransparency else 1
+end
+
+function NodeManager:SetTriangleVisibility(triId: string, visible: boolean)
+	local triData = self._state.triangles[triId]
+	if not triData then return end
+	for _, child in triData.model:GetChildren() do
+		if child:IsA("WedgePart") then
+			child.Transparency = if visible then 0 else 1
+		end
+	end
+end
+
+function NodeManager:ApplyTagFilter()
+	for nodeId in self._state.nodes do
+		local passes = self:NodePassesFilter(nodeId)
+		self:SetNodeVisibility(nodeId, passes)
+	end
+	for triId, tri in self._state.triangles do
+		local aPass = self:NodePassesFilter(tri.nodeA)
+		local bPass = self:NodePassesFilter(tri.nodeB)
+		local cPass = self:NodePassesFilter(tri.nodeC)
+		self:SetTriangleVisibility(triId, aPass or bPass or cPass)
+	end
+end
+
+------------------------------------------------------------------------
+-- Snapping
+------------------------------------------------------------------------
+function NodeManager:SnapPosition(position: Vector3): Vector3
+	if not self._state.settings.snapEnabled then return position end
+
+	local grid = self._state.settings.gridSize
+
+	-- Grid snap
+	local snapped = Vector3.new(
+		math.round(position.X / grid) * grid,
+		position.Y,
+		math.round(position.Z / grid) * grid
+	)
+
+	-- Vertex snap: check if close to an existing node
+	local vertexThreshold = grid * 0.4
+	local closestDist = vertexThreshold
+	local closestPos = nil
+	for _, nodeData in self._state.nodes do
+		local dist = (nodeData.position - position).Magnitude
+		if dist < closestDist then
+			closestDist = dist
+			closestPos = nodeData.position
+		end
+	end
+
+	return closestPos or snapped
+end
+
+------------------------------------------------------------------------
+-- Sculpt helpers
+------------------------------------------------------------------------
+function NodeManager:GetNodesInRadius(center: Vector3, radius: number): { { id: string, distance: number } }
+	local result = {}
+	for nodeId, nodeData in self._state.nodes do
+		if self:NodePassesFilter(nodeId) then
+			local dist = (nodeData.position - center).Magnitude
+			if dist <= radius then
+				table.insert(result, { id = nodeId, distance = dist })
+			end
+		end
+	end
+	return result
+end
+
+function NodeManager:SculptRaise(center: Vector3, radius: number, strength: number, falloff: string)
+	local recording = ChangeHistoryService:TryBeginRecording("Sculpt")
+	local nodes = self:GetNodesInRadius(center, radius)
+	for _, entry in nodes do
+		local weight = self:_falloffWeight(entry.distance, radius, falloff)
+		local nodeData = self._state.nodes[entry.id]
+		if nodeData then
+			local newPos = nodeData.position + Vector3.new(0, strength * weight, 0)
+			self:MoveNode(entry.id, newPos)
+		end
+	end
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+function NodeManager:SculptLower(center: Vector3, radius: number, strength: number, falloff: string)
+	self:SculptRaise(center, radius, -strength, falloff)
+end
+
+function NodeManager:SculptSmooth(center: Vector3, radius: number, strength: number, falloff: string)
+	local recording = ChangeHistoryService:TryBeginRecording("Sculpt")
+	local nodes = self:GetNodesInRadius(center, radius)
+
+	-- Calculate average height
+	local totalY = 0
+	local count = 0
+	for _, entry in nodes do
+		local nodeData = self._state.nodes[entry.id]
+		if nodeData then
+			totalY += nodeData.position.Y
+			count += 1
+		end
+	end
+	if count == 0 then return end
+	local avgY = totalY / count
+
+	for _, entry in nodes do
+		local weight = self:_falloffWeight(entry.distance, radius, falloff) * strength * 0.1
+		local nodeData = self._state.nodes[entry.id]
+		if nodeData then
+			local currentY = nodeData.position.Y
+			local newY = currentY + (avgY - currentY) * weight
+			self:MoveNode(entry.id, Vector3.new(nodeData.position.X, newY, nodeData.position.Z))
+		end
+	end
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+function NodeManager:SculptFlatten(center: Vector3, radius: number, _strength: number, falloff: string)
+	local recording = ChangeHistoryService:TryBeginRecording("Sculpt")
+	local nodes = self:GetNodesInRadius(center, radius)
+
+	local totalY = 0
+	local count = 0
+	for _, entry in nodes do
+		local nodeData = self._state.nodes[entry.id]
+		if nodeData then
+			totalY += nodeData.position.Y
+			count += 1
+		end
+	end
+	if count == 0 then return end
+	local avgY = totalY / count
+
+	for _, entry in nodes do
+		local weight = self:_falloffWeight(entry.distance, radius, falloff)
+		local nodeData = self._state.nodes[entry.id]
+		if nodeData then
+			local newY = nodeData.position.Y + (avgY - nodeData.position.Y) * weight
+			self:MoveNode(entry.id, Vector3.new(nodeData.position.X, newY, nodeData.position.Z))
+		end
+	end
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+------------------------------------------------------------------------
+-- Internal helpers
+------------------------------------------------------------------------
+function NodeManager:_refreshTriangleGeometry(triId: string)
+	local tri = self._state.triangles[triId]
+	if not tri then return end
+	local nA = self._state.nodes[tri.nodeA]
+	local nB = self._state.nodes[tri.nodeB]
+	local nC = self._state.nodes[tri.nodeC]
+	if not nA or not nB or not nC then return end
+
+	TriangleEngine.updateTriangle(tri.model, nA.position, nB.position, nC.position, self._state.settings.triangleThickness)
+end
+
+function NodeManager:_watchNodeMovement(nodeId: string, part: BasePart)
+	if self._moveConns[nodeId] then
+		self._moveConns[nodeId]:Disconnect()
+	end
+	self._moveConns[nodeId] = part:GetPropertyChangedSignal("Position"):Connect(function()
+		local nodeData = self._state.nodes[nodeId]
+		if nodeData and nodeData.position ~= part.Position then
+			self._state:UpdateNodePosition(nodeId, part.Position)
+			local connected = self._state:GetConnectedTriangles(nodeId)
+			for _, tri in connected do
+				self:_refreshTriangleGeometry(tri.id)
+			end
+		end
+	end)
+end
+
+function NodeManager:_falloffWeight(distance: number, radius: number, falloff: string): number
+	local t = math.clamp(distance / radius, 0, 1)
+	if falloff == "Linear" then
+		return 1 - t
+	elseif falloff == "Flat" then
+		return 1
+	else -- "Smooth" (default, cosine)
+		return (math.cos(t * math.pi) + 1) * 0.5
+	end
+end
+
+------------------------------------------------------------------------
+-- Cleanup
+------------------------------------------------------------------------
+function NodeManager:Destroy()
+	for _, conn in self._moveConns do
+		conn:Disconnect()
+	end
+	table.clear(self._moveConns)
+end
+
+return NodeManager
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX6">
+			<Properties>
+				<string name="Name">InputHandler</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	InputHandler
+	Routes mouse/keyboard input to the correct mode behavior.
+	Manages raycasting, hover highlights, and hotkeys.
+]]
+
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local InputHandler = {}
+InputHandler.__index = InputHandler
+
+function InputHandler.new(state, nodeManager, mouse)
+	local self = setmetatable({}, InputHandler)
+	self._state = state
+	self._nodeManager = nodeManager
+	self._mouse = mouse
+	self._active = false
+	self._conns = {}
+	self._hoverHighlight = nil
+	self._brushCircle = nil
+	self._ghostNode = nil
+	self._workPlane = nil
+	self._altHeld = false
+	self._sculpting = false
+	return self
+end
+
+function InputHandler:Activate()
+	self._active = true
+	self:_bindInputs()
+end
+
+function InputHandler:Deactivate()
+	self._active = false
+	self:_unbindInputs()
+	self:_clearHover()
+	self:_clearBrush()
+	self:_clearGhost()
+	self:_clearWorkPlane()
+end
+
+------------------------------------------------------------------------
+-- Raycasting
+------------------------------------------------------------------------
+function InputHandler:_raycast(filterDescendants: { Instance }?, allowWorkPlane: boolean?): RaycastResult?
+	local ray = self._mouse.UnitRay
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local exclude = filterDescendants or {}
+	if self._brushCircle then
+		table.insert(exclude, self._brushCircle)
+	end
+	if self._ghostNode then
+		table.insert(exclude, self._ghostNode)
+	end
+	if self._workPlane and not allowWorkPlane then
+		table.insert(exclude, self._workPlane)
+	end
+	params.FilterDescendantsInstances = exclude
+	return workspace:Raycast(ray.Origin, ray.Direction * 5000, params)
+end
+
+function InputHandler:_raycastForNodes(): (BasePart?, string?)
+	local ray = self._mouse.UnitRay
+	local origin = ray.Origin
+	local direction = ray.Direction * 5000
+
+	local closest: BasePart? = nil
+	local closestId: string? = nil
+	local closestDist = math.huge
+
+	for nodeId, nodeData in self._state.nodes do
+		if not self._nodeManager:NodePassesFilter(nodeId) then continue end
+		local part = nodeData.part
+		if not part or not part.Parent then continue end
+
+		local toNode = part.Position - origin
+		local projLen = toNode:Dot(direction.Unit)
+		if projLen < 0 then continue end
+
+		local projected = origin + direction.Unit * projLen
+		local dist = (projected - part.Position).Magnitude
+		local hitRadius = part.Size.X * 0.5 + 1.5
+
+		if dist < hitRadius and projLen < closestDist then
+			closestDist = projLen
+			closest = part
+			closestId = nodeId
+		end
+	end
+
+	return closest, closestId
+end
+
+function InputHandler:_raycastForTriangles(): (Model?, string?)
+	local result = self:_raycast()
+	if not result or not result.Instance then return nil, nil end
+
+	local hit = result.Instance
+	local parent = hit.Parent
+	if parent and parent:IsA("Model") and parent:GetAttribute("TriId") then
+		return parent, parent:GetAttribute("TriId")
+	end
+	return nil, nil
+end
+
+------------------------------------------------------------------------
+-- Mode dispatch
+------------------------------------------------------------------------
+function InputHandler:_onClick()
+	if not self._active then return end
+
+	local mode = self._state.activeMode
+
+	if mode == "Place" then
+		self:_handlePlaceClick()
+	elseif mode == "Draw" then
+		self:_handleDrawClick()
+	elseif mode == "Paint" then
+		self:_handlePaintClick()
+	elseif mode == "Select" then
+		self:_handleSelectClick()
+	end
+	-- Sculpt is handled continuously via InputChanged
+end
+
+function InputHandler:_onShiftClick()
+	if not self._active then return end
+
+	local mode = self._state.activeMode
+
+	if mode == "Place" then
+		self:_handlePlaceShiftClick()
+	end
+end
+
+------------------------------------------------------------------------
+-- Place mode
+------------------------------------------------------------------------
+function InputHandler:_handlePlaceClick()
+	local excludeParts = {}
+	for _, nodeData in self._state.nodes do
+		if nodeData.part then
+			table.insert(excludeParts, nodeData.part)
+		end
+	end
+
+	local result = self:_raycast(excludeParts, true)
+	local pos
+	if result then
+		pos = result.Position
+	else
+		pos = self._mouse.Hit.Position
+	end
+
+	if not self._altHeld then
+		pos = self._nodeManager:SnapPosition(pos)
+	end
+	self._nodeManager:CreateNode(pos)
+end
+
+function InputHandler:_handlePlaceShiftClick()
+	local _, nodeId = self:_raycastForNodes()
+	if nodeId then
+		self._nodeManager:DeleteNode(nodeId)
+	end
+end
+
+------------------------------------------------------------------------
+-- Draw mode
+------------------------------------------------------------------------
+function InputHandler:_handleDrawClick()
+	local _, nodeId = self:_raycastForNodes()
+	if nodeId then
+		self._state:ToggleDrawNode(nodeId)
+
+		if self._state:IsDrawReady() then
+			local sel = self._state.drawSelection
+			self._nodeManager:CreateTriangle(sel[1], sel[2], sel[3])
+			self._state:ClearDrawSelection()
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Paint mode
+------------------------------------------------------------------------
+function InputHandler:_handlePaintClick()
+	local _, triId = self:_raycastForTriangles()
+	if triId then
+		self._nodeManager:PaintTriangle(
+			triId,
+			self._state.settings.paintColor,
+			self._state.settings.paintMaterial
+		)
+	end
+end
+
+------------------------------------------------------------------------
+-- Select mode
+------------------------------------------------------------------------
+function InputHandler:_handleSelectClick()
+	local additive = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or
+		UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+
+	local _, nodeId = self:_raycastForNodes()
+	if nodeId then
+		self._state:SelectNode(nodeId, additive)
+		return
+	end
+
+	local _, triId = self:_raycastForTriangles()
+	if triId then
+		self._state:SelectTriangle(triId, additive)
+		return
+	end
+
+	if not additive then
+		self._state:SelectNode(nil)
+	end
+end
+
+------------------------------------------------------------------------
+-- Sculpt mode (continuous while mouse held)
+------------------------------------------------------------------------
+function InputHandler:_handleSculptTick()
+	if not self._sculpting then return end
+
+	local result = self:_raycast()
+	if not result then return end
+
+	local center = result.Position
+	local radius = self._state.settings.brushRadius
+	local strength = self._state.settings.brushStrength
+	local falloff = self._state.settings.brushFalloff
+	local tool = self._state.settings.sculptTool
+
+	if tool == "Raise" then
+		self._nodeManager:SculptRaise(center, radius, strength * 0.1, falloff)
+	elseif tool == "Lower" then
+		self._nodeManager:SculptLower(center, radius, strength * 0.1, falloff)
+	elseif tool == "Smooth" then
+		self._nodeManager:SculptSmooth(center, radius, strength, falloff)
+	elseif tool == "Flatten" then
+		self._nodeManager:SculptFlatten(center, radius, strength, falloff)
+	end
+end
+
+------------------------------------------------------------------------
+-- Work Plane (floating construction surface)
+------------------------------------------------------------------------
+function InputHandler:_updateWorkPlane()
+	if not self._state.settings.workPlaneEnabled then
+		self:_clearWorkPlane()
+		return
+	end
+
+	if not self._workPlane then
+		self._workPlane = Instance.new("Part")
+		self._workPlane.Name = "TT_WorkPlane"
+		self._workPlane.Anchored = true
+		self._workPlane.CanCollide = false
+		self._workPlane.CastShadow = false
+		self._workPlane.Transparency = 0.85
+		self._workPlane.Color = Color3.fromRGB(140, 180, 220)
+		self._workPlane.Material = Enum.Material.SmoothPlastic
+		self._workPlane.TopSurface = Enum.SurfaceType.Smooth
+		self._workPlane.BottomSurface = Enum.SurfaceType.Smooth
+		self._workPlane.Size = Vector3.new(512, 0.05, 512)
+		self._workPlane.Parent = workspace
+
+		local texture = Instance.new("Texture")
+		texture.Face = Enum.NormalId.Top
+		texture.StudsPerTileU = self._state.settings.gridSize
+		texture.StudsPerTileV = self._state.settings.gridSize
+		texture.Transparency = 0.6
+		texture.Color3 = Color3.fromRGB(180, 210, 240)
+		texture.Parent = self._workPlane
+		self._workPlaneTexture = texture
+	end
+
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+
+	local camPos = cam.CFrame.Position
+	local yOffset = self._state.settings.workPlaneYOffset
+	local grid = self._state.settings.gridSize
+
+	local snapX = math.round(camPos.X / grid) * grid
+	local snapZ = math.round(camPos.Z / grid) * grid
+	self._workPlane.Position = Vector3.new(snapX, camPos.Y - yOffset, snapZ)
+
+	if self._workPlaneTexture then
+		self._workPlaneTexture.StudsPerTileU = grid
+		self._workPlaneTexture.StudsPerTileV = grid
+	end
+end
+
+function InputHandler:_clearWorkPlane()
+	if self._workPlane then
+		self._workPlane:Destroy()
+		self._workPlane = nil
+		self._workPlaneTexture = nil
+	end
+end
+
+------------------------------------------------------------------------
+-- Ghost preview node (Place mode)
+------------------------------------------------------------------------
+function InputHandler:_updateGhostNode()
+	if self._state.activeMode ~= "Place" then
+		self:_clearGhost()
+		return
+	end
+
+	local excludeParts = {}
+	for _, nodeData in self._state.nodes do
+		if nodeData.part then
+			table.insert(excludeParts, nodeData.part)
+		end
+	end
+
+	local result = self:_raycast(excludeParts, true)
+	if not result then
+		local hitPos = self._mouse.Hit.Position
+		self:_showGhost(hitPos)
+		return
+	end
+
+	local pos = result.Position
+	if not self._altHeld then
+		pos = self._nodeManager:SnapPosition(pos)
+	end
+	self:_showGhost(pos)
+end
+
+function InputHandler:_showGhost(position: Vector3)
+	if not self._ghostNode then
+		self._ghostNode = Instance.new("Part")
+		self._ghostNode.Name = "TT_GhostNode"
+		self._ghostNode.Shape = Enum.PartType.Ball
+		self._ghostNode.Anchored = true
+		self._ghostNode.CanCollide = false
+		self._ghostNode.CastShadow = false
+		self._ghostNode.Transparency = 0.6
+		self._ghostNode.Color = Color3.fromRGB(255, 255, 100)
+		self._ghostNode.Material = Enum.Material.Neon
+		self._ghostNode.TopSurface = Enum.SurfaceType.Smooth
+		self._ghostNode.BottomSurface = Enum.SurfaceType.Smooth
+		self._ghostNode.Parent = workspace
+	end
+	self._ghostNode.Size = Vector3.one * self._state.settings.nodeSize
+	self._ghostNode.Position = position
+end
+
+function InputHandler:_clearGhost()
+	if self._ghostNode then
+		self._ghostNode:Destroy()
+		self._ghostNode = nil
+	end
+end
+
+------------------------------------------------------------------------
+-- Hover highlight
+------------------------------------------------------------------------
+function InputHandler:_updateHover()
+	if not self._active then return end
+
+	local mode = self._state.activeMode
+
+	if mode == "Place" or mode == "Draw" or mode == "Select" then
+		local part, nodeId = self:_raycastForNodes()
+		self:_setHoverHighlight(part)
+	elseif mode == "Paint" then
+		local model, triId = self:_raycastForTriangles()
+		if model then
+			self:_setHoverHighlight(model)
+		else
+			self:_clearHover()
+		end
+	elseif mode == "Sculpt" then
+		self:_clearHover()
+		self:_updateBrushCircle()
+	end
+end
+
+function InputHandler:_setHoverHighlight(target: Instance?)
+	if not target then
+		self:_clearHover()
+		return
+	end
+
+	if not self._hoverHighlight then
+		self._hoverHighlight = Instance.new("Highlight")
+		self._hoverHighlight.FillTransparency = 0.7
+		self._hoverHighlight.OutlineTransparency = 0
+		self._hoverHighlight.OutlineColor = Color3.fromRGB(0, 162, 255)
+		self._hoverHighlight.FillColor = Color3.fromRGB(0, 162, 255)
+		self._hoverHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	end
+
+	if self._hoverHighlight.Adornee ~= target then
+		self._hoverHighlight.Adornee = target
+		self._hoverHighlight.Parent = target
+	end
+end
+
+function InputHandler:_clearHover()
+	if self._hoverHighlight then
+		self._hoverHighlight.Parent = nil
+		self._hoverHighlight.Adornee = nil
+	end
+end
+
+------------------------------------------------------------------------
+-- Brush circle (sculpt mode visual)
+------------------------------------------------------------------------
+function InputHandler:_updateBrushCircle()
+	if self._state.activeMode ~= "Sculpt" then
+		self:_clearBrush()
+		return
+	end
+
+	local result = self:_raycast()
+	if not result then
+		self:_clearBrush()
+		return
+	end
+
+	if not self._brushCircle then
+		self._brushCircle = Instance.new("Part")
+		self._brushCircle.Name = "TT_BrushCircle"
+		self._brushCircle.Shape = Enum.PartType.Cylinder
+		self._brushCircle.Anchored = true
+		self._brushCircle.CanCollide = false
+		self._brushCircle.CastShadow = false
+		self._brushCircle.Transparency = 0.7
+		self._brushCircle.Color = Color3.fromRGB(0, 162, 255)
+		self._brushCircle.Material = Enum.Material.Neon
+		self._brushCircle.TopSurface = Enum.SurfaceType.Smooth
+		self._brushCircle.BottomSurface = Enum.SurfaceType.Smooth
+		self._brushCircle.Parent = workspace
+	end
+
+	local r = self._state.settings.brushRadius
+	self._brushCircle.Size = Vector3.new(0.2, r * 2, r * 2)
+	self._brushCircle.CFrame = CFrame.new(result.Position) * CFrame.Angles(0, 0, math.rad(90))
+end
+
+function InputHandler:_clearBrush()
+	if self._brushCircle then
+		self._brushCircle:Destroy()
+		self._brushCircle = nil
+	end
+end
+
+------------------------------------------------------------------------
+-- Hotkeys
+------------------------------------------------------------------------
+function InputHandler:_handleKey(keyCode: Enum.KeyCode)
+	if keyCode == Enum.KeyCode.One then
+		self._state:SetMode("Place")
+	elseif keyCode == Enum.KeyCode.Two then
+		self._state:SetMode("Draw")
+	elseif keyCode == Enum.KeyCode.Three then
+		self._state:SetMode("Paint")
+	elseif keyCode == Enum.KeyCode.Four then
+		self._state:SetMode("Sculpt")
+	elseif keyCode == Enum.KeyCode.Five then
+		self._state:SetMode("Select")
+	elseif keyCode == Enum.KeyCode.G then
+		local current = self._state.settings.showGrid
+		self._state:SetSetting("showGrid", not current)
+	elseif keyCode == Enum.KeyCode.Delete then
+		self:_deleteSelected()
+	end
+end
+
+function InputHandler:_deleteSelected()
+	for _, nodeId in self._state.selectedNodes do
+		self._nodeManager:DeleteNode(nodeId)
+	end
+	for _, triId in self._state.selectedTriangles do
+		self._nodeManager:DeleteTriangle(triId)
+	end
+	self._state:SelectNode(nil)
+end
+
+------------------------------------------------------------------------
+-- Input binding
+------------------------------------------------------------------------
+function InputHandler:_bindInputs()
+	table.insert(self._conns, self._mouse.Button1Down:Connect(function()
+		if self._state.activeMode == "Sculpt" then
+			self._sculpting = true
+		else
+			local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or
+				UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+			if shift then
+				self:_onShiftClick()
+			else
+				self:_onClick()
+			end
+		end
+	end))
+
+	table.insert(self._conns, self._mouse.Button1Up:Connect(function()
+		self._sculpting = false
+	end))
+
+	table.insert(self._conns, UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
+				self._altHeld = true
+			else
+				self:_handleKey(input.KeyCode)
+			end
+		end
+	end))
+
+	table.insert(self._conns, UserInputService.InputEnded:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
+			self._altHeld = false
+		end
+	end))
+
+	table.insert(self._conns, RunService.Heartbeat:Connect(function()
+		self:_updateHover()
+		self:_updateGhostNode()
+		self:_updateWorkPlane()
+		if self._sculpting then
+			self:_handleSculptTick()
+		end
+	end))
+end
+
+function InputHandler:_unbindInputs()
+	for _, conn in self._conns do
+		conn:Disconnect()
+	end
+	table.clear(self._conns)
+	self._sculpting = false
+end
+
+function InputHandler:Destroy()
+	self:Deactivate()
+	self:_clearHover()
+	self:_clearBrush()
+	self:_clearGhost()
+	self:_clearWorkPlane()
+	if self._hoverHighlight then
+		self._hoverHighlight:Destroy()
+		self._hoverHighlight = nil
+	end
+end
+
+return InputHandler
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX7">
+			<Properties>
+				<string name="Name">AutoTriangulate</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	AutoTriangulate
+	Delaunay triangulation on the XZ plane from a set of node positions.
+	Bowyer-Watson incremental insertion algorithm.
+]]
+
+local AutoTriangulate = {}
+
+type Point = {
+	x: number,
+	z: number,
+	nodeId: string,
+}
+
+type Triangle = {
+	p1: Point,
+	p2: Point,
+	p3: Point,
+}
+
+local function circumcircleContains(tri: Triangle, p: Point): boolean
+	local ax = tri.p1.x - p.x
+	local az = tri.p1.z - p.z
+	local bx = tri.p2.x - p.x
+	local bz = tri.p2.z - p.z
+	local cx = tri.p3.x - p.x
+	local cz = tri.p3.z - p.z
+
+	local det = (ax * ax + az * az) * (bx * cz - cx * bz)
+		- (bx * bx + bz * bz) * (ax * cz - cx * az)
+		+ (cx * cx + cz * cz) * (ax * bz - bx * az)
+
+	return det > 0
+end
+
+local function edgeKey(a: Point, b: Point): string
+	local idA = a.nodeId
+	local idB = b.nodeId
+	if idA > idB then idA, idB = idB, idA end
+	return idA .. "|" .. idB
+end
+
+local function sharesEdge(t1: Triangle, t2: Triangle): boolean
+	local pts1 = { t1.p1, t1.p2, t1.p3 }
+	local pts2 = { t2.p1, t2.p2, t2.p3 }
+	local shared = 0
+	for _, a in pts1 do
+		for _, b in pts2 do
+			if a.nodeId == b.nodeId then
+				shared += 1
+			end
+		end
+	end
+	return shared >= 2
+end
+
+function AutoTriangulate.triangulate(nodePositions: { { nodeId: string, position: Vector3 } }): { { string } }
+	if #nodePositions < 3 then return {} end
+
+	-- Project to XZ plane
+	local points: { Point } = {}
+	for _, entry in nodePositions do
+		table.insert(points, {
+			x = entry.position.X,
+			z = entry.position.Z,
+			nodeId = entry.nodeId,
+		})
+	end
+
+	-- Compute bounding box for super triangle
+	local minX, maxX = math.huge, -math.huge
+	local minZ, maxZ = math.huge, -math.huge
+	for _, p in points do
+		minX = math.min(minX, p.x)
+		maxX = math.max(maxX, p.x)
+		minZ = math.min(minZ, p.z)
+		maxZ = math.max(maxZ, p.z)
+	end
+
+	local dx = maxX - minX
+	local dz = maxZ - minZ
+	local dmax = math.max(dx, dz)
+	local midX = (minX + maxX) * 0.5
+	local midZ = (minZ + maxZ) * 0.5
+
+	-- Super-triangle vertices (large enough to contain all points)
+	local superA: Point = { x = midX - 2 * dmax, z = midZ - dmax, nodeId = "__super_a" }
+	local superB: Point = { x = midX + 2 * dmax, z = midZ - dmax, nodeId = "__super_b" }
+	local superC: Point = { x = midX, z = midZ + 2 * dmax, nodeId = "__super_c" }
+
+	local triangles: { Triangle } = {
+		{ p1 = superA, p2 = superB, p3 = superC }
+	}
+
+	-- Insert each point
+	for _, point in points do
+		local badTriangles: { Triangle } = {}
+		for _, tri in triangles do
+			if circumcircleContains(tri, point) then
+				table.insert(badTriangles, tri)
+			end
+		end
+
+		-- Find boundary polygon (non-shared edges)
+		local edgeCounts: { [string]: { Point } } = {}
+		local edgeList: { { Point } } = {}
+		for _, tri in badTriangles do
+			local edges = {
+				{ tri.p1, tri.p2 },
+				{ tri.p2, tri.p3 },
+				{ tri.p3, tri.p1 },
+			}
+			for _, e in edges do
+				local key = edgeKey(e[1], e[2])
+				if edgeCounts[key] then
+					edgeCounts[key] = nil -- shared edge, remove
+				else
+					edgeCounts[key] = e
+				end
+			end
+		end
+
+		-- Remove bad triangles
+		for _, bad in badTriangles do
+			for i = #triangles, 1, -1 do
+				local t = triangles[i]
+				if t.p1.nodeId == bad.p1.nodeId and t.p2.nodeId == bad.p2.nodeId and t.p3.nodeId == bad.p3.nodeId then
+					table.remove(triangles, i)
+					break
+				end
+			end
+		end
+
+		-- Create new triangles from boundary edges to new point
+		for _, edge in edgeCounts do
+			table.insert(triangles, { p1 = edge[1], p2 = edge[2], p3 = point })
+		end
+	end
+
+	-- Remove triangles that share vertices with the super triangle
+	local result: { { string } } = {}
+	local superIds = { __super_a = true, __super_b = true, __super_c = true }
+
+	for _, tri in triangles do
+		if not superIds[tri.p1.nodeId] and not superIds[tri.p2.nodeId] and not superIds[tri.p3.nodeId] then
+			table.insert(result, { tri.p1.nodeId, tri.p2.nodeId, tri.p3.nodeId })
+		end
+	end
+
+	return result
+end
+
+return AutoTriangulate
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX8">
+			<Properties>
+				<string name="Name">WidgetUI</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	WidgetUI
+	Builds the entire DockWidget interface: mode toolbar, tag bar,
+	mode-specific panels, and status bar.
+]]
+
+local Theme = require(script.Parent.Theme)
+
+local WidgetUI = {}
+WidgetUI.__index = WidgetUI
+
+function WidgetUI.new(widget, state, nodeManager, callbacks)
+	local self = setmetatable({}, WidgetUI)
+	self._widget = widget
+	self._state = state
+	self._nodeManager = nodeManager
+	self._callbacks = callbacks or {}
+	self._theme = Theme.get()
+	self._modeButtons = {}
+	self._tagButtons = {}
+	self._modePanel = nil
+	self._modePanels = {}
+	self._statusLabel = nil
+	self._conns = {}
+	self:_build()
+	self:_bindState()
+	return self
+end
+
+------------------------------------------------------------------------
+-- UI Construction
+------------------------------------------------------------------------
+function WidgetUI:_build()
+	local T = self._theme
+
+	local root = Instance.new("Frame")
+	root.Name = "Root"
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundColor3 = T.Colors.Background
+	root.BorderSizePixel = 0
+	root.Parent = self._widget
+	self._root = root
+
+	self:_buildToolbar(root)
+	self:_buildTagBar(root)
+	self:_buildModePanel(root)
+	self:_buildStatusBar(root)
+
+	self:_showModePanel(self._state.activeMode)
+end
+
+------------------------------------------------------------------------
+-- Mode Toolbar
+------------------------------------------------------------------------
+function WidgetUI:_buildToolbar(parent)
+	local T = self._theme
+
+	local toolbar = Instance.new("Frame")
+	toolbar.Name = "Toolbar"
+	toolbar.Size = UDim2.new(1, 0, 0, T.Sizes.ToolbarHeight)
+	toolbar.Position = UDim2.fromOffset(0, 0)
+	toolbar.BackgroundColor3 = T.Colors.Surface
+	toolbar.BorderSizePixel = 0
+	toolbar.Parent = parent
+
+	local sep = Instance.new("Frame", toolbar)
+	sep.Name = "Sep"
+	sep.Size = UDim2.new(1, 0, 0, 1)
+	sep.Position = UDim2.new(0, 0, 1, -1)
+	sep.BackgroundColor3 = T.Colors.Border
+	sep.BorderSizePixel = 0
+
+	local modes = { "Place", "Draw", "Paint", "Sculpt", "Select" }
+	local count = #modes
+	local gap = 3
+	local pad = 4
+
+	for i, mode in modes do
+		local btn = Instance.new("TextButton")
+		btn.Name = "Mode_" .. mode
+		btn.Size = UDim2.new(1 / count, -(gap + pad * 2 / count), 0, T.Sizes.ToolbarHeight - 8)
+		btn.Position = UDim2.new((i - 1) / count, pad + (i - 1) * gap / (count - 1), 0.5, -(T.Sizes.ToolbarHeight - 8) / 2)
+		btn.BackgroundColor3 = T.Colors.ButtonNormal
+		btn.TextColor3 = T.Colors.Text
+		btn.Text = mode
+		btn.FontFace = T.Fonts.Semi
+		btn.TextSize = T.Sizes.FontSizeSmall
+		btn.BorderSizePixel = 0
+		btn.AutoButtonColor = true
+		btn.Parent = toolbar
+		Instance.new("UICorner", btn).CornerRadius = T.Sizes.SmallCorner
+
+		btn.MouseButton1Click:Connect(function()
+			self._state:SetMode(mode)
+		end)
+
+		self._modeButtons[mode] = btn
+	end
+
+	self:_highlightActiveMode(self._state.activeMode)
+end
+
+function WidgetUI:_highlightActiveMode(activeMode)
+	local T = self._theme
+	for mode, btn in self._modeButtons do
+		if mode == activeMode then
+			btn.BackgroundColor3 = T.Colors.Accent
+			btn.TextColor3 = Color3.new(1, 1, 1)
+		else
+			btn.BackgroundColor3 = T.Colors.ButtonNormal
+			btn.TextColor3 = T.Colors.Text
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Tag Filter Bar
+------------------------------------------------------------------------
+function WidgetUI:_buildTagBar(parent)
+	local T = self._theme
+
+	local tagBar = Instance.new("Frame")
+	tagBar.Name = "TagBar"
+	tagBar.Size = UDim2.new(1, 0, 0, T.Sizes.TagBarHeight)
+	tagBar.Position = UDim2.new(0, 0, 0, T.Sizes.ToolbarHeight)
+	tagBar.BackgroundColor3 = T.Colors.Background
+	tagBar.BorderSizePixel = 0
+	tagBar.Parent = parent
+	self._tagBar = tagBar
+
+	local sep = Instance.new("Frame", tagBar)
+	sep.Name = "Sep"
+	sep.Size = UDim2.new(1, 0, 0, 1)
+	sep.Position = UDim2.new(0, 0, 1, -1)
+	sep.BackgroundColor3 = T.Colors.Border
+	sep.BorderSizePixel = 0
+
+	local scroll = Instance.new("ScrollingFrame", tagBar)
+	scroll.Name = "TagScroll"
+	scroll.Size = UDim2.new(1, -4, 1, -4)
+	scroll.Position = UDim2.fromOffset(2, 2)
+	scroll.BackgroundTransparency = 1
+	scroll.ScrollBarThickness = 0
+	scroll.ScrollingDirection = Enum.ScrollingDirection.X
+	scroll.CanvasSize = UDim2.fromOffset(0, 0)
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.X
+	self._tagScroll = scroll
+
+	local layout = Instance.new("UIListLayout", scroll)
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 4)
+
+	self:_refreshTagButtons()
+end
+
+function WidgetUI:_refreshTagButtons()
+	local T = self._theme
+
+	-- Clear old
+	for _, btn in self._tagButtons do
+		btn:Destroy()
+	end
+	table.clear(self._tagButtons)
+
+	local scroll = self._tagScroll
+
+	-- "All" button
+	local allBtn = self:_createTagPill(scroll, "All", nil)
+	allBtn.LayoutOrder = 1
+	table.insert(self._tagButtons, allBtn)
+
+	-- Tag pills
+	for i, tag in self._state.tags do
+		local pill = self:_createTagPill(scroll, tag, tag)
+		pill.LayoutOrder = i + 1
+		table.insert(self._tagButtons, pill)
+	end
+
+	-- "+" button
+	local addBtn = Instance.new("TextButton", scroll)
+	addBtn.Name = "AddTag"
+	addBtn.Size = UDim2.fromOffset(24, 22)
+	addBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	addBtn.TextColor3 = T.Colors.Accent
+	addBtn.Text = "+"
+	addBtn.FontFace = T.Fonts.Bold
+	addBtn.TextSize = T.Sizes.FontSizeLarge
+	addBtn.BorderSizePixel = 0
+	addBtn.LayoutOrder = 9999
+	addBtn.Parent = scroll
+	Instance.new("UICorner", addBtn).CornerRadius = T.Sizes.SmallCorner
+
+	addBtn.MouseButton1Click:Connect(function()
+		self:_showTagInput()
+	end)
+	table.insert(self._tagButtons, addBtn)
+
+	self:_highlightActiveTag()
+end
+
+function WidgetUI:_createTagPill(parent, label, tagValue)
+	local T = self._theme
+
+	local btn = Instance.new("TextButton")
+	btn.Name = "Tag_" .. label
+	btn.Size = UDim2.fromOffset(0, 22)
+	btn.AutomaticSize = Enum.AutomaticSize.X
+	btn.BackgroundColor3 = T.Colors.ButtonNormal
+	btn.TextColor3 = T.Colors.Text
+	btn.Text = "  " .. label .. "  "
+	btn.FontFace = T.Fonts.Semi
+	btn.TextSize = T.Sizes.FontSizeSmall
+	btn.BorderSizePixel = 0
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0.5, 0)
+
+	btn.MouseButton1Click:Connect(function()
+		self._state:SetTagFilter(tagValue)
+		self._nodeManager:ApplyTagFilter()
+	end)
+
+	btn:SetAttribute("TagValue", tagValue or "")
+	return btn
+end
+
+function WidgetUI:_highlightActiveTag()
+	local T = self._theme
+	local active = self._state.activeTag
+
+	for _, btn in self._tagButtons do
+		if not btn:IsA("TextButton") then continue end
+		local tagVal = btn:GetAttribute("TagValue")
+		if tagVal == "" then tagVal = nil end
+
+		if tagVal == active then
+			btn.BackgroundColor3 = T.Colors.Accent
+			btn.TextColor3 = Color3.new(1, 1, 1)
+		else
+			btn.BackgroundColor3 = T.Colors.ButtonNormal
+			btn.TextColor3 = T.Colors.Text
+		end
+	end
+end
+
+function WidgetUI:_showTagInput()
+	local T = self._theme
+
+	if self._tagBar:FindFirstChild("TagInput") then return end
+
+	local inputFrame = Instance.new("Frame")
+	inputFrame.Name = "TagInput"
+	inputFrame.Size = UDim2.new(1, -8, 0, 24)
+	inputFrame.Position = UDim2.fromOffset(4, 2)
+	inputFrame.BackgroundColor3 = T.Colors.Surface
+	inputFrame.BorderSizePixel = 0
+	inputFrame.ZIndex = 10
+	inputFrame.Parent = self._tagBar
+	Instance.new("UICorner", inputFrame).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", inputFrame).Color = T.Colors.Accent
+
+	local box = Instance.new("TextBox", inputFrame)
+	box.Size = UDim2.new(1, -8, 1, 0)
+	box.Position = UDim2.fromOffset(4, 0)
+	box.BackgroundTransparency = 1
+	box.TextColor3 = T.Colors.Text
+	box.PlaceholderText = "Tag name..."
+	box.PlaceholderColor3 = T.Colors.TextDim
+	box.FontFace = T.Fonts.Default
+	box.TextSize = T.Sizes.FontSizeSmall
+	box.ClearTextOnFocus = true
+	box.ZIndex = 11
+	box.Text = ""
+
+	box.FocusLost:Connect(function(enterPressed)
+		local name = box.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
+		if enterPressed and #name > 0 then
+			-- Tag all selected nodes, or if none selected, just register the tag
+			for _, nodeId in self._state.selectedNodes do
+				self._nodeManager:AddTagToNode(nodeId, name)
+			end
+			self._nodeManager:RefreshTagList()
+		end
+		inputFrame:Destroy()
+	end)
+
+	box:CaptureFocus()
+end
+
+------------------------------------------------------------------------
+-- Mode-specific Panels
+------------------------------------------------------------------------
+function WidgetUI:_buildModePanel(parent)
+	local T = self._theme
+
+	local yOffset = T.Sizes.ToolbarHeight + T.Sizes.TagBarHeight
+	local height = -yOffset - T.Sizes.StatusHeight
+
+	local container = Instance.new("ScrollingFrame")
+	container.Name = "ModePanel"
+	container.Size = UDim2.new(1, 0, 1, height)
+	container.Position = UDim2.fromOffset(0, yOffset)
+	container.BackgroundColor3 = T.Colors.Background
+	container.BorderSizePixel = 0
+	container.ScrollBarThickness = 4
+	container.ScrollBarImageColor3 = T.Colors.ScrollBar
+	container.CanvasSize = UDim2.fromOffset(0, 0)
+	container.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	container.Parent = parent
+	self._modePanel = container
+
+	local padding = Instance.new("UIPadding", container)
+	padding.PaddingTop = UDim.new(0, T.Sizes.Padding)
+	padding.PaddingBottom = UDim.new(0, T.Sizes.Padding)
+	padding.PaddingLeft = UDim.new(0, T.Sizes.Padding)
+	padding.PaddingRight = UDim.new(0, T.Sizes.Padding)
+
+	local layout = Instance.new("UIListLayout", container)
+	layout.Padding = UDim.new(0, T.Sizes.Padding)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	self._modePanels["Place"] = self:_buildPlacePanel(container)
+	self._modePanels["Draw"] = self:_buildDrawPanel(container)
+	self._modePanels["Paint"] = self:_buildPaintPanel(container)
+	self._modePanels["Sculpt"] = self:_buildSculptPanel(container)
+	self._modePanels["Select"] = self:_buildSelectPanel(container)
+end
+
+function WidgetUI:_showModePanel(mode)
+	for name, frame in self._modePanels do
+		frame.Visible = (name == mode)
+	end
+end
+
+------------------------------------------------------------------------
+-- Panel builders
+------------------------------------------------------------------------
+function WidgetUI:_buildPlacePanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "PlacePanel", 1)
+
+	self:_addLabel(frame, "PlaceTitle", "Place Nodes", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "PlaceHelp", "Click to place. Shift+Click to remove.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	self:_addSliderRow(frame, "GridSize", "Grid Size", 1, 32, self._state.settings.gridSize, 3, function(val)
+		self._state:SetSetting("gridSize", math.round(val))
+	end)
+
+	self:_addToggleRow(frame, "SnapToggle", "Snap Enabled", self._state.settings.snapEnabled, 4, function(val)
+		self._state:SetSetting("snapEnabled", val)
+	end)
+
+	self:_addSliderRow(frame, "NodeSize", "Node Size", 0.5, 5, self._state.settings.nodeSize, 5, function(val)
+		self._state:SetSetting("nodeSize", math.round(val * 10) / 10)
+	end)
+
+	-- Work Plane section
+	self:_addLabel(frame, "WPHeader", "Work Plane", T.Fonts.Bold, T.Sizes.FontSizeNormal, 10)
+
+	self:_addToggleRow(frame, "WorkPlaneToggle", "Show Work Plane", self._state.settings.workPlaneEnabled, 11, function(val)
+		self._state:SetSetting("workPlaneEnabled", val)
+	end)
+
+	self:_addSliderRow(frame, "WPYOffset", "Height Below Cam", 5, 100, self._state.settings.workPlaneYOffset, 12, function(val)
+		self._state:SetSetting("workPlaneYOffset", math.round(val))
+	end)
+
+	return frame
+end
+
+function WidgetUI:_buildDrawPanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "DrawPanel", 2)
+
+	self:_addLabel(frame, "DrawTitle", "Draw Triangles", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "DrawHelp", "Click 3 nodes to form a triangle.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	local statusLabel = self:_addLabel(frame, "DrawStatus", "Selected: 0/3 nodes", T.Fonts.Semi, T.Sizes.FontSizeNormal, 3)
+	self._drawStatusLabel = statusLabel
+
+	-- Auto-Triangulate button (not a hotkey!)
+	local autoBtn = Instance.new("TextButton", frame)
+	autoBtn.Name = "AutoTriBtn"
+	autoBtn.Size = UDim2.new(1, 0, 0, 32)
+	autoBtn.BackgroundColor3 = T.Colors.Accent
+	autoBtn.TextColor3 = Color3.new(1, 1, 1)
+	autoBtn.Text = "Auto-Triangulate All Visible Nodes"
+	autoBtn.FontFace = T.Fonts.Bold
+	autoBtn.TextSize = T.Sizes.FontSizeNormal
+	autoBtn.BorderSizePixel = 0
+	autoBtn.LayoutOrder = 4
+	autoBtn.Parent = frame
+	Instance.new("UICorner", autoBtn).CornerRadius = T.Sizes.SmallCorner
+
+	autoBtn.MouseButton1Click:Connect(function()
+		if self._callbacks.onAutoTriangulate then
+			self._callbacks.onAutoTriangulate()
+		end
+	end)
+
+	local clearBtn = Instance.new("TextButton", frame)
+	clearBtn.Name = "ClearSelBtn"
+	clearBtn.Size = UDim2.new(1, 0, 0, 28)
+	clearBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	clearBtn.TextColor3 = T.Colors.Text
+	clearBtn.Text = "Clear Selection"
+	clearBtn.FontFace = T.Fonts.Semi
+	clearBtn.TextSize = T.Sizes.FontSizeSmall
+	clearBtn.BorderSizePixel = 0
+	clearBtn.LayoutOrder = 5
+	clearBtn.Parent = frame
+	Instance.new("UICorner", clearBtn).CornerRadius = T.Sizes.SmallCorner
+
+	clearBtn.MouseButton1Click:Connect(function()
+		self._state:ClearDrawSelection()
+	end)
+
+	return frame
+end
+
+function WidgetUI:_buildPaintPanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "PaintPanel", 3)
+
+	self:_addLabel(frame, "PaintTitle", "Paint Triangles", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "PaintHelp", "Click a triangle to apply color & material.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	-- Color preview + picker trigger
+	local colorRow = Instance.new("Frame", frame)
+	colorRow.Name = "ColorRow"
+	colorRow.Size = UDim2.new(1, 0, 0, 28)
+	colorRow.BackgroundTransparency = 1
+	colorRow.LayoutOrder = 3
+	colorRow.Parent = frame
+
+	local colorLabel = Instance.new("TextLabel", colorRow)
+	colorLabel.Size = UDim2.new(0.5, 0, 1, 0)
+	colorLabel.BackgroundTransparency = 1
+	colorLabel.TextColor3 = T.Colors.Text
+	colorLabel.Text = "Color"
+	colorLabel.FontFace = T.Fonts.Semi
+	colorLabel.TextSize = T.Sizes.FontSizeNormal
+	colorLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local colorPreview = Instance.new("TextButton", colorRow)
+	colorPreview.Name = "ColorPreview"
+	colorPreview.Size = UDim2.new(0.5, -4, 0, 24)
+	colorPreview.Position = UDim2.new(0.5, 4, 0, 2)
+	colorPreview.BackgroundColor3 = self._state.settings.paintColor
+	colorPreview.Text = ""
+	colorPreview.BorderSizePixel = 0
+	Instance.new("UICorner", colorPreview).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", colorPreview).Color = T.Colors.Border
+	self._colorPreview = colorPreview
+
+	colorPreview.MouseButton1Click:Connect(function()
+		self:_showColorGrid(frame)
+	end)
+
+	-- Material dropdown
+	self:_addMaterialDropdown(frame, 4)
+
+	return frame
+end
+
+function WidgetUI:_buildSculptPanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "SculptPanel", 4)
+
+	self:_addLabel(frame, "SculptTitle", "Sculpt Terrain", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "SculptHelp", "Click and drag to sculpt node heights.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	-- Tool selector
+	local toolRow = Instance.new("Frame", frame)
+	toolRow.Name = "ToolRow"
+	toolRow.Size = UDim2.new(1, 0, 0, 28)
+	toolRow.BackgroundTransparency = 1
+	toolRow.LayoutOrder = 3
+
+	local toolLayout = Instance.new("UIListLayout", toolRow)
+	toolLayout.FillDirection = Enum.FillDirection.Horizontal
+	toolLayout.Padding = UDim.new(0, 3)
+
+	local sculptTools = { "Raise", "Lower", "Smooth", "Flatten" }
+	local sculptBtns = {}
+	for i, tool in sculptTools do
+		local btn = Instance.new("TextButton", toolRow)
+		btn.Name = "Sculpt_" .. tool
+		btn.Size = UDim2.new(0.25, -3, 1, 0)
+		btn.BackgroundColor3 = if tool == self._state.settings.sculptTool then T.Colors.Accent else T.Colors.ButtonNormal
+		btn.TextColor3 = if tool == self._state.settings.sculptTool then Color3.new(1, 1, 1) else T.Colors.Text
+		btn.Text = tool
+		btn.FontFace = T.Fonts.Semi
+		btn.TextSize = T.Sizes.FontSizeSmall
+		btn.BorderSizePixel = 0
+		Instance.new("UICorner", btn).CornerRadius = T.Sizes.SmallCorner
+
+		btn.MouseButton1Click:Connect(function()
+			self._state:SetSetting("sculptTool", tool)
+			for _, b in sculptBtns do
+				b.BackgroundColor3 = T.Colors.ButtonNormal
+				b.TextColor3 = T.Colors.Text
+			end
+			btn.BackgroundColor3 = T.Colors.Accent
+			btn.TextColor3 = Color3.new(1, 1, 1)
+		end)
+
+		table.insert(sculptBtns, btn)
+	end
+
+	self:_addSliderRow(frame, "BrushRadius", "Radius", 2, 100, self._state.settings.brushRadius, 4, function(val)
+		self._state:SetSetting("brushRadius", math.round(val))
+	end)
+
+	self:_addSliderRow(frame, "BrushStrength", "Strength", 0.1, 10, self._state.settings.brushStrength, 5, function(val)
+		self._state:SetSetting("brushStrength", math.round(val * 10) / 10)
+	end)
+
+	-- Falloff selector
+	local falloffRow = Instance.new("Frame", frame)
+	falloffRow.Name = "FalloffRow"
+	falloffRow.Size = UDim2.new(1, 0, 0, 28)
+	falloffRow.BackgroundTransparency = 1
+	falloffRow.LayoutOrder = 6
+
+	self:_addLabel(falloffRow, "FalloffLabel", "Falloff", T.Fonts.Semi, T.Sizes.FontSizeNormal, 0)
+
+	local falloffs = { "Smooth", "Linear", "Flat" }
+	local falloffBtns = {}
+	local fbtnContainer = Instance.new("Frame", falloffRow)
+	fbtnContainer.Size = UDim2.new(0.6, 0, 1, 0)
+	fbtnContainer.Position = UDim2.new(0.4, 0, 0, 0)
+	fbtnContainer.BackgroundTransparency = 1
+
+	local fbtnLayout = Instance.new("UIListLayout", fbtnContainer)
+	fbtnLayout.FillDirection = Enum.FillDirection.Horizontal
+	fbtnLayout.Padding = UDim.new(0, 3)
+
+	for _, fo in falloffs do
+		local btn = Instance.new("TextButton", fbtnContainer)
+		btn.Size = UDim2.new(1 / 3, -2, 1, 0)
+		btn.BackgroundColor3 = if fo == self._state.settings.brushFalloff then T.Colors.Accent else T.Colors.ButtonNormal
+		btn.TextColor3 = if fo == self._state.settings.brushFalloff then Color3.new(1, 1, 1) else T.Colors.Text
+		btn.Text = fo
+		btn.FontFace = T.Fonts.Semi
+		btn.TextSize = T.Sizes.FontSizeSmall
+		btn.BorderSizePixel = 0
+		Instance.new("UICorner", btn).CornerRadius = T.Sizes.SmallCorner
+
+		btn.MouseButton1Click:Connect(function()
+			self._state:SetSetting("brushFalloff", fo)
+			for _, b in falloffBtns do
+				b.BackgroundColor3 = T.Colors.ButtonNormal
+				b.TextColor3 = T.Colors.Text
+			end
+			btn.BackgroundColor3 = T.Colors.Accent
+			btn.TextColor3 = Color3.new(1, 1, 1)
+		end)
+
+		table.insert(falloffBtns, btn)
+	end
+
+	return frame
+end
+
+function WidgetUI:_buildSelectPanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "SelectPanel", 5)
+
+	self:_addLabel(frame, "SelectTitle", "Select & Inspect", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "SelectHelp", "Click nodes/triangles. Ctrl+click for multi.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	local selInfo = self:_addLabel(frame, "SelInfo", "Nothing selected", T.Fonts.Default, T.Sizes.FontSizeNormal, 3)
+	self._selInfoLabel = selInfo
+
+	-- Tag assignment for selected nodes
+	local tagLabel = self:_addLabel(frame, "TagLabel", "Assign tag to selected:", T.Fonts.Semi, T.Sizes.FontSizeSmall, 4)
+
+	local tagBox = Instance.new("TextBox", frame)
+	tagBox.Name = "TagAssignBox"
+	tagBox.Size = UDim2.new(1, 0, 0, 26)
+	tagBox.BackgroundColor3 = T.Colors.Surface
+	tagBox.TextColor3 = T.Colors.Text
+	tagBox.PlaceholderText = "tag_name"
+	tagBox.PlaceholderColor3 = T.Colors.TextDim
+	tagBox.FontFace = T.Fonts.Default
+	tagBox.TextSize = T.Sizes.FontSizeSmall
+	tagBox.BorderSizePixel = 0
+	tagBox.LayoutOrder = 5
+	tagBox.Text = ""
+	Instance.new("UICorner", tagBox).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", tagBox).Color = T.Colors.Border
+
+	local assignBtn = Instance.new("TextButton", frame)
+	assignBtn.Name = "AssignTagBtn"
+	assignBtn.Size = UDim2.new(0.48, 0, 0, 26)
+	assignBtn.BackgroundColor3 = T.Colors.Positive
+	assignBtn.TextColor3 = Color3.new(1, 1, 1)
+	assignBtn.Text = "Add Tag"
+	assignBtn.FontFace = T.Fonts.Bold
+	assignBtn.TextSize = T.Sizes.FontSizeSmall
+	assignBtn.BorderSizePixel = 0
+	assignBtn.LayoutOrder = 6
+	Instance.new("UICorner", assignBtn).CornerRadius = T.Sizes.SmallCorner
+
+	assignBtn.MouseButton1Click:Connect(function()
+		local name = tagBox.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
+		if #name == 0 then return end
+		for _, nodeId in self._state.selectedNodes do
+			self._nodeManager:AddTagToNode(nodeId, name)
+		end
+		self._nodeManager:RefreshTagList()
+		tagBox.Text = ""
+	end)
+
+	local removeBtn = Instance.new("TextButton", frame)
+	removeBtn.Name = "RemoveTagBtn"
+	removeBtn.Size = UDim2.new(0.48, 0, 0, 26)
+	removeBtn.BackgroundColor3 = T.Colors.Negative
+	removeBtn.TextColor3 = Color3.new(1, 1, 1)
+	removeBtn.Text = "Remove Tag"
+	removeBtn.FontFace = T.Fonts.Bold
+	removeBtn.TextSize = T.Sizes.FontSizeSmall
+	removeBtn.BorderSizePixel = 0
+	removeBtn.LayoutOrder = 7
+	Instance.new("UICorner", removeBtn).CornerRadius = T.Sizes.SmallCorner
+
+	removeBtn.MouseButton1Click:Connect(function()
+		local name = tagBox.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
+		if #name == 0 then return end
+		for _, nodeId in self._state.selectedNodes do
+			self._nodeManager:RemoveTagFromNode(nodeId, name)
+		end
+		self._nodeManager:RefreshTagList()
+		tagBox.Text = ""
+	end)
+
+	-- Delete selected button
+	local deleteBtn = Instance.new("TextButton", frame)
+	deleteBtn.Name = "DeleteBtn"
+	deleteBtn.Size = UDim2.new(1, 0, 0, 30)
+	deleteBtn.BackgroundColor3 = T.Colors.Negative
+	deleteBtn.TextColor3 = Color3.new(1, 1, 1)
+	deleteBtn.Text = "Delete Selected"
+	deleteBtn.FontFace = T.Fonts.Bold
+	deleteBtn.TextSize = T.Sizes.FontSizeNormal
+	deleteBtn.BorderSizePixel = 0
+	deleteBtn.LayoutOrder = 10
+	Instance.new("UICorner", deleteBtn).CornerRadius = T.Sizes.SmallCorner
+
+	deleteBtn.MouseButton1Click:Connect(function()
+		if self._callbacks.onDeleteSelected then
+			self._callbacks.onDeleteSelected()
+		end
+	end)
+
+	return frame
+end
+
+------------------------------------------------------------------------
+-- Color Grid (simple palette picker)
+------------------------------------------------------------------------
+function WidgetUI:_showColorGrid(parent)
+	local T = self._theme
+
+	if parent:FindFirstChild("ColorGrid") then
+		parent:FindFirstChild("ColorGrid"):Destroy()
+		return
+	end
+
+	local grid = Instance.new("Frame", parent)
+	grid.Name = "ColorGrid"
+	grid.Size = UDim2.new(1, 0, 0, 120)
+	grid.BackgroundColor3 = T.Colors.Surface
+	grid.BorderSizePixel = 0
+	grid.LayoutOrder = 10
+	Instance.new("UICorner", grid).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", grid).Color = T.Colors.Border
+
+	local gridLayout = Instance.new("UIGridLayout", grid)
+	gridLayout.CellSize = UDim2.fromOffset(20, 20)
+	gridLayout.CellPadding = UDim2.fromOffset(2, 2)
+
+	local gridPad = Instance.new("UIPadding", grid)
+	gridPad.PaddingTop = UDim.new(0, 4)
+	gridPad.PaddingLeft = UDim.new(0, 4)
+
+	local colors = {
+		Color3.fromRGB(74, 124, 63),   -- grass green
+		Color3.fromRGB(34, 85, 28),    -- dark green
+		Color3.fromRGB(120, 160, 90),  -- light green
+		Color3.fromRGB(85, 65, 40),    -- dirt brown
+		Color3.fromRGB(140, 110, 70),  -- sand
+		Color3.fromRGB(200, 180, 140), -- light sand
+		Color3.fromRGB(100, 100, 100), -- gray rock
+		Color3.fromRGB(60, 60, 65),    -- dark rock
+		Color3.fromRGB(160, 160, 160), -- light rock
+		Color3.fromRGB(50, 90, 140),   -- water blue
+		Color3.fromRGB(70, 130, 180),  -- light blue
+		Color3.fromRGB(200, 200, 210), -- snow
+		Color3.fromRGB(240, 230, 200), -- pale
+		Color3.fromRGB(180, 60, 40),   -- red clay
+		Color3.fromRGB(60, 40, 30),    -- dark earth
+		Color3.fromRGB(150, 130, 100), -- limestone
+		Color3.fromRGB(80, 70, 60),    -- slate
+		Color3.fromRGB(110, 90, 70),   -- mud
+		Color3.fromRGB(40, 60, 40),    -- deep forest
+		Color3.fromRGB(170, 140, 90),  -- mesa
+	}
+
+	for i, color in colors do
+		local swatch = Instance.new("TextButton", grid)
+		swatch.Name = "Color_" .. i
+		swatch.BackgroundColor3 = color
+		swatch.Text = ""
+		swatch.BorderSizePixel = 0
+		Instance.new("UICorner", swatch).CornerRadius = T.Sizes.SmallCorner
+
+		swatch.MouseButton1Click:Connect(function()
+			self._state:SetSetting("paintColor", color)
+			if self._colorPreview then
+				self._colorPreview.BackgroundColor3 = color
+			end
+			grid:Destroy()
+		end)
+	end
+end
+
+------------------------------------------------------------------------
+-- Material Dropdown
+------------------------------------------------------------------------
+function WidgetUI:_addMaterialDropdown(parent, layoutOrder)
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = "MaterialRow"
+	row.Size = UDim2.new(1, 0, 0, 28)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = layoutOrder
+
+	local label = Instance.new("TextLabel", row)
+	label.Size = UDim2.new(0.35, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = T.Colors.Text
+	label.Text = "Material"
+	label.FontFace = T.Fonts.Semi
+	label.TextSize = T.Sizes.FontSizeNormal
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local dropdown = Instance.new("TextButton", row)
+	dropdown.Name = "MaterialDropdown"
+	dropdown.Size = UDim2.new(0.65, -4, 1, 0)
+	dropdown.Position = UDim2.new(0.35, 4, 0, 0)
+	dropdown.BackgroundColor3 = T.Colors.Surface
+	dropdown.TextColor3 = T.Colors.Text
+	dropdown.Text = self._state.settings.paintMaterial.Name
+	dropdown.FontFace = T.Fonts.Default
+	dropdown.TextSize = T.Sizes.FontSizeSmall
+	dropdown.BorderSizePixel = 0
+	Instance.new("UICorner", dropdown).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", dropdown).Color = T.Colors.Border
+	self._materialDropdown = dropdown
+
+	local materials = {
+		Enum.Material.Grass, Enum.Material.Sand, Enum.Material.Rock,
+		Enum.Material.Ground, Enum.Material.Mud, Enum.Material.Slate,
+		Enum.Material.Concrete, Enum.Material.Brick, Enum.Material.Cobblestone,
+		Enum.Material.Snow, Enum.Material.Ice, Enum.Material.Glacier,
+		Enum.Material.SmoothPlastic, Enum.Material.Pavement, Enum.Material.Limestone,
+		Enum.Material.Basalt, Enum.Material.Asphalt, Enum.Material.Salt,
+		Enum.Material.CrackedLava, Enum.Material.LeafyGrass,
+	}
+
+	dropdown.MouseButton1Click:Connect(function()
+		if parent:FindFirstChild("MaterialList") then
+			parent:FindFirstChild("MaterialList"):Destroy()
+			return
+		end
+
+		local list = Instance.new("ScrollingFrame", parent)
+		list.Name = "MaterialList"
+		list.Size = UDim2.new(1, 0, 0, 150)
+		list.BackgroundColor3 = T.Colors.Surface
+		list.BorderSizePixel = 0
+		list.ScrollBarThickness = 4
+		list.CanvasSize = UDim2.fromOffset(0, 0)
+		list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		list.LayoutOrder = layoutOrder + 1
+		list.ZIndex = 10
+		Instance.new("UICorner", list).CornerRadius = T.Sizes.SmallCorner
+		Instance.new("UIStroke", list).Color = T.Colors.Border
+
+		local listLayout = Instance.new("UIListLayout", list)
+		listLayout.Padding = UDim.new(0, 1)
+
+		for _, mat in materials do
+			local matBtn = Instance.new("TextButton", list)
+			matBtn.Size = UDim2.new(1, 0, 0, 22)
+			matBtn.BackgroundColor3 = T.Colors.Surface
+			matBtn.TextColor3 = T.Colors.Text
+			matBtn.Text = "  " .. mat.Name
+			matBtn.FontFace = T.Fonts.Default
+			matBtn.TextSize = T.Sizes.FontSizeSmall
+			matBtn.TextXAlignment = Enum.TextXAlignment.Left
+			matBtn.BorderSizePixel = 0
+			matBtn.ZIndex = 11
+
+			matBtn.MouseButton1Click:Connect(function()
+				self._state:SetSetting("paintMaterial", mat)
+				dropdown.Text = mat.Name
+				list:Destroy()
+			end)
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- Status Bar
+------------------------------------------------------------------------
+function WidgetUI:_buildStatusBar(parent)
+	local T = self._theme
+
+	local bar = Instance.new("Frame")
+	bar.Name = "StatusBar"
+	bar.Size = UDim2.new(1, 0, 0, T.Sizes.StatusHeight)
+	bar.Position = UDim2.new(0, 0, 1, -T.Sizes.StatusHeight)
+	bar.BackgroundColor3 = T.Colors.Surface
+	bar.BorderSizePixel = 0
+	bar.Parent = parent
+
+	local sep = Instance.new("Frame", bar)
+	sep.Name = "Sep"
+	sep.Size = UDim2.new(1, 0, 0, 1)
+	sep.Position = UDim2.fromOffset(0, 0)
+	sep.BackgroundColor3 = T.Colors.Border
+	sep.BorderSizePixel = 0
+
+	local lbl = Instance.new("TextLabel", bar)
+	lbl.Name = "Label"
+	lbl.Size = UDim2.new(1, -12, 1, -1)
+	lbl.Position = UDim2.fromOffset(6, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.TextDim
+	lbl.FontFace = T.Fonts.Default
+	lbl.TextSize = T.Sizes.FontSizeSmall
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	self._statusLabel = lbl
+
+	self:_refreshStatus()
+end
+
+function WidgetUI:_refreshStatus()
+	if not self._statusLabel then return end
+	local nodes = self._state:GetNodeCount()
+	local tris = self._state:GetTriangleCount()
+	local tag = self._state.activeTag or "All"
+	self._statusLabel.Text = string.format("Nodes: %d  |  Triangles: %d  |  Tag: %s", nodes, tris, tag)
+end
+
+------------------------------------------------------------------------
+-- Generic UI helpers
+------------------------------------------------------------------------
+function WidgetUI:_panelFrame(parent, name, order): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.Size = UDim2.new(1, 0, 0, 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
+	frame.BackgroundTransparency = 1
+	frame.LayoutOrder = order
+	frame.Visible = false
+	frame.Parent = parent
+
+	local layout = Instance.new("UIListLayout", frame)
+	layout.Padding = UDim.new(0, self._theme.Sizes.Padding)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	return frame
+end
+
+function WidgetUI:_addLabel(parent, name, text, font, size, order): TextLabel
+	local T = self._theme
+	local lbl = Instance.new("TextLabel", parent)
+	lbl.Name = name
+	lbl.Size = UDim2.new(1, 0, 0, size + 4)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.Text
+	lbl.Text = text
+	lbl.FontFace = font
+	lbl.TextSize = size
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.TextWrapped = true
+	lbl.AutomaticSize = Enum.AutomaticSize.Y
+	lbl.LayoutOrder = order
+	return lbl
+end
+
+function WidgetUI:_addSliderRow(parent, name, label, min, max, default, order, callback)
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = name
+	row.Size = UDim2.new(1, 0, 0, 28)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = order
+
+	local lbl = Instance.new("TextLabel", row)
+	lbl.Size = UDim2.new(0.35, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.Text
+	lbl.Text = label
+	lbl.FontFace = T.Fonts.Semi
+	lbl.TextSize = T.Sizes.FontSizeNormal
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	local valLabel = Instance.new("TextLabel", row)
+	valLabel.Name = "Value"
+	valLabel.Size = UDim2.fromOffset(40, 28)
+	valLabel.Position = UDim2.new(1, -40, 0, 0)
+	valLabel.BackgroundTransparency = 1
+	valLabel.TextColor3 = T.Colors.TextDim
+	valLabel.Text = tostring(math.round(default * 10) / 10)
+	valLabel.FontFace = T.Fonts.Default
+	valLabel.TextSize = T.Sizes.FontSizeSmall
+	valLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+	local sliderBg = Instance.new("Frame", row)
+	sliderBg.Name = "SliderBg"
+	sliderBg.Size = UDim2.new(0.65, -48, 0, 6)
+	sliderBg.Position = UDim2.new(0.35, 4, 0.5, -3)
+	sliderBg.BackgroundColor3 = T.Colors.Border
+	sliderBg.BorderSizePixel = 0
+	Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(0.5, 0)
+
+	local fill = Instance.new("Frame", sliderBg)
+	fill.Name = "Fill"
+	fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+	fill.BackgroundColor3 = T.Colors.Accent
+	fill.BorderSizePixel = 0
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0.5, 0)
+
+	local handle = Instance.new("TextButton", sliderBg)
+	handle.Name = "Handle"
+	handle.Size = UDim2.fromOffset(12, 12)
+	handle.Position = UDim2.new((default - min) / (max - min), -6, 0.5, -6)
+	handle.BackgroundColor3 = Color3.new(1, 1, 1)
+	handle.Text = ""
+	handle.BorderSizePixel = 0
+	handle.ZIndex = 5
+	Instance.new("UICorner", handle).CornerRadius = UDim.new(0.5, 0)
+
+	local dragging = false
+	handle.MouseButton1Down:Connect(function()
+		dragging = true
+	end)
+
+	handle.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local abs = sliderBg.AbsolutePosition
+			local sizeX = sliderBg.AbsoluteSize.X
+			local relX = math.clamp((input.Position.X - abs.X) / sizeX, 0, 1)
+			local val = min + relX * (max - min)
+			fill.Size = UDim2.new(relX, 0, 1, 0)
+			handle.Position = UDim2.new(relX, -6, 0.5, -6)
+			valLabel.Text = tostring(math.round(val * 10) / 10)
+			callback(val)
+		end
+	end)
+
+	sliderBg.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local abs = sliderBg.AbsolutePosition
+			local sizeX = sliderBg.AbsoluteSize.X
+			local relX = math.clamp((input.Position.X - abs.X) / sizeX, 0, 1)
+			local val = min + relX * (max - min)
+			fill.Size = UDim2.new(relX, 0, 1, 0)
+			handle.Position = UDim2.new(relX, -6, 0.5, -6)
+			valLabel.Text = tostring(math.round(val * 10) / 10)
+			callback(val)
+		end
+	end)
+
+	handle.MouseButton1Up:Connect(function() dragging = false end)
+	handle.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+	end)
+end
+
+function WidgetUI:_addToggleRow(parent, name, label, default, order, callback)
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = name
+	row.Size = UDim2.new(1, 0, 0, 28)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = order
+
+	local lbl = Instance.new("TextLabel", row)
+	lbl.Size = UDim2.new(0.7, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.Text
+	lbl.Text = label
+	lbl.FontFace = T.Fonts.Semi
+	lbl.TextSize = T.Sizes.FontSizeNormal
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	local btn = Instance.new("TextButton", row)
+	btn.Size = UDim2.fromOffset(44, 22)
+	btn.Position = UDim2.new(1, -44, 0.5, -11)
+	btn.BackgroundColor3 = if default then T.Colors.Positive else T.Colors.Border
+	btn.Text = if default then "ON" else "OFF"
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.FontFace = T.Fonts.Bold
+	btn.TextSize = T.Sizes.FontSizeSmall
+	btn.BorderSizePixel = 0
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0.5, 0)
+
+	local state = default
+	btn.MouseButton1Click:Connect(function()
+		state = not state
+		btn.BackgroundColor3 = if state then T.Colors.Positive else T.Colors.Border
+		btn.Text = if state then "ON" else "OFF"
+		callback(state)
+	end)
+end
+
+------------------------------------------------------------------------
+-- State bindings
+------------------------------------------------------------------------
+function WidgetUI:_bindState()
+	table.insert(self._conns, self._state.modeChanged:Connect(function(mode)
+		self:_highlightActiveMode(mode)
+		self:_showModePanel(mode)
+	end))
+
+	table.insert(self._conns, self._state.nodeAdded:Connect(function()
+		self:_refreshStatus()
+	end))
+
+	table.insert(self._conns, self._state.nodeRemoved:Connect(function()
+		self:_refreshStatus()
+	end))
+
+	table.insert(self._conns, self._state.triangleAdded:Connect(function()
+		self:_refreshStatus()
+	end))
+
+	table.insert(self._conns, self._state.triangleRemoved:Connect(function()
+		self:_refreshStatus()
+	end))
+
+	table.insert(self._conns, self._state.tagFilterChanged:Connect(function()
+		self:_highlightActiveTag()
+		self:_refreshStatus()
+	end))
+
+	table.insert(self._conns, self._state.tagsChanged:Connect(function()
+		self:_refreshTagButtons()
+	end))
+
+	table.insert(self._conns, self._state.drawSelectionChanged:Connect(function(sel)
+		if self._drawStatusLabel then
+			self._drawStatusLabel.Text = string.format("Selected: %d/3 nodes", #sel)
+		end
+	end))
+
+	table.insert(self._conns, self._state.selectionChanged:Connect(function()
+		if self._selInfoLabel then
+			local nn = #self._state.selectedNodes
+			local nt = #self._state.selectedTriangles
+			if nn == 0 and nt == 0 then
+				self._selInfoLabel.Text = "Nothing selected"
+			else
+				local parts = {}
+				if nn > 0 then table.insert(parts, nn .. " node" .. (nn > 1 and "s" or "")) end
+				if nt > 0 then table.insert(parts, nt .. " triangle" .. (nt > 1 and "s" or "")) end
+				self._selInfoLabel.Text = table.concat(parts, ", ") .. " selected"
+			end
+		end
+	end))
+end
+
+------------------------------------------------------------------------
+-- Cleanup
+------------------------------------------------------------------------
+function WidgetUI:Destroy()
+	for _, conn in self._conns do
+		conn:Disconnect()
+	end
+	if self._root then
+		self._root:Destroy()
+	end
+end
+
+return WidgetUI
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		</Item>
+</roblox>
