@@ -11,11 +11,17 @@
 	node/triangle data, sculpt tools, and auto-triangulation.
 ]]
 
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
 local TerrainState    = require(script.TerrainState)
 local NodeManager     = require(script.NodeManager)
 local InputHandler    = require(script.InputHandler)
 local AutoTriangulate = require(script.AutoTriangulate)
 local WidgetUI        = require(script.WidgetUI)
+local MaterialPresets = require(script.MaterialPresets)
+local Version         = require(script.Version)
+
+local TITLE = "Triangle Terrain v" .. Version.STRING
 
 ------------------------------------------------------------------------
 -- Plugin toolbar
@@ -23,7 +29,7 @@ local WidgetUI        = require(script.WidgetUI)
 local toolbar = plugin:CreateToolbar("Triangle Terrain")
 local toggleBtn = toolbar:CreateButton(
 	"TriTerrainToggle",
-	"Open the Triangle Terrain editor",
+	"Open the Triangle Terrain editor (" .. TITLE .. ")",
 	"rbxassetid://6034818372",
 	"Triangle Terrain"
 )
@@ -40,14 +46,17 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 )
 
 local widget = plugin:CreateDockWidgetPluginGui("TriangleTerrain", widgetInfo)
-widget.Title = "Triangle Terrain"
+widget.Title = TITLE
 widget.Name = "TriangleTerrain"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+print(string.format("[TriTerrain] Loaded %s", TITLE))
 
 ------------------------------------------------------------------------
 -- Core systems
 ------------------------------------------------------------------------
 local state = TerrainState.new()
+state.materialPresets = MaterialPresets.new(plugin)
 local nodeManager = NodeManager.new(state)
 local mouse = plugin:GetMouse()
 local inputHandler = InputHandler.new(state, nodeManager, mouse)
@@ -72,7 +81,15 @@ local callbacks = {
 			return
 		end
 
-		local triangles = AutoTriangulate.triangulate(visibleNodes)
+		local triangles = AutoTriangulate.triangulate(
+			visibleNodes,
+			state.settings.autoTriMaxEdgeFactor
+		)
+
+		-- One outer recording so the whole batch is a single undo step.
+		-- CreateTriangle's own TryBeginRecording will return nil while ours
+		-- is in flight, so we don't get N separate undo entries.
+		local recording = ChangeHistoryService:TryBeginRecording("AutoTriangulate")
 
 		local created = 0
 		for _, tri in triangles do
@@ -80,16 +97,17 @@ local callbacks = {
 			if id then created += 1 end
 		end
 
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+
 		print(string.format("[TriTerrain] Auto-triangulated: %d triangles from %d nodes.", created, #visibleNodes))
 	end,
 
 	onDeleteSelected = function()
-		for _, nodeId in state.selectedNodes do
-			nodeManager:DeleteNode(nodeId)
-		end
-		for _, triId in state.selectedTriangles do
-			nodeManager:DeleteTriangle(triId)
-		end
+		-- Routed through NodeManager:DeleteMany so this matches the keyboard
+		-- delete path (single undo step covering both nodes and triangles).
+		nodeManager:DeleteMany(state.selectedNodes, state.selectedTriangles)
 		state:SelectNode(nil)
 	end,
 }
@@ -141,6 +159,22 @@ state.tagFilterChanged:Connect(function()
 end)
 
 ------------------------------------------------------------------------
+-- Undo/redo state reconciliation
+--
+-- Studio's ChangeHistoryService restores the workspace instances on Ctrl+Z,
+-- but our self._state.nodes / .triangles maps don't know that the
+-- previously-deleted parts came back (or that previously-restored parts
+-- went away again on redo). Resync after every undo/redo so hover, paint,
+-- delete and selection all act on what's actually in the scene.
+------------------------------------------------------------------------
+ChangeHistoryService.OnUndo:Connect(function()
+	nodeManager:ResyncFromWorkspace()
+end)
+ChangeHistoryService.OnRedo:Connect(function()
+	nodeManager:ResyncFromWorkspace()
+end)
+
+------------------------------------------------------------------------
 -- Cleanup
 ------------------------------------------------------------------------
 plugin.Unloading:Connect(function()
@@ -151,6 +185,298 @@ end)
 ]]></ProtectedString>
 			</Properties>
 		<Item class="ModuleScript" referent="RBX1">
+			<Properties>
+				<string name="Name">Version</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	Triangle Terrain Plugin — version
+
+	BUMP POLICY (semver-style):
+	  PATCH (0.0.x): bug fixes, internal refactors, no user-visible behavior change
+	  MINOR (0.x.0): new feature, new mode, new UI section, expanded capability
+	  MAJOR (x.0.0): breaking change to data format, removal of features, big rewrites
+
+	ALWAYS bump this string before running build_rbxmx.py whenever you ship a
+	meaningful change to the plugin. The version is shown in the dock widget
+	title so the user can see at a glance which build is loaded.
+
+	History (reverse chronological):
+	  0.11.0 — Auto-Triangulate alpha-shape filter. Stylxus laid nodes along
+	           a curving road, hit Auto-Triangulate, and got one giant
+	           triangle stretching across the empty inside of the curve from
+	           one tip to the other. Classic Delaunay convex-hull artifact —
+	           the algorithm fills the convex hull regardless of input shape,
+	           and any non-convex layout (curves, rings, C-shapes) gets
+	           "bridged" by these huge triangles across empty space.
+	             Fix: after Bowyer-Watson runs, compute the median nearest-
+	             neighbor distance of the input points and drop any triangle
+	             whose longest edge exceeds maxEdgeFactor * medianNN. The
+	             median-NN baseline scales the threshold to the actual point
+	             density, so dense grids and sparse low-poly layouts both
+	             work without per-scene tuning.
+	             Surfaced as a "Shape Tightness" slider in the Draw panel
+	             (range 1.5–8, default 3.0). Lower = stricter shape-following
+	             (kills more bridges); higher = closer to raw Delaunay (fills
+	             more concavities). Default of 3 catches the curve-bridge
+	             case without breaking square grids (their longest legitimate
+	             edge is sqrt(2) * spacing ≈ 1.41x). Set to 0 to disable
+	             filtering entirely if you ever want raw Delaunay back.
+	             stored as autoTriMaxEdgeFactor in settings, persists like
+	             everything else through settingsChanged.
+	  0.10.4 — Audit pass round 2: 5 medium / low-priority polish items
+	           and 2 clarifying comments. No behavior changes you can see
+	           directly, but several "wait, why did THAT happen" surfaces
+	           are now smoothed over.
+	             6. Delete-mode "Deleted: N" counter undercounted whenever
+	                a delete cascaded — clicking one node with "Delete
+	                Nodes" on would cull ~6 connected triangles, but the
+	                counter only added 1. Switched to subscribing to
+	                nodeRemoved/triangleRemoved for the duration of the
+	                drag, so the counter == actual entities removed (single
+	                source of truth = "what state lost"). Removed all the
+	                manual SetDeleteStrokeCount calls from the per-tick
+	                delete code so it can't drift again.
+	             7. Replace-All in the Preset Import panel was a single-
+	                click destructive action. One misclick wiped the entire
+	                library. Now two-step: first click flips the button to
+	                "Confirm replace?" with a darker red for 3 seconds; only
+	                a second click within that window commits. Token-
+	                guarded timer so re-arming resets the countdown.
+	             8. Preset dropdowns in Paint/Draw panels stayed open with
+	                stale entries when presets were edited or deleted in
+	                the Preset Manager. Clicking a stale row could apply a
+	                deleted preset's color/material. Now closes any open
+	                "PresetList" descendants on every presets.changed fire.
+	            10. Y-position TextBox (and any future _addTextInputRow
+	                consumers) re-fired onCommit on focus-lost even when
+	                the user didn't type anything. Skips now if the box
+	                text matches lastGoodText, killing a needless
+	                SetSetting -> settingsChanged cascade that occasionally
+	                raced the live-Y broadcaster on the work plane.
+	            11. Studio-driven deletes (Delete-key on a node/triangle
+	                model in the Explorer) bypassed our state — hover/
+	                click/sculpt would silently misbehave on the missing
+	                instance until plugin reload. Added ChildRemoved
+	                listeners on the nodes / triangles folders that
+	                unregister whatever's tracked when an instance leaves
+	                the folder by ANY path. Identity-checked (only react
+	                if the part that left IS the one we track) so duplicate
+	                ids from external sources can't yank our entries.
+	                Plugin's own DeleteNode/DeleteTriangle path is
+	                idempotent against this — listener fires synchronously
+	                during Parent = nil and unregisters first; subsequent
+	                UnregisterNode/Triangle is a no-op.
+	             Also: clarifying comments on InputHandler:Activate (now
+	             guarded against double-Activate inputs binding twice) and
+	             NodeManager:ResyncFromWorkspace (explaining why we don't
+	             push part.Position back into state.position for already-
+	             known nodes — the watchNodeMovement listener handles it).
+	  0.10.3 — Audit pass: 5 latent bugs caught before they bit users.
+	             1. Selection arrays (selectedNodes / selectedTriangles)
+	                never pruned dead ids when the underlying instance was
+	                deleted by any path (Place shift+click, Delete mode,
+	                cascade from DeleteNode, undo/redo resync). Symptom:
+	                "5 selected" label after deleting one of those 5,
+	                Delete-Selected silently no-ops on dead ids, undo
+	                reviving a part also "re-selects" it as a side effect.
+	                Fix: prune in TerrainState:UnregisterNode /
+	                UnregisterTriangle (single chokepoint), fire
+	                selectionChanged so highlight + label refresh.
+	             2. drawSelection (the in-progress 3-vertex Draw pick) had
+	                the same problem. Picking node A, switching to Place
+	                and deleting A, then returning to Draw and picking B,C
+	                left a stale [A,B,C] pick that CreateTriangle silently
+	                rejected (nA was nil) — felt like clicks doing nothing.
+	                Fix: same prune-on-removal in UnregisterNode, with
+	                drawSelectionChanged fired so the panel visual updates.
+	             3. TerrainState:SetMode cleared drawSelection but didn't
+	                fire drawSelectionChanged, so the Draw panel kept
+	                showing a stale partial pick after a mode switch.
+	                Fix: clear via table.clear and fire the signal.
+	             4. MaterialPresets used Enum.Material[name] directly in
+	                two places (_load and ImportFromJSON). Enum.Material[X]
+	                THROWS on unknown names rather than returning nil — a
+	                single corrupted setting would crash _load mid-loop and
+	                truncate the user's library; Import bypassed its own
+	                validator and produced a Lua traceback. Wrapped both in
+	                pcall with a Plastic fallback (load) / clean error
+	                (import).
+	             5. Empty Delete-mode click (mouse down on empty space, no
+	                drag) opened a ChangeHistoryService recording but
+	                captured zero mutations, leaving an empty "DeleteStroke"
+	                entry on the undo stack. Now uses
+	                Enum.FinishRecordingOperation.Cancel when stroke count
+	                is 0, so empty strokes don't pollute undo history.
+	                Same fix applied to the mid-stroke deactivation path.
+	  0.10.2 — Two real bugs in the Delete-mode shipping in 0.10.0/0.10.1:
+	             1. Hover highlight stayed BLUE instead of turning RED.
+	                Root cause was a Lua scope bug — HOVER_COLOR_DELETE was
+	                declared next to _ensureHoverHighlight (mid-file), but
+	                _updateHover (defined earlier) read it as a global, got
+	                nil, and _setHoverHighlight fell back to the default
+	                blue. Moved both color constants to the top of
+	                InputHandler.luau so every method sees them as upvalues.
+	             2. Undo of Delete-mode strokes silently failed and printed
+	                "The Parent property of Wedge2 is locked, current
+	                parent: NULL, new parent Tri_0193" to the output.
+	                Root cause: NodeManager:DeleteTriangle / DeleteNode
+	                used :Destroy(), which permanently locks the Parent
+	                property. ChangeHistoryService recorded the deletion
+	                but Roblox refused to re-parent on undo. Switched both
+	                to Parent = nil so the instance stays restorable.
+	             Also added NodeManager:ResyncFromWorkspace() and wired it
+	             to ChangeHistoryService.OnUndo / OnRedo, so when Studio
+	             restores deleted parts our self._state.nodes/.triangles
+	             maps catch up. Without this, hover/paint/sculpt would
+	             still ignore restored geometry until plugin reload.
+	             Same fix applies to undo of Delete Selected, Sub-Divide,
+	             Auto-Triangulate teardowns, and any other path that
+	             routes through DeleteNode/DeleteTriangle.
+	  0.10.1 — Delete-mode "Delete Nodes" toggle. Off by default (matches
+	           prior behavior). When on:
+	             * Hover/click prefers nodes over triangles (smaller hit
+	               target wins, same priority as Select mode).
+	             * Clicking a node deletes it directly. Connected triangles
+	               cascade out via the existing DeleteNode logic.
+	             * Deleting a triangle also nukes any of its 3 vertex nodes
+	               that aren't used by any other triangle — orphan cleanup,
+	               so tearing down a region doesn't leave dangling stray
+	               nodes behind.
+	           New NodeManager:DeleteTriangleAndOrphans() centralizes the
+	           triangle-plus-orphans logic; the inner DeleteNode recordings
+	           batch into the outer Delete-stroke recording, so a full sweep
+	           (triangles + cascaded triangles + orphan nodes) collapses to
+	           one undo step.
+	  0.10.0 — New "Delete" mode (7th tool, hotkey 6). Built for fast,
+	           free-form triangle cleanup that doesn't require selecting
+	           first.
+	             * Hover paints the target triangle red (overrides the
+	               normal blue hover so the destructive intent is impossible
+	               to mistake for Paint or Select hover).
+	             * Click deletes the hovered triangle.
+	             * Hold and drag to sweep — every triangle the cursor
+	               passes over gets deleted, all wrapped in a single
+	               ChangeHistoryService recording so the whole stroke is
+	               one undo step (matches the Sculpt drag pattern from
+	               0.8.2).
+	             * Mode toolbar button uses the negative/red active color
+	               instead of accent blue, so the "you are in a destructive
+	               mode" state is visible from the toolbar alone — no need
+	               to glance at the panel.
+	             * Panel shows a live "Deleted: N" counter during a drag
+	               and a caution banner explaining what's about to happen.
+	             * Mid-stroke deactivation cleanly commits the partial
+	               recording (same defensive pattern as Sculpt).
+	  0.9.0 — Work plane overhaul. The plane was hard to see and you couldn't
+	          pin it where you wanted it. Three changes:
+	            * Visual: brighter cyan slab with a crisp SelectionBox border,
+	              a centre crosshair (so you can see where the camera column
+	              hits the plane), and a floating "Y: 23.5" label rendered
+	              on top of the plane via SurfaceGui — so you can read the
+	              plane's height directly in the viewport, no panel-glance
+	              required. Edge color flips to amber when locked, so the
+	              lock state is obvious from the 3D scene alone.
+	            * Lock + manual Y entry: new "Lock Work Plane" toggle pins
+	              Y at the current value; new editable "Y Position" field
+	              shows the live Y and lets you type an exact target (typing
+	              auto-locks, since "I want it HERE" implies "stay HERE").
+	              The "Height Below Cam" slider only does anything when
+	              unlocked, so it greys out when lock is on.
+	            * Reusable disable cascade: _addToggleRow / _addSliderRow /
+	              new _addTextInputRow now return controllers with SetEnabled
+	              and SetValue, so any future "this option only matters when
+	              the parent toggle is ON" case can grey out cleanly. The
+	              work plane section uses this so all the dependent rows
+	              (Lock, Y Position, offset slider) grey out when "Show Work
+	              Plane" is off.
+	  0.8.2 — Undo audit pass. Fixed every remaining "did stuff, can't undo it
+	          properly" case found by walking every mutating callsite:
+	            * "Delete Selected" *button* in the Select panel had the same
+	              bug 0.8.1 fixed for the keyboard path — only one of the two
+	              code paths got fixed. Both now route through a shared
+	              NodeManager:DeleteMany so they can't drift apart again.
+	            * Auto-Triangulate created N undo entries (one per triangle).
+	              Now wrapped in one outer recording.
+	            * Add Tag / Remove Tag buttons (and the floating tag dialog)
+	              created N undo entries. Now batched via
+	              NodeManager:AddTagToNodes / RemoveTagFromNodes.
+	            * Sculpt drags created one undo entry per Heartbeat tick
+	              (~120 entries for a 2-second stroke). Now one outer
+	              recording opens on Button1Down and closes on Button1Up,
+	              so each stroke is one undo step. Mid-stroke deactivation
+	              cleanly commits the partial recording.
+	  0.8.1 — Two fixes: (1) "Delete Selected" now produces a single undoable
+	          step. Previously triangle-only deletes had NO undo entry (because
+	          DeleteTriangle didn't record on its own) and node deletes
+	          produced N separate undo steps. Wrapped the whole batch in one
+	          ChangeHistoryService recording. (2) Removed the redundant
+	          "Clear Selection" button from the Draw panel — clicking the same
+	          node again already toggles it off, and Escape now aborts an
+	          in-progress 3-vertex pick.
+	  0.8.0 — Select mode actually works visually now. Two layers of feedback:
+	          (1) gold always-on-top Highlight overlays per selected node/
+	          triangle, and (2) Studio's native Selection service is mirrored,
+	          so selected items show in the Properties panel and feel like
+	          regular Studio selection. Hover in Select mode now also previews
+	          triangles (was nodes-only before, even though clicks worked on
+	          both). All selection visuals auto-clear when leaving Select mode
+	          or deactivating the plugin tool.
+	  0.7.2 — Fix off-by-one in "+ New Preset" spotlight. Add() fires `changed`
+	          synchronously *before* returning, so the deferred-target trick
+	          from 0.7.1 always ran one click late (creating Preset 8 would
+	          spotlight Preset 7). Now we call _spotlightPresetRow directly
+	          from the click handler with the freshly-returned id, since the
+	          manager has already refreshed by that point.
+	  0.7.1 — UX fix: clicking "+ New Preset" had no visible effect because the
+	          new row appeared off-screen at the bottom of the manager list.
+	          Now the manager auto-scrolls the new row into view, focuses its
+	          name TextBox (with select-all so typing replaces the placeholder),
+	          and briefly flashes its outline accent so it visually pops.
+	  0.7.0 — Material Preset import / export. Two buttons in the Presets
+	          panel pop up inline JSON panels: Export pretty-prints the
+	          library and offers Copy-to-Clipboard (StudioService); Import
+	          parses pasted JSON, validates every entry up-front, and lets
+	          the user choose Add (merge) or Replace All. One-line-per-
+	          preset format that's hand-editable.
+	  0.6.1 — Removed the redundant "Use" button from preset manager rows.
+	          Selecting a preset from the dropdown already applies it; the
+	          extra button just took up space.
+	  0.6.0 — Material Presets: 6th "Presets" tab with full CRUD manager
+	          (name, color swatch, material picker, ViewportFrame thumbnails,
+	          Use button, delete). Preset dropdown added to Paint and Draw
+	          panels with thumbnails in the list and a "+ Manage Presets"
+	          shortcut at the bottom. Presets persist via plugin:SetSetting
+	          so they're shared across every workspace. Ships 6 sensible
+	          defaults (Grass, Dirt, Stone, Sand, Snow, Water) on first run.
+	          Paint UI now auto-syncs preview/material text via settings
+	          signals.
+	  0.5.0 — Simplified Sub-Divide: removed the increment slider and custom
+	          value input. Always does the classic 1->4 split now. Less UI,
+	          fewer T-junction edge cases.
+	  0.4.0 — Sub-Divide now re-fans neighboring triangles along the shared
+	          edge so they share the new midpoint nodes. Eliminates the
+	          T-junction gaps that appeared when sculpting a subdivided edge.
+	  0.3.2 — Fix: hover highlight was lighting up the entire workspace when
+	          unhovered. Now toggles Highlight.Enabled instead of nilling
+	          Adornee (which falls back to adorning the parent).
+	  0.3.1 — Fix: hover highlight crash after Sub-Divide. Highlight is now
+	          parented to workspace and only the Adornee is swapped, so the
+	          highlight's lifetime is decoupled from the hovered instance.
+	  0.3.0 — Sub-Divide mode: hover-preview + intelligent triangle subdivision
+	          with 1-5 slider plus double-click-to-customize value (up to 50).
+	          Adds Version module shown in widget title.
+	  0.2.0 — Baseline before Sub-Divide work (5 modes, auto-triangulate,
+	          sculpt, paint, work plane, tag filter, persistence).
+]]
+
+local Version = {}
+
+Version.STRING = "0.11.0"
+
+return Version
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX2">
 			<Properties>
 				<string name="Name">Signal</string>
 				<ProtectedString name="Source"><![CDATA[local Signal = {}
@@ -200,7 +526,7 @@ return Signal
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX2">
+		<Item class="ModuleScript" referent="RBX3">
 			<Properties>
 				<string name="Name">Theme</string>
 				<ProtectedString name="Source"><![CDATA[local Studio = settings().Studio
@@ -260,12 +586,13 @@ return Theme
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX3">
+		<Item class="ModuleScript" referent="RBX4">
 			<Properties>
 				<string name="Name">TerrainState</string>
 				<ProtectedString name="Source"><![CDATA[local Signal = require(script.Parent.Signal)
 
-export type Mode = "Place" | "Draw" | "Paint" | "Sculpt" | "Select"
+export type Mode = "Place" | "Draw" | "Paint" | "Sculpt" | "Select" | "Delete" | "Presets"
+export type DrawSubMode = "Triangulate" | "SubDivide"
 
 export type NodeData = {
 	id: string,
@@ -293,6 +620,7 @@ function TerrainState.new()
 	self.triangles = {} :: { [string]: TriData }
 
 	self.activeMode = "Place" :: Mode
+	self.drawSubMode = "Triangulate" :: DrawSubMode
 	self.activeTag = nil :: string?
 	self.tags = {} :: { string }
 
@@ -316,10 +644,36 @@ function TerrainState.new()
 		triangleThickness = 0.1,
 		workPlaneEnabled = false,
 		workPlaneYOffset = 20,
+		-- When locked, the plane stays at workPlaneFixedY and ignores the
+		-- camera-relative offset. When unlocked, it tracks the camera as
+		-- camPos.Y - workPlaneYOffset.
+		workPlaneLocked = false,
+		workPlaneFixedY = 0,
+		-- Delete-mode option. When true, Delete mode also targets nodes
+		-- directly, and deleting a triangle additionally cleans up any of
+		-- its 3 vertex nodes that are no longer used by any other triangle
+		-- ("orphan nodes"). Off by default — additive feature, conservative
+		-- default to avoid surprising the user.
+		deleteNodesEnabled = false,
+		-- Auto-Triangulate alpha-shape filter strength. The threshold for
+		-- "this triangle is a convex-hull bridge artifact" is
+		--   (longest edge) > autoTriMaxEdgeFactor * (median nearest-neighbor)
+		-- 3.0 is a sweet spot for typical irregular layouts (curves, rings).
+		-- Bump higher (5+) if you want raw Delaunay; drop to ~2 for very
+		-- conservative shape-following on dense point clouds. 0 disables
+		-- the filter entirely.
+		autoTriMaxEdgeFactor = 3.0,
 	}
+
+	-- Live Y of the work plane in the world. Updated by InputHandler each
+	-- frame the plane is visible. Not part of `settings` because it's a
+	-- *computed* value, not a user preference, so we don't want it firing
+	-- the broadly-listened settingsChanged signal every frame.
+	self.workPlaneCurrentY = 0
 
 	-- Signals
 	self.modeChanged = Signal.new()
+	self.drawSubModeChanged = Signal.new()
 	self.nodeAdded = Signal.new()
 	self.nodeRemoved = Signal.new()
 	self.nodeMoved = Signal.new()
@@ -332,9 +686,17 @@ function TerrainState.new()
 	self.tagsChanged = Signal.new()
 	self.settingsChanged = Signal.new()
 	self.stateLoaded = Signal.new()
+	self.workPlaneYChanged = Signal.new()
+	self.deleteStrokeChanged = Signal.new()
+	self.deleteStrokeCount = 0
 
 	self._nextNodeId = 1
 	self._nextTriId = 1
+
+	-- Material preset library (set externally by Plugin.server.luau because
+	-- it needs the `plugin` handle for SetSetting/GetSetting). UI code reads
+	-- from here. May be nil during very early construction.
+	self.materialPresets = nil
 
 	return self
 end
@@ -345,8 +707,26 @@ end
 function TerrainState:SetMode(mode: Mode)
 	if self.activeMode == mode then return end
 	self.activeMode = mode
-	self.drawSelection = {}
+	-- Switching modes also clears any in-progress 3-vertex Draw pick. Must
+	-- fire drawSelectionChanged so the Draw panel's "selected nodes" visual
+	-- doesn't lie about a partial pick the user can no longer complete.
+	if #self.drawSelection > 0 then
+		table.clear(self.drawSelection)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
 	self.modeChanged:Fire(mode)
+end
+
+function TerrainState:SetDrawSubMode(mode: DrawSubMode)
+	if self.drawSubMode == mode then return end
+	self.drawSubMode = mode
+	-- Switching sub-mode also clears any partial draw selection so the user
+	-- doesn't end up with stale 1-or-2-node picks when toggling.
+	if #self.drawSelection > 0 then
+		table.clear(self.drawSelection)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
+	self.drawSubModeChanged:Fire(mode)
 end
 
 ------------------------------------------------------------------------
@@ -372,6 +752,23 @@ function TerrainState:UnregisterNode(id: string)
 	if not self.nodes[id] then return end
 	self.nodes[id] = nil
 	self.nodeRemoved:Fire(id)
+
+	-- Prune the id from any selection/pick lists so dead ids don't pile up.
+	-- Without this:
+	--   * selectedNodes count ("3 nodes selected") lies after deletes
+	--   * Delete Selected silently no-ops on dead ids
+	--   * drawSelection in Draw mode keeps a stale partial pick that
+	--     CreateTriangle silently rejects (frustrating "click does nothing")
+	local sIdx = table.find(self.selectedNodes, id)
+	if sIdx then
+		table.remove(self.selectedNodes, sIdx)
+		self.selectionChanged:Fire()
+	end
+	local dIdx = table.find(self.drawSelection, id)
+	if dIdx then
+		table.remove(self.drawSelection, dIdx)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
 end
 
 function TerrainState:UpdateNodePosition(id: string, position: Vector3)
@@ -412,6 +809,14 @@ function TerrainState:UnregisterTriangle(id: string)
 	if not self.triangles[id] then return end
 	self.triangles[id] = nil
 	self.triangleRemoved:Fire(id)
+
+	-- Same prune-on-removal contract as UnregisterNode — keeps
+	-- selectedTriangles honest after any cascade delete.
+	local sIdx = table.find(self.selectedTriangles, id)
+	if sIdx then
+		table.remove(self.selectedTriangles, sIdx)
+		self.selectionChanged:Fire()
+	end
 end
 
 function TerrainState:UpdateTriangleAppearance(id: string, color: Color3?, material: Enum.Material?)
@@ -503,6 +908,28 @@ function TerrainState:SetSetting(key: string, value: any)
 end
 
 ------------------------------------------------------------------------
+-- Work plane live-Y broadcast. Throttles to 0.05-stud changes to avoid
+-- per-frame spam (Heartbeat fires ~60 Hz; without this, listeners would
+-- update 60 times/sec while the camera moves vertically).
+------------------------------------------------------------------------
+function TerrainState:SetWorkPlaneCurrentY(y: number)
+	if math.abs((self.workPlaneCurrentY or 0) - y) < 0.05 then return end
+	self.workPlaneCurrentY = y
+	self.workPlaneYChanged:Fire(y)
+end
+
+------------------------------------------------------------------------
+-- Delete-mode stroke counter. Fired by InputHandler when an in-progress
+-- delete drag adds a triangle, and again with 0 when the stroke ends.
+-- The Delete panel listens to this to show "Deleted: N" mid-stroke.
+------------------------------------------------------------------------
+function TerrainState:SetDeleteStrokeCount(n: number)
+	if self.deleteStrokeCount == n then return end
+	self.deleteStrokeCount = n
+	self.deleteStrokeChanged:Fire(n)
+end
+
+------------------------------------------------------------------------
 -- Counts
 ------------------------------------------------------------------------
 function TerrainState:GetNodeCount(): number
@@ -573,7 +1000,7 @@ return TerrainState
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX4">
+		<Item class="ModuleScript" referent="RBX5">
 			<Properties>
 				<string name="Name">TriangleEngine</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -721,7 +1148,425 @@ return TriangleEngine
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX5">
+		<Item class="ModuleScript" referent="RBX6">
+			<Properties>
+				<string name="Name">SubdivisionEngine</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	SubdivisionEngine
+	Pure math for triangle subdivision.
+
+	Given a triangle (A, B, C) and an increment K (>= 1), splits each edge
+	into K+1 segments, producing a triangular grid of (K+2)*(K+1)/2 vertices
+	and (K+1)^2 sub-triangles.
+
+	Increment | segments/edge | sub-triangles
+	    1     |       2       |       4
+	    2     |       3       |       9
+	    3     |       4       |      16
+	    5     |       6       |      36
+	   50     |      51       |    2601
+
+	Returns:
+		vertices: { Vector3 } -- 1-indexed list of new vertex positions
+		triangles: { { number, number, number } } -- triples of indices into `vertices`,
+			wound consistently with the parent triangle (A, B, C order)
+]]
+
+local SubdivisionEngine = {}
+
+function SubdivisionEngine.subdivide(A: Vector3, B: Vector3, C: Vector3, increment: number)
+	local K = math.max(1, math.floor(increment))
+	local S = K + 1
+
+	local vertices: { Vector3 } = {}
+	local indexAt: { [number]: { [number]: number } } = {}
+
+	for r = 0, S do
+		indexAt[r] = {}
+		for c = 0, r do
+			local aA = (S - r) / S
+			local aB = (r - c) / S
+			local aC = c / S
+			local pos = A * aA + B * aB + C * aC
+			table.insert(vertices, pos)
+			indexAt[r][c] = #vertices
+		end
+	end
+
+	local triangles: { { number } } = {}
+	for r = 0, S - 1 do
+		for c = 0, r do
+			-- "Up" triangle (always present) — same winding as parent
+			table.insert(triangles, { indexAt[r][c], indexAt[r + 1][c], indexAt[r + 1][c + 1] })
+			-- "Down" triangle (only when c < r) — also same winding as parent
+			if c < r then
+				table.insert(triangles, { indexAt[r][c], indexAt[r + 1][c + 1], indexAt[r][c + 1] })
+			end
+		end
+	end
+
+	-- Edge node lists, ordered from first corner -> second corner. Each list
+	-- contains S+1 vertex indices, including both endpoints. Used by callers
+	-- to re-fan neighboring triangles so they share edge nodes (no T-junctions).
+	local edges = { AB = {}, BC = {}, CA = {} }
+	for r = 0, S do
+		table.insert(edges.AB, indexAt[r][0])  -- A -> B: column 0 walking down
+	end
+	for c = 0, S do
+		table.insert(edges.BC, indexAt[S][c])  -- B -> C: bottom row walking right
+	end
+	for r = S, 0, -1 do
+		table.insert(edges.CA, indexAt[r][r])  -- C -> A: diagonal walking up
+	end
+
+	return vertices, triangles, edges
+end
+
+-- Helper: returns a table of corner-vertex indices in the returned vertex array.
+-- Useful for callers that want to reuse the original triangle's three corner nodeIds.
+function SubdivisionEngine.cornerIndices(increment: number)
+	local K = math.max(1, math.floor(increment))
+	local S = K + 1
+	-- Index of (r, c) in the 1-indexed flat array equals: 1 + sum_{r'=0..r-1}(r'+1) + c
+	-- = 1 + r*(r+1)/2 + c
+	local function idx(r: number, c: number): number
+		return 1 + r * (r + 1) / 2 + c
+	end
+	return {
+		A = idx(0, 0),
+		B = idx(S, 0),
+		C = idx(S, S),
+	}
+end
+
+return SubdivisionEngine
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX7">
+			<Properties>
+				<string name="Name">MaterialPresets</string>
+				<ProtectedString name="Source"><![CDATA[--[[
+	MaterialPresets
+	A user-managed library of named (color + material) pairs. Stored via
+	plugin:SetSetting so presets persist across all workspaces the user opens
+	(it's a personal library, not per-game state).
+
+	Wire:
+	  local presets = MaterialPresets.new(plugin)
+	  presets.changed:Connect(function() refreshUI() end)
+	  presets:Add("Stone", Color3.fromRGB(100,100,100), Enum.Material.Rock)
+
+	On first run, seeds 6 sensible defaults so the dropdown isn't empty.
+]]
+
+local HttpService = game:GetService("HttpService")
+local Signal = require(script.Parent.Signal)
+
+export type Preset = {
+	id: string,
+	name: string,
+	color: Color3,
+	material: Enum.Material,
+}
+
+local SETTING_KEY = "TT_MaterialPresets_v1"
+
+local DEFAULT_PRESETS = {
+	{ name = "Grass",  color = Color3.fromRGB( 74, 124,  63), material = Enum.Material.Grass },
+	{ name = "Dirt",   color = Color3.fromRGB( 85,  65,  40), material = Enum.Material.Ground },
+	{ name = "Stone",  color = Color3.fromRGB(110, 110, 110), material = Enum.Material.Rock },
+	{ name = "Sand",   color = Color3.fromRGB(200, 180, 140), material = Enum.Material.Sand },
+	{ name = "Snow",   color = Color3.fromRGB(220, 220, 230), material = Enum.Material.Snow },
+	{ name = "Water",  color = Color3.fromRGB( 50,  90, 140), material = Enum.Material.Water },
+}
+
+local MaterialPresets = {}
+MaterialPresets.__index = MaterialPresets
+
+function MaterialPresets.new(plugin: Plugin)
+	local self = setmetatable({}, MaterialPresets)
+	self._plugin = plugin
+	self._presets = {} :: { Preset }
+	self._nextId = 1
+	self.changed = Signal.new()
+	self:_load()
+	return self
+end
+
+------------------------------------------------------------------------
+-- Persistence
+------------------------------------------------------------------------
+function MaterialPresets:_genId(): string
+	local id = string.format("preset_%04d", self._nextId)
+	self._nextId += 1
+	return id
+end
+
+function MaterialPresets:_load()
+	local raw = self._plugin:GetSetting(SETTING_KEY)
+	if type(raw) == "string" and #raw > 0 then
+		local ok, decoded = pcall(function()
+			return HttpService:JSONDecode(raw)
+		end)
+		if ok and type(decoded) == "table" then
+			for _, entry in decoded do
+				local c = entry.color or { 200, 200, 200 }
+				-- Enum.Material[X] THROWS on unknown names rather than
+				-- returning nil, so a single corrupted setting would crash
+				-- _load mid-loop and silently truncate the user's library.
+				-- pcall it and fall back to Plastic on any failure.
+				local mat = Enum.Material.Plastic
+				if type(entry.material) == "string" then
+					local okMat, m = pcall(function()
+						return (Enum.Material :: any)[entry.material]
+					end)
+					if okMat and m then mat = m end
+				end
+				local preset: Preset = {
+					id = entry.id or self:_genId(),
+					name = entry.name or "Untitled",
+					color = Color3.fromRGB(c[1] or 200, c[2] or 200, c[3] or 200),
+					material = mat,
+				}
+				table.insert(self._presets, preset)
+
+				-- Keep the id counter ahead of any loaded ids.
+				local n = tonumber(string.match(preset.id, "preset_(%d+)"))
+				if n and n >= self._nextId then
+					self._nextId = n + 1
+				end
+			end
+			return
+		end
+	end
+
+	-- First run: seed defaults. We bypass change firing during seeding and
+	-- save once at the end.
+	for _, d in DEFAULT_PRESETS do
+		local id = self:_genId()
+		table.insert(self._presets, {
+			id = id,
+			name = d.name,
+			color = d.color,
+			material = d.material,
+		})
+	end
+	self:_save()
+end
+
+function MaterialPresets:_save()
+	local serialized = {}
+	for _, p in self._presets do
+		table.insert(serialized, {
+			id = p.id,
+			name = p.name,
+			color = {
+				math.round(p.color.R * 255),
+				math.round(p.color.G * 255),
+				math.round(p.color.B * 255),
+			},
+			material = p.material.Name,
+		})
+	end
+	local ok, encoded = pcall(function()
+		return HttpService:JSONEncode(serialized)
+	end)
+	if ok then
+		self._plugin:SetSetting(SETTING_KEY, encoded)
+	else
+		warn("[TriTerrain] Failed to serialize material presets:", encoded)
+	end
+end
+
+------------------------------------------------------------------------
+-- CRUD
+------------------------------------------------------------------------
+function MaterialPresets:Add(name: string, color: Color3, material: Enum.Material): string
+	local id = self:_genId()
+	table.insert(self._presets, { id = id, name = name, color = color, material = material })
+	self:_save()
+	self.changed:Fire()
+	return id
+end
+
+function MaterialPresets:Update(id: string, fields: { name: string?, color: Color3?, material: Enum.Material? })
+	for _, p in self._presets do
+		if p.id == id then
+			if fields.name ~= nil then p.name = fields.name end
+			if fields.color ~= nil then p.color = fields.color end
+			if fields.material ~= nil then p.material = fields.material end
+			self:_save()
+			self.changed:Fire()
+			return
+		end
+	end
+end
+
+function MaterialPresets:Remove(id: string)
+	for i, p in self._presets do
+		if p.id == id then
+			table.remove(self._presets, i)
+			self:_save()
+			self.changed:Fire()
+			return
+		end
+	end
+end
+
+function MaterialPresets:Get(id: string): Preset?
+	for _, p in self._presets do
+		if p.id == id then return p end
+	end
+	return nil
+end
+
+function MaterialPresets:GetAll(): { Preset }
+	return self._presets
+end
+
+------------------------------------------------------------------------
+-- Lookup by exact (color + material) match. Used by UI to figure out
+-- which preset (if any) corresponds to the current paint settings, so the
+-- preset dropdown can label itself with the matching preset's name.
+------------------------------------------------------------------------
+local function colorsApproxEqual(a: Color3, b: Color3): boolean
+	-- 1/255 tolerance is about the precision we get back from RGB roundtrips.
+	local tol = 1 / 255 + 1e-4
+	return math.abs(a.R - b.R) < tol
+		and math.abs(a.G - b.G) < tol
+		and math.abs(a.B - b.B) < tol
+end
+
+function MaterialPresets:FindByAppearance(color: Color3, material: Enum.Material): Preset?
+	for _, p in self._presets do
+		if p.material == material and colorsApproxEqual(p.color, color) then
+			return p
+		end
+	end
+	return nil
+end
+
+------------------------------------------------------------------------
+-- Export (human-readable JSON)
+--
+-- Format: a JSON array, one preset per line. Pretty-printed manually
+-- (HttpService:JSONEncode produces compact one-line output) so it's
+-- copy-paste-friendly.
+--
+-- Example output:
+--   [
+--     { "name": "Grass", "color": [74, 124, 63], "material": "Grass" },
+--     { "name": "Dirt",  "color": [85, 65, 40],  "material": "Ground" }
+--   ]
+------------------------------------------------------------------------
+function MaterialPresets:ExportToJSON(): string
+	local lines = { "[" }
+	local count = #self._presets
+	for i, p in self._presets do
+		-- Defer string escaping to HttpService for safety (handles quotes,
+		-- backslashes, unicode etc).
+		local nameJson = HttpService:JSONEncode(p.name)
+		local matJson = HttpService:JSONEncode(p.material.Name)
+		local r = math.round(p.color.R * 255)
+		local g = math.round(p.color.G * 255)
+		local b = math.round(p.color.B * 255)
+		local trail = if i < count then "," else ""
+		table.insert(lines, string.format(
+			'  { "name": %s, "color": [%d, %d, %d], "material": %s }%s',
+			nameJson, r, g, b, matJson, trail
+		))
+	end
+	table.insert(lines, "]")
+	return table.concat(lines, "\n")
+end
+
+------------------------------------------------------------------------
+-- Import (parses JSON exported by ExportToJSON, or any structurally
+-- equivalent JSON array).
+--
+-- `replace = true` clears the existing library before importing.
+-- `replace = false` appends.
+--
+-- Returns (importedCount, errorMessage). If errorMessage is non-nil,
+-- nothing was imported (validate-then-apply, no partial state).
+------------------------------------------------------------------------
+function MaterialPresets:ImportFromJSON(text: string, replace: boolean): (number, string?)
+	if type(text) ~= "string" or #text:gsub("%s", "") == 0 then
+		return 0, "Empty input."
+	end
+
+	local ok, decoded = pcall(function()
+		return HttpService:JSONDecode(text)
+	end)
+	if not ok then
+		return 0, "Invalid JSON: " .. tostring(decoded):match("[^\n]+")
+	end
+	if type(decoded) ~= "table" then
+		return 0, "Expected a JSON array of presets."
+	end
+
+	-- Validate every entry up-front before we mutate any state.
+	local staged: { Preset } = {}
+	for i, entry in decoded do
+		if type(entry) ~= "table" then
+			return 0, string.format("Entry #%d is not an object.", i)
+		end
+		if type(entry.name) ~= "string" or #entry.name == 0 then
+			return 0, string.format("Entry #%d is missing a non-empty 'name'.", i)
+		end
+		if type(entry.color) ~= "table" then
+			return 0, string.format("Entry #%d is missing 'color' (expected [r, g, b]).", i)
+		end
+		local r = entry.color[1]
+		local g = entry.color[2]
+		local b = entry.color[3]
+		if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then
+			return 0, string.format("Entry #%d has invalid 'color' values.", i)
+		end
+		if type(entry.material) ~= "string" then
+			return 0, string.format("Entry #%d is missing 'material' (expected enum name).", i)
+		end
+		-- Enum.Material[X] throws on unknown names — pcall so an import with
+		-- one bad material returns a clean error instead of a Lua traceback.
+		local okMat, mat = pcall(function()
+			return (Enum.Material :: any)[entry.material]
+		end)
+		if not okMat or not mat then
+			return 0, string.format("Entry #%d uses unknown material '%s'.", i, entry.material)
+		end
+
+		table.insert(staged, {
+			id = "",  -- will be assigned below
+			name = entry.name,
+			color = Color3.fromRGB(
+				math.clamp(math.round(r), 0, 255),
+				math.clamp(math.round(g), 0, 255),
+				math.clamp(math.round(b), 0, 255)
+			),
+			material = mat,
+		})
+	end
+
+	if replace then
+		table.clear(self._presets)
+	end
+
+	for _, entry in staged do
+		entry.id = self:_genId()
+		table.insert(self._presets, entry)
+	end
+
+	self:_save()
+	self.changed:Fire()
+	return #staged, nil
+end
+
+return MaterialPresets
+]]></ProtectedString>
+			</Properties>
+		</Item>
+		<Item class="ModuleScript" referent="RBX8">
 			<Properties>
 				<string name="Name">NodeManager</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -734,6 +1579,7 @@ local CollectionService = game:GetService("CollectionService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 local TriangleEngine = require(script.Parent.TriangleEngine)
+local SubdivisionEngine = require(script.Parent.SubdivisionEngine)
 
 local TAG_PREFIX = "TT_"
 local ROOT_NAME = "TriangleTerrain"
@@ -831,6 +1677,132 @@ function NodeManager:LoadFromWorkspace()
 
 	self._state:SyncIdCounters()
 	self._state.stateLoaded:Fire()
+
+	-- Bind safety-net folder watchers ONCE per session. These catch
+	-- destructions we didn't drive ourselves — e.g. user deletes a node or
+	-- triangle from the Studio Explorer / hits Delete on a selected
+	-- TT_Triangles model. Without these, our state map would still claim
+	-- the entity exists and hover/click/sculpt would silently misbehave.
+	-- For plugin-driven deletes (DeleteNode/DeleteTriangle) the listener
+	-- runs synchronously during Parent = nil and unregisters first; the
+	-- subsequent UnregisterNode/Triangle call is then a no-op (idempotent).
+	self:_bindFolderWatchers()
+end
+
+function NodeManager:_bindFolderWatchers()
+	if self._folderWatchersBound then return end
+	self._folderWatchersBound = true
+
+	self._nodesFolder.ChildRemoved:Connect(function(child)
+		if not child:IsA("BasePart") then return end
+		local nodeId = child:GetAttribute("NodeId") or child.Name
+		local nodeData = self._state.nodes[nodeId]
+		-- Identity check: only react if the part that left IS the one we
+		-- track for this id (defensive against id collisions or duplicate
+		-- parts being re-parented around).
+		if nodeData and nodeData.part == child then
+			if self._moveConns[nodeId] then
+				self._moveConns[nodeId]:Disconnect()
+				self._moveConns[nodeId] = nil
+			end
+			self._state:UnregisterNode(nodeId)
+		end
+	end)
+
+	self._meshFolder.ChildRemoved:Connect(function(child)
+		if not child:IsA("Model") then return end
+		local triId = child:GetAttribute("TriId") or child.Name
+		local triData = self._state.triangles[triId]
+		if triData and triData.model == child then
+			self._state:UnregisterTriangle(triId)
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- Reconcile in-memory state with what's actually in the workspace folders.
+--
+-- Why this exists: when the user undoes a delete, ChangeHistoryService
+-- restores the Parts/Models in workspace, but our self._state.nodes /
+-- .triangles maps don't know about the resurrection. This walks the folders
+-- and adds entries for instances that came back, and removes entries for
+-- instances that disappeared (e.g. after a redo of a delete).
+--
+-- Diff-based so it's cheap on no-ops and doesn't re-fire every signal for
+-- every existing item every time the user touches Ctrl+Z.
+------------------------------------------------------------------------
+-- Note: this resync intentionally does NOT push part.Position back into
+-- state.position for already-known nodes. The _watchNodeMovement listener
+-- fires synchronously when ChangeHistoryService restores a sculpt-undo's
+-- positions, so state catches up there. Doing it again here would just be
+-- redundant work on every undo (and there's no Studio path that mutates
+-- Position without firing the property-changed signal).
+function NodeManager:ResyncFromWorkspace()
+	self:EnsureFolders()
+
+	-- Snapshot what's in the workspace right now, by id.
+	local presentNodes: { [string]: BasePart } = {}
+	for _, part in self._nodesFolder:GetChildren() do
+		if part:IsA("BasePart") then
+			local nodeId = part:GetAttribute("NodeId") or part.Name
+			presentNodes[nodeId] = part
+		end
+	end
+
+	local presentTris: { [string]: Model } = {}
+	for _, model in self._meshFolder:GetChildren() do
+		if model:IsA("Model") then
+			local triId = model:GetAttribute("TriId") or model.Name
+			presentTris[triId] = model
+		end
+	end
+
+	-- Drop state entries whose instance is no longer present (redo-of-delete).
+	-- Triangles first so triangle-removed signals fire before their referenced
+	-- nodes potentially go away.
+	for id in self._state.triangles do
+		if not presentTris[id] then
+			self._state:UnregisterTriangle(id)
+		end
+	end
+	for id in self._state.nodes do
+		if not presentNodes[id] then
+			-- Also drop the move watcher so a later restoration re-binds cleanly.
+			if self._moveConns[id] then
+				self._moveConns[id]:Disconnect()
+				self._moveConns[id] = nil
+			end
+			self._state:UnregisterNode(id)
+		end
+	end
+
+	-- Add state entries for instances that reappeared (undo-of-delete).
+	for id, part in presentNodes do
+		if not self._state.nodes[id] then
+			self._state:RegisterNode(id, part, part.Position)
+			self:_watchNodeMovement(id, part)
+		end
+	end
+	for id, model in presentTris do
+		if not self._state.triangles[id] then
+			local nodeA = model:GetAttribute("NodeA")
+			local nodeB = model:GetAttribute("NodeB")
+			local nodeC = model:GetAttribute("NodeC")
+			local colorAttr = model:GetAttribute("Color")
+			local matAttr = model:GetAttribute("Material")
+
+			local color = if typeof(colorAttr) == "Color3" then colorAttr else Color3.fromRGB(74, 124, 63)
+			local material = Enum.Material.Grass
+			if matAttr then
+				local ok, mat = pcall(function() return Enum.Material[matAttr] end)
+				if ok and mat then material = mat end
+			end
+
+			if nodeA and nodeB and nodeC then
+				self._state:RegisterTriangle(id, model, nodeA, nodeB, nodeC, color, material)
+			end
+		end
+	end
 end
 
 ------------------------------------------------------------------------
@@ -891,8 +1863,15 @@ function NodeManager:DeleteNode(nodeId: string)
 		self._moveConns[nodeId] = nil
 	end
 
+	-- IMPORTANT: detach via Parent = nil rather than :Destroy(). :Destroy()
+	-- permanently locks the Parent property, so ChangeHistoryService can record
+	-- the deletion but Roblox refuses to re-parent on undo (warns "Parent
+	-- property of X is locked" and the visual undo silently fails). Using
+	-- Parent = nil leaves the instance restorable; ChangeHistoryService keeps a
+	-- reference until the entry falls out of the undo stack, then the GC
+	-- reclaims it.
 	if nodeData.part and nodeData.part.Parent then
-		nodeData.part:Destroy()
+		nodeData.part.Parent = nil
 	end
 
 	self._state:UnregisterNode(nodeId)
@@ -919,7 +1898,7 @@ end
 ------------------------------------------------------------------------
 -- Triangle CRUD
 ------------------------------------------------------------------------
-function NodeManager:CreateTriangle(nodeA: string, nodeB: string, nodeC: string): string?
+function NodeManager:CreateTriangle(nodeA: string, nodeB: string, nodeC: string, colorOverride: Color3?, materialOverride: Enum.Material?, suppressRecording: boolean?): string?
 	local nA = self._state.nodes[nodeA]
 	local nB = self._state.nodes[nodeB]
 	local nC = self._state.nodes[nodeC]
@@ -937,11 +1916,11 @@ function NodeManager:CreateTriangle(nodeA: string, nodeB: string, nodeC: string)
 	end
 
 	self:EnsureFolders()
-	local recording = ChangeHistoryService:TryBeginRecording("DrawTriangle")
+	local recording = if suppressRecording then nil else ChangeHistoryService:TryBeginRecording("DrawTriangle")
 
 	local triId = self._state:GenerateTriId()
-	local color = self._state.settings.paintColor
-	local material = self._state.settings.paintMaterial
+	local color = colorOverride or self._state.settings.paintColor
+	local material = materialOverride or self._state.settings.paintMaterial
 	local thickness = self._state.settings.triangleThickness
 
 	local w1, w2 = TriangleEngine.draw(nA.position, nB.position, nC.position, thickness)
@@ -978,11 +1957,323 @@ function NodeManager:DeleteTriangle(triId: string)
 	local triData = self._state.triangles[triId]
 	if not triData then return end
 
+	-- See note in DeleteNode about Parent = nil vs :Destroy() — same reason
+	-- here. :Destroy() locks Parent and breaks Studio's undo for this model.
 	if triData.model and triData.model.Parent then
-		triData.model:Destroy()
+		triData.model.Parent = nil
 	end
 
 	self._state:UnregisterTriangle(triId)
+end
+
+------------------------------------------------------------------------
+-- Delete a triangle and any of its 3 vertex nodes that are no longer
+-- referenced by any other triangle (orphan cleanup).
+--
+-- Used by Delete mode when the "Delete Nodes" option is on, so users can
+-- tear down triangulated areas without leaving stray dangling nodes
+-- behind. Inner DeleteNode calls' own ChangeHistory recordings get
+-- swallowed by any outer recording (e.g. the Delete-stroke recording in
+-- InputHandler), so the whole sweep stays one undo step.
+------------------------------------------------------------------------
+function NodeManager:DeleteTriangleAndOrphans(triId: string)
+	local triData = self._state.triangles[triId]
+	if not triData then return end
+
+	-- Snapshot the vertex IDs *before* deleting — UnregisterTriangle wipes
+	-- the row from state.triangles.
+	local vertexIds = { triData.nodeA, triData.nodeB, triData.nodeC }
+
+	self:DeleteTriangle(triId)
+
+	for _, nodeId in vertexIds do
+		local connected = self._state:GetConnectedTriangles(nodeId)
+		if #connected == 0 then
+			self:DeleteNode(nodeId)
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Batch delete: nodes + triangles in one undoable step.
+--
+-- Wraps the whole batch in one ChangeHistoryService recording so:
+--   * triangle-only deletes get an undo entry (DeleteTriangle alone doesn't
+--     record on its own)
+--   * node deletes don't produce N separate undo steps
+-- Inner DeleteNode/DeleteTriangle calls' own TryBeginRecording will return
+-- nil while ours is in progress and skip their own FinishRecording.
+------------------------------------------------------------------------
+function NodeManager:DeleteMany(nodeIds: { string }, triIds: { string })
+	if #nodeIds == 0 and #triIds == 0 then return end
+
+	local recording = ChangeHistoryService:TryBeginRecording("DeleteSelected")
+
+	-- Snapshot defensively; deletes can mutate caller-owned tables (e.g.
+	-- selectedNodes / selectedTriangles get cleared by SelectNode(nil)
+	-- elsewhere, and DeleteNode cascades into connected-triangle deletes).
+	local nodeSnapshot = table.clone(nodeIds)
+	local triSnapshot = table.clone(triIds)
+
+	for _, nodeId in nodeSnapshot do
+		self:DeleteNode(nodeId)
+	end
+	for _, triId in triSnapshot do
+		self:DeleteTriangle(triId)
+	end
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+------------------------------------------------------------------------
+-- Subdivision
+------------------------------------------------------------------------
+-- Splits a triangle into (increment+1)^2 sub-triangles. Reuses existing
+-- nodes within MERGE_THRESHOLD studs so adjacent subdivisions share edge
+-- nodes cleanly. Inherits the original triangle's color/material and tags
+-- on the new corner nodes (existing tags on the 3 original corners are
+-- preserved automatically since those nodes are reused).
+local SUBDIV_MERGE_THRESHOLD = 0.05  -- studs
+
+function NodeManager:SubdivideTriangle(triId: string, increment: number): boolean
+	local triData = self._state.triangles[triId]
+	if not triData then return false end
+
+	local nA = self._state.nodes[triData.nodeA]
+	local nB = self._state.nodes[triData.nodeB]
+	local nC = self._state.nodes[triData.nodeC]
+	if not nA or not nB or not nC then return false end
+
+	local K = math.max(1, math.floor(increment))
+	local origA, origB, origC = triData.nodeA, triData.nodeB, triData.nodeC
+
+	self:EnsureFolders()
+	local recording = ChangeHistoryService:TryBeginRecording("SubdivideTriangle")
+
+	local color = triData.color
+	local material = triData.material
+
+	-- Collect tags shared by all three corners — propagate to new nodes.
+	local sharedTags = self:_intersectTags(origA, origB, origC)
+
+	local verts, tris, edges = SubdivisionEngine.subdivide(nA.position, nB.position, nC.position, K)
+	local corners = SubdivisionEngine.cornerIndices(K)
+
+	-- Map vertex index -> nodeId. Seed the 3 corners with the existing nodeIds
+	-- so we never accidentally create duplicates at A/B/C.
+	local nodeIdAt: { [number]: string } = {}
+	nodeIdAt[corners.A] = origA
+	nodeIdAt[corners.B] = origB
+	nodeIdAt[corners.C] = origC
+
+	-- For each non-corner vertex, look for an existing node within threshold.
+	-- Otherwise create a new one.
+	local thresholdSq = SUBDIV_MERGE_THRESHOLD * SUBDIV_MERGE_THRESHOLD
+	for vi, pos in verts do
+		if nodeIdAt[vi] then continue end
+
+		local foundId: string? = nil
+		for nodeId, nodeData in self._state.nodes do
+			local d = nodeData.position - pos
+			if d:Dot(d) <= thresholdSq then
+				foundId = nodeId
+				break
+			end
+		end
+
+		if foundId then
+			nodeIdAt[vi] = foundId
+		else
+			local newId = self:_createNodeRaw(pos, sharedTags)
+			nodeIdAt[vi] = newId
+		end
+	end
+
+	-- Identify edge-neighbors BEFORE deleting anything, so we can re-fan them
+	-- against the new subdivided edges. Only handles neighbors that share two
+	-- of T1's three ORIGINAL corners (a full edge). Mixed-resolution borders
+	-- where the neighbor was already subdivided into a finer fan are left
+	-- alone — same-increment subdivision still aligns via the snap-merge above.
+	local neighbors = self:_findEdgeNeighbors(triId, origA, origB, origC)
+
+	-- Build the edge node-id lists in T1's canonical order (A->B, B->C, C->A).
+	local function mapEdge(idxList: { number }): { string }
+		local out = {}
+		for _, vi in idxList do
+			table.insert(out, nodeIdAt[vi])
+		end
+		return out
+	end
+	local edgeNodes = {
+		AB = mapEdge(edges.AB),
+		BC = mapEdge(edges.BC),
+		CA = mapEdge(edges.CA),
+	}
+
+	-- Delete the original triangle BEFORE creating new ones.
+	self:DeleteTriangle(triId)
+
+	-- Re-fan each edge neighbor so it shares the new subdivision nodes.
+	for _, n in neighbors do
+		local list = edgeNodes[n.edge]
+		if n.reversed then
+			list = self:_reversedList(list)
+		end
+		self:_fanReplaceTriangle(n.triId, n.apex, list)
+	end
+
+	local created = 0
+	for _, tri in tris do
+		local idA = nodeIdAt[tri[1]]
+		local idB = nodeIdAt[tri[2]]
+		local idC = nodeIdAt[tri[3]]
+		if idA and idB and idC then
+			local newId = self:CreateTriangle(idA, idB, idC, color, material, true)
+			if newId then created += 1 end
+		end
+	end
+
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+
+	-- Refresh tags so any newly-introduced shared tags appear in the bar.
+	if #sharedTags > 0 then
+		self:RefreshTagList()
+	end
+
+	return created > 0
+end
+
+-- Find triangles that share exactly one full edge with the triangle defined
+-- by (A, B, C). Returns a list of records describing each neighbor:
+--   { triId, apex (the non-shared nodeId), edge ("AB"|"BC"|"CA"),
+--     reversed (true if the neighbor walks the shared edge opposite to T1) }
+function NodeManager:_findEdgeNeighbors(triId: string, A: string, B: string, C: string)
+	local cornerSet = { [A] = true, [B] = true, [C] = true }
+	local result = {}
+
+	for otherId, other in self._state.triangles do
+		if otherId == triId then continue end
+
+		local refs = { other.nodeA, other.nodeB, other.nodeC }
+		local apexPos: number? = nil
+		local sharedCount = 0
+		for i, r in refs do
+			if cornerSet[r] then
+				sharedCount += 1
+			else
+				apexPos = i
+			end
+		end
+
+		if sharedCount ~= 2 or apexPos == nil then continue end
+
+		-- In a 3-vertex triangle, the edge OPPOSITE the apex (in winding
+		-- order) is (refs[apexPos+1], refs[apexPos+2]) cyclically. That tells
+		-- us the direction the neighbor expects when we hand it edge nodes.
+		local apex = refs[apexPos]
+		local e1 = refs[(apexPos % 3) + 1]
+		local e2 = refs[((apexPos + 1) % 3) + 1]
+		if not (cornerSet[e1] and cornerSet[e2]) then continue end
+
+		local edge: string?, reversed: boolean
+		if e1 == A and e2 == B then edge, reversed = "AB", false
+		elseif e1 == B and e2 == A then edge, reversed = "AB", true
+		elseif e1 == B and e2 == C then edge, reversed = "BC", false
+		elseif e1 == C and e2 == B then edge, reversed = "BC", true
+		elseif e1 == C and e2 == A then edge, reversed = "CA", false
+		elseif e1 == A and e2 == C then edge, reversed = "CA", true
+		else continue end
+
+		table.insert(result, { triId = otherId, apex = apex, edge = edge, reversed = reversed })
+	end
+
+	return result
+end
+
+-- Replace a triangle with a fan of smaller triangles sharing `apex` and
+-- walking through `edgeList` (in winding order). Preserves the original
+-- triangle's color/material.
+function NodeManager:_fanReplaceTriangle(oldTriId: string, apex: string, edgeList: { string })
+	local old = self._state.triangles[oldTriId]
+	if not old then return end
+	if #edgeList < 2 then return end
+
+	local color = old.color
+	local material = old.material
+
+	self:DeleteTriangle(oldTriId)
+
+	for i = 1, #edgeList - 1 do
+		local a = apex
+		local b = edgeList[i]
+		local c = edgeList[i + 1]
+		if a ~= b and b ~= c and a ~= c then
+			self:CreateTriangle(a, b, c, color, material, true)
+		end
+	end
+end
+
+function NodeManager:_reversedList(list: { string }): { string }
+	local out = {}
+	for i = #list, 1, -1 do
+		table.insert(out, list[i])
+	end
+	return out
+end
+
+-- Internal: create a node Part without its own undo recording (caller handles it).
+function NodeManager:_createNodeRaw(position: Vector3, tags: { string }?): string
+	self:EnsureFolders()
+
+	local nodeId = self._state:GenerateNodeId()
+
+	local part = Instance.new("Part")
+	part.Name = nodeId
+	part.Shape = Enum.PartType.Ball
+	part.Size = Vector3.one * self._state.settings.nodeSize
+	part.Position = position
+	part.Anchored = true
+	part.CanCollide = false
+	part.CastShadow = false
+	part.Transparency = self._state.settings.nodeTransparency
+	part.Color = Color3.fromRGB(255, 255, 100)
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part:SetAttribute("NodeId", nodeId)
+	part.Parent = self._nodesFolder
+
+	if tags then
+		for _, tag in tags do
+			CollectionService:AddTag(part, TAG_PREFIX .. tag)
+		end
+	end
+
+	self._state:RegisterNode(nodeId, part, position)
+	self:_watchNodeMovement(nodeId, part)
+
+	return nodeId
+end
+
+function NodeManager:_intersectTags(nodeIdA: string, nodeIdB: string, nodeIdC: string): { string }
+	local a = self:GetNodeTags(nodeIdA)
+	local b = self:GetNodeTags(nodeIdB)
+	local c = self:GetNodeTags(nodeIdC)
+
+	local bSet, cSet = {}, {}
+	for _, t in b do bSet[t] = true end
+	for _, t in c do cSet[t] = true end
+
+	local result = {}
+	for _, t in a do
+		if bSet[t] and cSet[t] then
+			table.insert(result, t)
+		end
+	end
+	return result
 end
 
 function NodeManager:PaintTriangle(triId: string, color: Color3?, material: Enum.Material?)
@@ -1026,6 +2317,34 @@ function NodeManager:RemoveTagFromNode(nodeId: string, tagName: string)
 	if not nodeData then return end
 	CollectionService:RemoveTag(nodeData.part, TAG_PREFIX .. tagName)
 	self:RefreshTagList()
+end
+
+------------------------------------------------------------------------
+-- Batch tag operations: assign or unassign one tag across many nodes in a
+-- single undoable step. Without an outer recording, the "Add Tag" button
+-- on N selected nodes would create N separate undo entries (each
+-- CollectionService change is recorded individually by Studio).
+------------------------------------------------------------------------
+function NodeManager:AddTagToNodes(nodeIds: { string }, tagName: string)
+	if #nodeIds == 0 or #tagName == 0 then return end
+	local recording = ChangeHistoryService:TryBeginRecording("AddTag")
+	for _, nodeId in nodeIds do
+		self:AddTagToNode(nodeId, tagName)
+	end
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
+end
+
+function NodeManager:RemoveTagFromNodes(nodeIds: { string }, tagName: string)
+	if #nodeIds == 0 or #tagName == 0 then return end
+	local recording = ChangeHistoryService:TryBeginRecording("RemoveTag")
+	for _, nodeId in nodeIds do
+		self:RemoveTagFromNode(nodeId, tagName)
+	end
+	if recording then
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end
 end
 
 function NodeManager:GetNodeTags(nodeId: string): { string }
@@ -1279,7 +2598,7 @@ return NodeManager
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX6">
+		<Item class="ModuleScript" referent="RBX9">
 			<Properties>
 				<string name="Name">InputHandler</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -1290,6 +2609,27 @@ return NodeManager
 
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local Selection = game:GetService("Selection")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
+local SubdivisionEngine = require(script.Parent.SubdivisionEngine)
+local TriangleEngine = require(script.Parent.TriangleEngine)
+
+-- Sub-Divide always splits into the classic 1->4 (each edge bisected once).
+-- Was a configurable 1-50 in earlier versions; reverted in 0.5.0 because the
+-- single-step split + neighbor re-fan handles the common case cleanly and
+-- variable-resolution borders introduce T-junction problems.
+local SUBDIV_INCREMENT = 1
+
+-- Hover-highlight palette. Declared at module top so EVERY method can see them
+-- as upvalues. Previously these lived next to _ensureHoverHighlight (further
+-- down the file), but Luau locals are lexically scoped from their declaration
+-- onwards — methods defined above the declaration (like _updateHover) saw
+-- HOVER_COLOR_DELETE as a global and got `nil`, which fell back to blue. That
+-- silent fallback is exactly the "red highlight is not happening, it's blue"
+-- bug that 0.10.2 fixes.
+local HOVER_COLOR_DEFAULT = Color3.fromRGB(0, 162, 255)
+local HOVER_COLOR_DELETE = Color3.fromRGB(220, 60, 60)
 
 local InputHandler = {}
 InputHandler.__index = InputHandler
@@ -1307,10 +2647,39 @@ function InputHandler.new(state, nodeManager, mouse)
 	self._workPlane = nil
 	self._altHeld = false
 	self._sculpting = false
+	self._subdivPreview = nil :: Folder?
+	self._subdivPreviewKey = nil :: string?
+	-- Persistent highlights showing what's currently selected. One per
+	-- selected item, keyed by id ("node:<id>" or "tri:<id>") so we can
+	-- diff-rebuild instead of nuking + recreating every selection change.
+	self._selectionHighlights = {} :: { [string]: Highlight }
+	-- Outer ChangeHistory recording held for the duration of one sculpt
+	-- drag. Without this, each Heartbeat tick records its own entry, so a
+	-- 2-second stroke produces ~120 separate undo steps.
+	self._sculptRecording = nil
+	-- Same idea for Delete drag-strokes: one outer recording wraps every
+	-- triangle nuked between Button1Down and Button1Up so the whole sweep
+	-- collapses into one undo step.
+	self._deleteRecording = nil
+	self._deleting = false
+	self._deleteStrokeCount = 0
+	-- Connections kept open only during a delete drag — count every
+	-- nodeRemoved / triangleRemoved fire in the stroke window so the
+	-- panel's "Deleted: N" reflects ALL victims, including cascades from
+	-- DeleteNode (1 node click can wipe ~6 connected triangles + orphan
+	-- neighbors). Without this the counter undercounts and lies to the
+	-- user about how much disappeared.
+	self._deleteWatchConns = nil :: { RBXScriptConnection }?
 	return self
 end
 
 function InputHandler:Activate()
+	-- Safe to call after a Deactivate that closed an in-progress sculpt or
+	-- delete recording. Deactivate clears self._sculpting/_deleting and
+	-- nils both recording handles, so a fresh Activate doesn't inherit any
+	-- half-open ChangeHistoryService state. Double-Activate without
+	-- Deactivate would double-bind inputs — guarded against here too.
+	if self._active then return end
 	self._active = true
 	self:_bindInputs()
 end
@@ -1322,6 +2691,32 @@ function InputHandler:Deactivate()
 	self:_clearBrush()
 	self:_clearGhost()
 	self:_clearWorkPlane()
+	self:_clearSubdivPreview()
+	self:_clearSelectionHighlights()
+	-- If we deactivate mid-sculpt-stroke, close the open recording so it
+	-- doesn't leak (and so the partial stroke stays undoable).
+	if self._sculptRecording then
+		ChangeHistoryService:FinishRecording(self._sculptRecording, Enum.FinishRecordingOperation.Commit)
+		self._sculptRecording = nil
+	end
+	-- Same for an in-progress delete drag. Cancel if no actual deletes
+	-- happened (user pressed mouse over empty space then deactivated).
+	if self._deleteWatchConns then
+		for _, c in self._deleteWatchConns do c:Disconnect() end
+		self._deleteWatchConns = nil
+	end
+	if self._deleteRecording then
+		local op = if self._deleteStrokeCount > 0
+			then Enum.FinishRecordingOperation.Commit
+			else Enum.FinishRecordingOperation.Cancel
+		ChangeHistoryService:FinishRecording(self._deleteRecording, op)
+		self._deleteRecording = nil
+	end
+	self._deleting = false
+	if self._deleteStrokeCount > 0 then
+		self._deleteStrokeCount = 0
+		self._state:SetDeleteStrokeCount(0)
+	end
 end
 
 ------------------------------------------------------------------------
@@ -1340,6 +2735,9 @@ function InputHandler:_raycast(filterDescendants: { Instance }?, allowWorkPlane:
 	end
 	if self._workPlane and not allowWorkPlane then
 		table.insert(exclude, self._workPlane)
+	end
+	if self._subdivPreview then
+		table.insert(exclude, self._subdivPreview)
 	end
 	params.FilterDescendantsInstances = exclude
 	return workspace:Raycast(ray.Origin, ray.Direction * 5000, params)
@@ -1405,6 +2803,8 @@ function InputHandler:_onClick()
 		self:_handlePaintClick()
 	elseif mode == "Select" then
 		self:_handleSelectClick()
+	elseif mode == "Delete" then
+		self:_handleDeleteClick()
 	end
 	-- Sculpt is handled continuously via InputChanged
 end
@@ -1455,6 +2855,15 @@ end
 -- Draw mode
 ------------------------------------------------------------------------
 function InputHandler:_handleDrawClick()
+	if self._state.drawSubMode == "SubDivide" then
+		local _, triId = self:_raycastForTriangles()
+		if triId then
+			self._nodeManager:SubdivideTriangle(triId, SUBDIV_INCREMENT)
+			self:_clearSubdivPreview()
+		end
+		return
+	end
+
 	local _, nodeId = self:_raycastForNodes()
 	if nodeId then
 		self._state:ToggleDrawNode(nodeId)
@@ -1506,6 +2915,41 @@ function InputHandler:_handleSelectClick()
 end
 
 ------------------------------------------------------------------------
+-- Delete mode
+--
+-- Click deletes the hovered triangle. Holding the mouse opens a single
+-- ChangeHistoryService recording (see Button1Down handler below) so a
+-- whole sweep collapses into one undo step. The actual per-frame delete
+-- during a drag happens inside _updateHover so triangles can be picked
+-- off as the cursor moves over them — there's no need to re-click.
+------------------------------------------------------------------------
+function InputHandler:_handleDeleteClick()
+	local nodesEnabled = self._state.settings.deleteNodesEnabled
+
+	-- Same prefer-node-then-triangle priority as the hover handler so the
+	-- click and hover always agree on what's about to die.
+	-- The "Deleted: N" counter is bumped by nodeRemoved/triangleRemoved
+	-- subscriptions opened in Button1Down — no manual increments here so
+	-- cascades (DeleteNode killing 6 connected tris) get counted too.
+	if nodesEnabled then
+		local _, nodeId = self:_raycastForNodes()
+		if nodeId then
+			self._nodeManager:DeleteNode(nodeId)
+			return
+		end
+	end
+
+	local _, triId = self:_raycastForTriangles()
+	if triId then
+		if nodesEnabled then
+			self._nodeManager:DeleteTriangleAndOrphans(triId)
+		else
+			self._nodeManager:DeleteTriangle(triId)
+		end
+	end
+end
+
+------------------------------------------------------------------------
 -- Sculpt mode (continuous while mouse held)
 ------------------------------------------------------------------------
 function InputHandler:_handleSculptTick()
@@ -1533,59 +2977,202 @@ end
 
 ------------------------------------------------------------------------
 -- Work Plane (floating construction surface)
+--
+-- Visual layout (one Model rooted at TT_WorkPlane):
+--   * "Slab"        — the main translucent cyan plate (raycast target for
+--                     placing nodes in mid-air). Bottom surface is what
+--                     the user looks at, but the raycast uses the top.
+--   * "Edges"       — SelectionBox adornee'd to the slab for crisp,
+--                     always-readable borders no matter the view angle.
+--   * "CrossX"/"CrossZ" — thin Neon ribbons forming a "+" at the centre
+--                     so the user immediately sees where the camera
+--                     column intersects the plane.
+--   * "Label"       — SurfaceGui hovering on top of the slab showing the
+--                     live Y value (and "LOCKED" tag when locked), so the
+--                     user can read the plane's height directly in 3D.
+--
+-- When workPlaneLocked is true, the Y stays at workPlaneFixedY and the
+-- camera-relative Y offset is ignored. X/Z still snap to the grid under
+-- the camera so the plane stays useful as the user pans around.
 ------------------------------------------------------------------------
+local WORK_PLANE_SIZE = 512
+local WORK_PLANE_FILL = Color3.fromRGB(70, 190, 230)
+local WORK_PLANE_EDGE = Color3.fromRGB(120, 220, 255)
+local WORK_PLANE_LOCKED_EDGE = Color3.fromRGB(255, 200, 70)
+
+function InputHandler:_buildWorkPlane()
+	local model = Instance.new("Model")
+	model.Name = "TT_WorkPlane"
+
+	local slab = Instance.new("Part")
+	slab.Name = "Slab"
+	slab.Anchored = true
+	slab.CanCollide = false
+	slab.CanTouch = false
+	slab.CastShadow = false
+	slab.Transparency = 0.7
+	slab.Color = WORK_PLANE_FILL
+	slab.Material = Enum.Material.SmoothPlastic
+	slab.TopSurface = Enum.SurfaceType.Smooth
+	slab.BottomSurface = Enum.SurfaceType.Smooth
+	slab.Size = Vector3.new(WORK_PLANE_SIZE, 0.05, WORK_PLANE_SIZE)
+	slab.Parent = model
+
+	local texture = Instance.new("Texture")
+	texture.Face = Enum.NormalId.Top
+	texture.StudsPerTileU = self._state.settings.gridSize
+	texture.StudsPerTileV = self._state.settings.gridSize
+	texture.Transparency = 0.35
+	texture.Color3 = Color3.fromRGB(220, 240, 255)
+	texture.Parent = slab
+	self._workPlaneTexture = texture
+
+	local edges = Instance.new("SelectionBox")
+	edges.Name = "Edges"
+	edges.Adornee = slab
+	edges.Color3 = WORK_PLANE_EDGE
+	edges.LineThickness = 0.06
+	edges.SurfaceTransparency = 1
+	edges.Transparency = 0
+	edges.Parent = model
+	self._workPlaneEdges = edges
+
+	-- Centre crosshair — two thin neon ribbons. Slightly raised so they
+	-- don't z-fight with the slab top surface.
+	local function makeCrossArm(name, sizeVec)
+		local arm = Instance.new("Part")
+		arm.Name = name
+		arm.Anchored = true
+		arm.CanCollide = false
+		arm.CanTouch = false
+		arm.CanQuery = false
+		arm.CastShadow = false
+		arm.Material = Enum.Material.Neon
+		arm.Color = WORK_PLANE_EDGE
+		arm.Transparency = 0.3
+		arm.Size = sizeVec
+		arm.Parent = model
+		return arm
+	end
+	self._workPlaneCrossX = makeCrossArm("CrossX", Vector3.new(WORK_PLANE_SIZE * 0.18, 0.06, 0.18))
+	self._workPlaneCrossZ = makeCrossArm("CrossZ", Vector3.new(0.18, 0.06, WORK_PLANE_SIZE * 0.18))
+
+	-- Floating Y readout. Sized in studs (PixelsPerStud) so it reads at a
+	-- consistent physical size regardless of camera distance.
+	local labelHost = Instance.new("Part")
+	labelHost.Name = "LabelHost"
+	labelHost.Anchored = true
+	labelHost.CanCollide = false
+	labelHost.CanTouch = false
+	labelHost.CanQuery = false
+	labelHost.CastShadow = false
+	labelHost.Transparency = 1
+	labelHost.Size = Vector3.new(8, 0.05, 2)
+	labelHost.Parent = model
+
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Top
+	sg.LightInfluence = 0
+	sg.AlwaysOnTop = true
+	sg.PixelsPerStud = 50
+	sg.Parent = labelHost
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = "Y: 0.0"
+	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	lbl.TextStrokeTransparency = 0.2
+	lbl.TextStrokeColor3 = Color3.fromRGB(0, 30, 60)
+	lbl.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
+	lbl.TextScaled = true
+	lbl.Parent = sg
+
+	self._workPlaneLabelHost = labelHost
+	self._workPlaneLabel = lbl
+
+	model.Parent = workspace
+	self._workPlane = model
+	self._workPlaneSlab = slab
+end
+
 function InputHandler:_updateWorkPlane()
 	if not self._state.settings.workPlaneEnabled then
 		self:_clearWorkPlane()
 		return
 	end
 
-	if not self._workPlane then
-		self._workPlane = Instance.new("Part")
-		self._workPlane.Name = "TT_WorkPlane"
-		self._workPlane.Anchored = true
-		self._workPlane.CanCollide = false
-		self._workPlane.CastShadow = false
-		self._workPlane.Transparency = 0.85
-		self._workPlane.Color = Color3.fromRGB(140, 180, 220)
-		self._workPlane.Material = Enum.Material.SmoothPlastic
-		self._workPlane.TopSurface = Enum.SurfaceType.Smooth
-		self._workPlane.BottomSurface = Enum.SurfaceType.Smooth
-		self._workPlane.Size = Vector3.new(512, 0.05, 512)
-		self._workPlane.Parent = workspace
-
-		local texture = Instance.new("Texture")
-		texture.Face = Enum.NormalId.Top
-		texture.StudsPerTileU = self._state.settings.gridSize
-		texture.StudsPerTileV = self._state.settings.gridSize
-		texture.Transparency = 0.6
-		texture.Color3 = Color3.fromRGB(180, 210, 240)
-		texture.Parent = self._workPlane
-		self._workPlaneTexture = texture
+	if not self._workPlane or not self._workPlane.Parent then
+		self:_buildWorkPlane()
 	end
 
 	local cam = workspace.CurrentCamera
 	if not cam then return end
 
+	local s = self._state.settings
 	local camPos = cam.CFrame.Position
-	local yOffset = self._state.settings.workPlaneYOffset
-	local grid = self._state.settings.gridSize
+	local grid = s.gridSize
 
 	local snapX = math.round(camPos.X / grid) * grid
 	local snapZ = math.round(camPos.Z / grid) * grid
-	self._workPlane.Position = Vector3.new(snapX, camPos.Y - yOffset, snapZ)
+
+	local y
+	if s.workPlaneLocked then
+		y = s.workPlaneFixedY
+	else
+		y = camPos.Y - s.workPlaneYOffset
+	end
+
+	local centre = Vector3.new(snapX, y, snapZ)
+	self._workPlaneSlab.Position = centre
+
+	-- Crosshair arms sit a hair above the slab top to avoid z-fighting.
+	local crossY = y + 0.04
+	self._workPlaneCrossX.Position = Vector3.new(snapX, crossY, snapZ)
+	self._workPlaneCrossZ.Position = Vector3.new(snapX, crossY, snapZ)
+
+	-- Label hovers a few studs above the centre so it never disappears
+	-- behind the slab when looking from below.
+	self._workPlaneLabelHost.Position = Vector3.new(snapX, y + 0.08, snapZ)
+
+	-- Edge color flips to amber when locked so the lock state is obvious
+	-- at a glance, even without looking at the panel.
+	local edgeColor = s.workPlaneLocked and WORK_PLANE_LOCKED_EDGE or WORK_PLANE_EDGE
+	self._workPlaneEdges.Color3 = edgeColor
+	self._workPlaneCrossX.Color = edgeColor
+	self._workPlaneCrossZ.Color = edgeColor
+
+	if self._workPlaneLabel then
+		self._workPlaneLabel.Text = string.format(
+			"%sY: %.1f",
+			if s.workPlaneLocked then "LOCKED  " else "",
+			y
+		)
+		self._workPlaneLabel.TextColor3 = if s.workPlaneLocked
+			then Color3.fromRGB(255, 220, 140)
+			else Color3.fromRGB(255, 255, 255)
+	end
 
 	if self._workPlaneTexture then
 		self._workPlaneTexture.StudsPerTileU = grid
 		self._workPlaneTexture.StudsPerTileV = grid
 	end
+
+	-- Broadcast live Y to the UI (throttled inside SetWorkPlaneCurrentY).
+	self._state:SetWorkPlaneCurrentY(y)
 end
 
 function InputHandler:_clearWorkPlane()
 	if self._workPlane then
 		self._workPlane:Destroy()
 		self._workPlane = nil
+		self._workPlaneSlab = nil
 		self._workPlaneTexture = nil
+		self._workPlaneEdges = nil
+		self._workPlaneCrossX = nil
+		self._workPlaneCrossZ = nil
+		self._workPlaneLabel = nil
+		self._workPlaneLabelHost = nil
 	end
 end
 
@@ -1653,48 +3240,250 @@ function InputHandler:_updateHover()
 
 	local mode = self._state.activeMode
 
-	if mode == "Place" or mode == "Draw" or mode == "Select" then
-		local part, nodeId = self:_raycastForNodes()
-		self:_setHoverHighlight(part)
-	elseif mode == "Paint" then
+	if mode == "Draw" and self._state.drawSubMode == "SubDivide" then
 		local model, triId = self:_raycastForTriangles()
+		if model and triId then
+			self:_setHoverHighlight(model)
+			self:_updateSubdivPreview(triId)
+		else
+			self:_clearHover()
+			self:_clearSubdivPreview()
+		end
+		return
+	else
+		-- Make sure preview disappears when leaving SubDivide mode.
+		if self._subdivPreview then
+			self:_clearSubdivPreview()
+		end
+	end
+
+	if mode == "Place" or mode == "Draw" then
+		local part, _ = self:_raycastForNodes()
+		self:_setHoverHighlight(part)
+	elseif mode == "Select" then
+		-- Select can target either nodes or triangles, so hover should reflect
+		-- whichever is under the cursor. Prefer nodes (smaller, more precise)
+		-- and fall back to the underlying triangle.
+		local part, _ = self:_raycastForNodes()
+		if part then
+			self:_setHoverHighlight(part)
+		else
+			local model, _ = self:_raycastForTriangles()
+			if model then
+				self:_setHoverHighlight(model)
+			else
+				self:_clearHover()
+			end
+		end
+	elseif mode == "Paint" then
+		local model, _ = self:_raycastForTriangles()
 		if model then
 			self:_setHoverHighlight(model)
+		else
+			self:_clearHover()
+		end
+	elseif mode == "Delete" then
+		-- Hover paints the target red so the user knows what'll die. If a
+		-- delete drag is in progress (mouse held), every new target the
+		-- cursor sweeps over also gets deleted in the same undo recording.
+		--
+		-- When "Delete Nodes" is on we prefer nodes over triangles (smaller
+		-- hit target, more precise), falling back to triangles — same
+		-- priority logic Select mode uses.
+		local nodesEnabled = self._state.settings.deleteNodesEnabled
+
+		-- Counter is bumped by nodeRemoved/triangleRemoved subscriptions in
+		-- the Button1Down handler — no manual SetDeleteStrokeCount here.
+		if nodesEnabled then
+			local part, nodeId = self:_raycastForNodes()
+			if part and nodeId then
+				self:_setHoverHighlight(part, HOVER_COLOR_DELETE)
+				if self._deleting then
+					-- DeleteNode cascades to its connected triangles already.
+					self._nodeManager:DeleteNode(nodeId)
+					self:_clearHover()
+				end
+				return
+			end
+		end
+
+		local model, triId = self:_raycastForTriangles()
+		if model and triId then
+			self:_setHoverHighlight(model, HOVER_COLOR_DELETE)
+			if self._deleting then
+				if nodesEnabled then
+					self._nodeManager:DeleteTriangleAndOrphans(triId)
+				else
+					self._nodeManager:DeleteTriangle(triId)
+				end
+				-- Triangle is gone now — kill the highlight this tick so it
+				-- doesn't briefly orphan onto the destroyed model.
+				self:_clearHover()
+			end
 		else
 			self:_clearHover()
 		end
 	elseif mode == "Sculpt" then
 		self:_clearHover()
 		self:_updateBrushCircle()
+	else
+		-- "Presets" or any unknown mode: pure UI, no world interaction.
+		self:_clearHover()
+		self:_clearBrush()
 	end
 end
 
-function InputHandler:_setHoverHighlight(target: Instance?)
+-- Build (or rebuild) the hover highlight. We parent it to workspace once and
+-- only ever change Adornee/Enabled, so the highlight's lifetime is decoupled
+-- from any specific instance it adorns. Without this, deleting a hovered
+-- triangle (e.g. during SubdivideTriangle) would destroy the highlight, and
+-- the next frame's reparent would throw "Parent property is locked". We also
+-- toggle Enabled instead of nilling Adornee, because a Highlight with
+-- Adornee=nil falls back to adorning its Parent — which would light up the
+-- entire workspace.
+-- (HOVER_COLOR_* constants live at the top of this file — see note there.)
+function InputHandler:_ensureHoverHighlight()
+	if self._hoverHighlight and self._hoverHighlight.Parent then
+		return
+	end
+	local h = Instance.new("Highlight")
+	h.Name = "TT_HoverHighlight"
+	h.FillTransparency = 0.7
+	h.OutlineTransparency = 0
+	h.OutlineColor = HOVER_COLOR_DEFAULT
+	h.FillColor = HOVER_COLOR_DEFAULT
+	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	h.Enabled = false
+	h.Parent = workspace
+	self._hoverHighlight = h
+end
+
+-- Optional `color` overrides the default blue. Used by Delete mode to
+-- signal "click and this dies" with a red fill, and bumps the fill
+-- transparency lower so the warning reads strongly.
+function InputHandler:_setHoverHighlight(target: Instance?, color: Color3?)
 	if not target then
 		self:_clearHover()
 		return
 	end
-
-	if not self._hoverHighlight then
-		self._hoverHighlight = Instance.new("Highlight")
-		self._hoverHighlight.FillTransparency = 0.7
-		self._hoverHighlight.OutlineTransparency = 0
-		self._hoverHighlight.OutlineColor = Color3.fromRGB(0, 162, 255)
-		self._hoverHighlight.FillColor = Color3.fromRGB(0, 162, 255)
-		self._hoverHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	-- Bail if the target is no longer in the data model (raced deletion).
+	if not target.Parent then
+		self:_clearHover()
+		return
 	end
 
+	self:_ensureHoverHighlight()
+	local c = color or HOVER_COLOR_DEFAULT
+	if self._hoverHighlight.FillColor ~= c then
+		self._hoverHighlight.FillColor = c
+		self._hoverHighlight.OutlineColor = c
+	end
+	-- Stronger fill for destructive (red) state so the user can't miss it.
+	local desiredFillT = if color == HOVER_COLOR_DELETE then 0.45 else 0.7
+	if self._hoverHighlight.FillTransparency ~= desiredFillT then
+		self._hoverHighlight.FillTransparency = desiredFillT
+	end
 	if self._hoverHighlight.Adornee ~= target then
 		self._hoverHighlight.Adornee = target
-		self._hoverHighlight.Parent = target
+	end
+	if not self._hoverHighlight.Enabled then
+		self._hoverHighlight.Enabled = true
 	end
 end
 
 function InputHandler:_clearHover()
-	if self._hoverHighlight then
-		self._hoverHighlight.Parent = nil
-		self._hoverHighlight.Adornee = nil
+	if self._hoverHighlight and self._hoverHighlight.Parent then
+		self._hoverHighlight.Enabled = false
 	end
+end
+
+------------------------------------------------------------------------
+-- Selection visualization
+--
+-- Two layers of feedback for selected nodes/triangles in Select mode:
+--   1. Our own gold Highlight overlays (always-on-top, depth-independent)
+--      so the user can see at a glance what's selected even through
+--      occluding geometry.
+--   2. Studio's native Selection service is also synced, so the user gets
+--      the familiar selection box + can see attributes/properties of the
+--      selected parts in Studio's Properties panel. (Answers the common
+--      question "is this selection like Studio's regular selection?" — yes,
+--      we mirror to it.)
+--
+-- Both are cleared when the user leaves Select mode or the plugin tool is
+-- deactivated, so they don't pollute the workspace.
+------------------------------------------------------------------------
+local SELECTION_COLOR = Color3.fromRGB(255, 200, 50)
+
+function InputHandler:_refreshSelectionHighlights()
+	-- Build the desired set of (key -> instance) for the current selection.
+	local desired: { [string]: Instance } = {}
+
+	if self._state.activeMode == "Select" then
+		for _, nodeId in self._state.selectedNodes do
+			local nd = self._state.nodes[nodeId]
+			if nd and nd.part and nd.part.Parent then
+				desired["node:" .. nodeId] = nd.part
+			end
+		end
+		for _, triId in self._state.selectedTriangles do
+			local td = self._state.triangles[triId]
+			if td and td.model and td.model.Parent then
+				desired["tri:" .. triId] = td.model
+			end
+		end
+	end
+
+	-- Drop highlights that are no longer wanted.
+	for key, hl in self._selectionHighlights do
+		if not desired[key] then
+			pcall(function() hl:Destroy() end)
+			self._selectionHighlights[key] = nil
+		end
+	end
+
+	-- Add highlights for newly-selected items.
+	for key, target in desired do
+		local existing = self._selectionHighlights[key]
+		if existing and existing.Parent then
+			if existing.Adornee ~= target then
+				existing.Adornee = target
+			end
+		else
+			local hl = Instance.new("Highlight")
+			hl.Name = "TT_SelectionHighlight"
+			hl.FillColor = SELECTION_COLOR
+			hl.OutlineColor = SELECTION_COLOR
+			hl.FillTransparency = 0.55
+			hl.OutlineTransparency = 0
+			hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			hl.Adornee = target
+			hl.Parent = workspace
+			self._selectionHighlights[key] = hl
+		end
+	end
+
+	-- Mirror to Studio's Selection. Replaces whatever the user had selected
+	-- before — that's intentional, since we own the active tool.
+	local studioPick: { Instance } = {}
+	for _, target in desired do
+		table.insert(studioPick, target)
+	end
+	pcall(function()
+		Selection:Set(studioPick)
+	end)
+end
+
+function InputHandler:_clearSelectionHighlights()
+	for key, hl in self._selectionHighlights do
+		pcall(function() hl:Destroy() end)
+		self._selectionHighlights[key] = nil
+	end
+	-- Only clear Studio's Selection if it's currently holding what we put
+	-- there; don't stomp on the user's selection from other tools.
+	pcall(function()
+		Selection:Set({})
+	end)
 end
 
 ------------------------------------------------------------------------
@@ -1740,6 +3529,108 @@ function InputHandler:_clearBrush()
 end
 
 ------------------------------------------------------------------------
+-- Sub-Divide preview (Draw mode, sub-mode = SubDivide)
+------------------------------------------------------------------------
+function InputHandler:_updateSubdivPreview(triId: string)
+	local triData = self._state.triangles[triId]
+	if not triData then
+		self:_clearSubdivPreview()
+		return
+	end
+
+	local key = triId
+	if self._subdivPreviewKey == key and self._subdivPreview then
+		return -- cached preview is still valid
+	end
+
+	local nA = self._state.nodes[triData.nodeA]
+	local nB = self._state.nodes[triData.nodeB]
+	local nC = self._state.nodes[triData.nodeC]
+	if not nA or not nB or not nC then
+		self:_clearSubdivPreview()
+		return
+	end
+
+	self:_clearSubdivPreview()
+
+	local folder = Instance.new("Folder")
+	folder.Name = "TT_SubdividePreview"
+	folder.Parent = workspace
+	self._subdivPreview = folder
+	self._subdivPreviewKey = key
+
+	local verts, tris = SubdivisionEngine.subdivide(nA.position, nB.position, nC.position, SUBDIV_INCREMENT)
+
+	-- A bright cyan, semi-transparent, slightly raised triangle for each sub-tri.
+	-- We lift the previews along the parent's normal a hair to avoid z-fighting
+	-- with the original wedge faces.
+	local normal = TriangleEngine.getNormal(nA.position, nB.position, nC.position)
+	local lift = normal * 0.05
+
+	for _, tri in tris do
+		local a = verts[tri[1]] + lift
+		local b = verts[tri[2]] + lift
+		local c = verts[tri[3]] + lift
+		local w1, w2 = TriangleEngine.draw(a, b, c, 0.08)
+		for _, w in { w1, w2 } do
+			w.Anchored = true
+			w.CanCollide = false
+			w.CanQuery = false
+			w.CanTouch = false
+			w.CastShadow = false
+			w.Transparency = 0.4
+			w.Color = Color3.fromRGB(0, 230, 255)
+			w.Material = Enum.Material.Neon
+			w.Parent = folder
+		end
+	end
+
+	-- Bright outline for each sub-edge so the topology is obvious even from
+	-- shallow viewing angles. We use small thin parts for edges.
+	local edgeSet: { [string]: boolean } = {}
+	local function addEdge(i: number, j: number)
+		local lo, hi = math.min(i, j), math.max(i, j)
+		local k = lo .. "-" .. hi
+		if edgeSet[k] then return end
+		edgeSet[k] = true
+
+		local p1 = verts[lo] + lift
+		local p2 = verts[hi] + lift
+		local diff = p2 - p1
+		local len = diff.Magnitude
+		if len < 0.01 then return end
+
+		local edge = Instance.new("Part")
+		edge.Name = "Edge"
+		edge.Anchored = true
+		edge.CanCollide = false
+		edge.CanQuery = false
+		edge.CanTouch = false
+		edge.CastShadow = false
+		edge.Material = Enum.Material.Neon
+		edge.Color = Color3.fromRGB(255, 255, 255)
+		edge.Transparency = 0.1
+		edge.Size = Vector3.new(0.08, 0.08, len)
+		edge.CFrame = CFrame.lookAt(p1 + diff * 0.5, p2)
+		edge.Parent = folder
+	end
+
+	for _, tri in tris do
+		addEdge(tri[1], tri[2])
+		addEdge(tri[2], tri[3])
+		addEdge(tri[3], tri[1])
+	end
+end
+
+function InputHandler:_clearSubdivPreview()
+	if self._subdivPreview then
+		self._subdivPreview:Destroy()
+		self._subdivPreview = nil
+	end
+	self._subdivPreviewKey = nil
+end
+
+------------------------------------------------------------------------
 -- Hotkeys
 ------------------------------------------------------------------------
 function InputHandler:_handleKey(keyCode: Enum.KeyCode)
@@ -1753,21 +3644,24 @@ function InputHandler:_handleKey(keyCode: Enum.KeyCode)
 		self._state:SetMode("Sculpt")
 	elseif keyCode == Enum.KeyCode.Five then
 		self._state:SetMode("Select")
+	elseif keyCode == Enum.KeyCode.Six then
+		self._state:SetMode("Delete")
 	elseif keyCode == Enum.KeyCode.G then
 		local current = self._state.settings.showGrid
 		self._state:SetSetting("showGrid", not current)
 	elseif keyCode == Enum.KeyCode.Delete then
 		self:_deleteSelected()
+	elseif keyCode == Enum.KeyCode.Escape then
+		-- Abort an in-progress 3-vertex draw pick. Replaces the old
+		-- "Clear Selection" panel button (removed in 0.8.1).
+		if self._state.activeMode == "Draw" and #self._state.drawSelection > 0 then
+			self._state:ClearDrawSelection()
+		end
 	end
 end
 
 function InputHandler:_deleteSelected()
-	for _, nodeId in self._state.selectedNodes do
-		self._nodeManager:DeleteNode(nodeId)
-	end
-	for _, triId in self._state.selectedTriangles do
-		self._nodeManager:DeleteTriangle(triId)
-	end
+	self._nodeManager:DeleteMany(self._state.selectedNodes, self._state.selectedTriangles)
 	self._state:SelectNode(nil)
 end
 
@@ -1778,6 +3672,32 @@ function InputHandler:_bindInputs()
 	table.insert(self._conns, self._mouse.Button1Down:Connect(function()
 		if self._state.activeMode == "Sculpt" then
 			self._sculpting = true
+			-- Open one outer recording for the whole drag. Inner per-tick
+			-- Sculpt* calls' TryBeginRecording will return nil while ours is
+			-- in flight, batching the entire stroke into one undo step.
+			self._sculptRecording = ChangeHistoryService:TryBeginRecording("SculptStroke")
+		elseif self._state.activeMode == "Delete" then
+			-- Same recording-batch pattern as Sculpt: one undo step per drag.
+			self._deleting = true
+			self._deleteStrokeCount = 0
+			self._state:SetDeleteStrokeCount(0)
+			self._deleteRecording = ChangeHistoryService:TryBeginRecording("DeleteStroke")
+			-- Subscribe to removal signals so cascade-deleted triangles
+			-- (DeleteNode wipes connected tris) and orphan-deleted nodes
+			-- (DeleteTriangleAndOrphans) get counted too. Inner _handleDelete*
+			-- code no longer touches the counter directly — single source of
+			-- truth = "actually removed from state".
+			local handleRemoved = function()
+				self._deleteStrokeCount += 1
+				self._state:SetDeleteStrokeCount(self._deleteStrokeCount)
+			end
+			self._deleteWatchConns = {
+				self._state.nodeRemoved:Connect(handleRemoved),
+				self._state.triangleRemoved:Connect(handleRemoved),
+			}
+			-- Delete the triangle directly under the cursor on press, so a
+			-- single click (no drag) still works.
+			self:_onClick()
 		else
 			local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or
 				UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
@@ -1791,6 +3711,36 @@ function InputHandler:_bindInputs()
 
 	table.insert(self._conns, self._mouse.Button1Up:Connect(function()
 		self._sculpting = false
+		if self._sculptRecording then
+			ChangeHistoryService:FinishRecording(self._sculptRecording, Enum.FinishRecordingOperation.Commit)
+			self._sculptRecording = nil
+		end
+		if self._deleting then
+			self._deleting = false
+			-- Tear down the per-stroke removal-watchers BEFORE finishing the
+			-- recording. A late removal during the post-stroke logic would
+			-- otherwise bump the counter we're about to reset.
+			if self._deleteWatchConns then
+				for _, c in self._deleteWatchConns do c:Disconnect() end
+				self._deleteWatchConns = nil
+			end
+			if self._deleteRecording then
+				-- If the user clicked Delete on empty space (or released
+				-- before the cursor swept across anything), the recording
+				-- captured zero mutations. Cancel it so the undo stack
+				-- doesn't fill with no-op "DeleteStroke" entries.
+				local op = if self._deleteStrokeCount > 0
+					then Enum.FinishRecordingOperation.Commit
+					else Enum.FinishRecordingOperation.Cancel
+				ChangeHistoryService:FinishRecording(self._deleteRecording, op)
+				self._deleteRecording = nil
+			end
+			-- Clear the panel counter on stroke end. The "n triangles deleted"
+			-- info the user cares about post-stroke is the undo entry name +
+			-- visible terrain change; no need to leave a stale label.
+			self._deleteStrokeCount = 0
+			self._state:SetDeleteStrokeCount(0)
+		end
 	end))
 
 	table.insert(self._conns, UserInputService.InputBegan:Connect(function(input, processed)
@@ -1818,6 +3768,22 @@ function InputHandler:_bindInputs()
 			self:_handleSculptTick()
 		end
 	end))
+
+	-- Selection visuals: rebuild whenever selection changes, and clear when
+	-- leaving Select mode (the highlights/Studio selection only make sense
+	-- there).
+	table.insert(self._conns, self._state.selectionChanged:Connect(function()
+		self:_refreshSelectionHighlights()
+	end))
+	table.insert(self._conns, self._state.modeChanged:Connect(function(mode)
+		if mode == "Select" then
+			self:_refreshSelectionHighlights()
+		else
+			self:_clearSelectionHighlights()
+		end
+	end))
+	-- Initial sync in case we activate while already in Select mode.
+	self:_refreshSelectionHighlights()
 end
 
 function InputHandler:_unbindInputs()
@@ -1834,8 +3800,10 @@ function InputHandler:Destroy()
 	self:_clearBrush()
 	self:_clearGhost()
 	self:_clearWorkPlane()
+	self:_clearSubdivPreview()
+	self:_clearSelectionHighlights()
 	if self._hoverHighlight then
-		self._hoverHighlight:Destroy()
+		pcall(function() self._hoverHighlight:Destroy() end)
 		self._hoverHighlight = nil
 	end
 end
@@ -1844,16 +3812,34 @@ return InputHandler
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX7">
+		<Item class="ModuleScript" referent="RBX10">
 			<Properties>
 				<string name="Name">AutoTriangulate</string>
 				<ProtectedString name="Source"><![CDATA[--[[
 	AutoTriangulate
 	Delaunay triangulation on the XZ plane from a set of node positions.
 	Bowyer-Watson incremental insertion algorithm.
+
+	-- Alpha-shape filtering --
+	Plain Delaunay triangulates the *convex hull* of the input. When nodes
+	are laid out along a non-convex shape (a curve, a C, a ring), Delaunay
+	happily fills the concavities with huge "bridge" triangles — e.g. one
+	triangle stretching from one tip of the curve to the other across empty
+	space. This looks awful and is almost never what the user wants.
+
+	Fix: after Delaunay, drop any triangle whose longest edge is more than
+	`maxEdgeFactor` times the median nearest-neighbor distance among the
+	input points. This is a simplified alpha-shape / alpha-complex filter.
+	The threshold scales with point density automatically (sparse layouts
+	get a sparse threshold, dense layouts get a tight one).
+
+	Pass maxEdgeFactor = 0 (or any value <= 0) to disable filtering and
+	get raw Delaunay back.
 ]]
 
 local AutoTriangulate = {}
+
+local DEFAULT_MAX_EDGE_FACTOR = 3.0
 
 type Point = {
 	x: number,
@@ -1903,8 +3889,38 @@ local function sharesEdge(t1: Triangle, t2: Triangle): boolean
 	return shared >= 2
 end
 
-function AutoTriangulate.triangulate(nodePositions: { { nodeId: string, position: Vector3 } }): { { string } }
+local function medianNearestNeighborDistance(points: { Point }): number
+	if #points < 2 then return 0 end
+	local distances = table.create(#points)
+	for i = 1, #points do
+		local p = points[i]
+		local minSq = math.huge
+		for j = 1, #points do
+			if i ~= j then
+				local q = points[j]
+				local dx = p.x - q.x
+				local dz = p.z - q.z
+				local dSq = dx * dx + dz * dz
+				if dSq < minSq then minSq = dSq end
+			end
+		end
+		if minSq < math.huge then
+			distances[#distances + 1] = math.sqrt(minSq)
+		end
+	end
+	if #distances == 0 then return 0 end
+	table.sort(distances)
+	-- True median (average of two middles for even counts) is overkill for
+	-- our use case; the lower-middle index is plenty and avoids the branch.
+	return distances[math.ceil(#distances / 2)]
+end
+
+function AutoTriangulate.triangulate(
+	nodePositions: { { nodeId: string, position: Vector3 } },
+	maxEdgeFactor: number?
+): { { string } }
 	if #nodePositions < 3 then return {} end
+	local edgeFactor = maxEdgeFactor or DEFAULT_MAX_EDGE_FACTOR
 
 	-- Project to XZ plane
 	local points: { Point } = {}
@@ -1986,14 +4002,42 @@ function AutoTriangulate.triangulate(nodePositions: { { nodeId: string, position
 		end
 	end
 
-	-- Remove triangles that share vertices with the super triangle
-	local result: { { string } } = {}
+	-- Remove triangles that share vertices with the super triangle, and
+	-- (optionally) drop "bridge" triangles whose longest edge dwarfs the
+	-- typical inter-node spacing — those are the convex-hull artifacts.
 	local superIds = { __super_a = true, __super_b = true, __super_c = true }
 
-	for _, tri in triangles do
-		if not superIds[tri.p1.nodeId] and not superIds[tri.p2.nodeId] and not superIds[tri.p3.nodeId] then
-			table.insert(result, { tri.p1.nodeId, tri.p2.nodeId, tri.p3.nodeId })
+	-- maxEdgeSq == 0 means "filter disabled". math.huge means "no edge can
+	-- exceed this", which is the same thing in practice and keeps the inner
+	-- loop branch-free.
+	local maxEdgeSq: number
+	if edgeFactor > 0 then
+		local medianNN = medianNearestNeighborDistance(points)
+		if medianNN > 0 then
+			local maxEdge = medianNN * edgeFactor
+			maxEdgeSq = maxEdge * maxEdge
+		else
+			maxEdgeSq = math.huge
 		end
+	else
+		maxEdgeSq = math.huge
+	end
+
+	local result: { { string } } = {}
+	for _, tri in triangles do
+		if superIds[tri.p1.nodeId] or superIds[tri.p2.nodeId] or superIds[tri.p3.nodeId] then
+			continue
+		end
+		if maxEdgeSq ~= math.huge then
+			local p1, p2, p3 = tri.p1, tri.p2, tri.p3
+			local d12 = (p1.x - p2.x)^2 + (p1.z - p2.z)^2
+			local d23 = (p2.x - p3.x)^2 + (p2.z - p3.z)^2
+			local d31 = (p3.x - p1.x)^2 + (p3.z - p1.z)^2
+			if d12 > maxEdgeSq or d23 > maxEdgeSq or d31 > maxEdgeSq then
+				continue
+			end
+		end
+		table.insert(result, { tri.p1.nodeId, tri.p2.nodeId, tri.p3.nodeId })
 	end
 
 	return result
@@ -2003,7 +4047,7 @@ return AutoTriangulate
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="ModuleScript" referent="RBX8">
+		<Item class="ModuleScript" referent="RBX11">
 			<Properties>
 				<string name="Name">WidgetUI</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -2030,6 +4074,11 @@ function WidgetUI.new(widget, state, nodeManager, callbacks)
 	self._modePanels = {}
 	self._statusLabel = nil
 	self._conns = {}
+	-- All preset-dropdown rows register a refresh fn here so they all stay
+	-- in sync when presets change or paint settings change elsewhere.
+	self._presetDropdownRefreshers = {}
+	self._materialDropdownRefreshers = {}
+	self._colorPreviewRefreshers = {}
 	self:_build()
 	self:_bindState()
 	return self
@@ -2078,7 +4127,7 @@ function WidgetUI:_buildToolbar(parent)
 	sep.BackgroundColor3 = T.Colors.Border
 	sep.BorderSizePixel = 0
 
-	local modes = { "Place", "Draw", "Paint", "Sculpt", "Select" }
+	local modes = { "Place", "Draw", "Paint", "Sculpt", "Select", "Delete", "Presets" }
 	local count = #modes
 	local gap = 3
 	local pad = 4
@@ -2110,9 +4159,13 @@ end
 
 function WidgetUI:_highlightActiveMode(activeMode)
 	local T = self._theme
+	-- Most modes get the standard accent when active. Delete gets the
+	-- negative/red color instead, because being in Delete mode is a
+	-- "watch out, clicks destroy things" state and the toolbar should
+	-- make that obvious without requiring a glance at the mode panel.
 	for mode, btn in self._modeButtons do
 		if mode == activeMode then
-			btn.BackgroundColor3 = T.Colors.Accent
+			btn.BackgroundColor3 = if mode == "Delete" then T.Colors.Negative else T.Colors.Accent
 			btn.TextColor3 = Color3.new(1, 1, 1)
 		else
 			btn.BackgroundColor3 = T.Colors.ButtonNormal
@@ -2284,11 +4337,7 @@ function WidgetUI:_showTagInput()
 	box.FocusLost:Connect(function(enterPressed)
 		local name = box.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
 		if enterPressed and #name > 0 then
-			-- Tag all selected nodes, or if none selected, just register the tag
-			for _, nodeId in self._state.selectedNodes do
-				self._nodeManager:AddTagToNode(nodeId, name)
-			end
-			self._nodeManager:RefreshTagList()
+			self._nodeManager:AddTagToNodes(self._state.selectedNodes, name)
 		end
 		inputFrame:Destroy()
 	end)
@@ -2333,6 +4382,8 @@ function WidgetUI:_buildModePanel(parent)
 	self._modePanels["Paint"] = self:_buildPaintPanel(container)
 	self._modePanels["Sculpt"] = self:_buildSculptPanel(container)
 	self._modePanels["Select"] = self:_buildSelectPanel(container)
+	self._modePanels["Delete"] = self:_buildDeletePanel(container)
+	self._modePanels["Presets"] = self:_buildPresetsPanel(container)
 end
 
 function WidgetUI:_showModePanel(mode)
@@ -2363,16 +4414,76 @@ function WidgetUI:_buildPlacePanel(parent): Frame
 		self._state:SetSetting("nodeSize", math.round(val * 10) / 10)
 	end)
 
+	-- ----------------------------------------------------------------
 	-- Work Plane section
+	--
+	-- Layout:
+	--   "Show Work Plane"   — master toggle. When OFF, every other row
+	--                         in this section is greyed out.
+	--   "Lock Work Plane"   — pins Y at the current value (or whatever's
+	--                         in workPlaneFixedY). When ON, the offset
+	--                         slider becomes meaningless and gets disabled.
+	--   "Y Position"        — live readout + manual entry. Typing here
+	--                         auto-locks at the typed value.
+	--   "Height Below Cam"  — only used when unlocked.
+	-- ----------------------------------------------------------------
 	self:_addLabel(frame, "WPHeader", "Work Plane", T.Fonts.Bold, T.Sizes.FontSizeNormal, 10)
 
-	self:_addToggleRow(frame, "WorkPlaneToggle", "Show Work Plane", self._state.settings.workPlaneEnabled, 11, function(val)
-		self._state:SetSetting("workPlaneEnabled", val)
-	end)
+	local showCtrl = self:_addToggleRow(frame, "WorkPlaneToggle", "Show Work Plane",
+		self._state.settings.workPlaneEnabled, 11, function(val)
+			self._state:SetSetting("workPlaneEnabled", val)
+		end)
 
-	self:_addSliderRow(frame, "WPYOffset", "Height Below Cam", 5, 100, self._state.settings.workPlaneYOffset, 12, function(val)
-		self._state:SetSetting("workPlaneYOffset", math.round(val))
-	end)
+	local lockCtrl = self:_addToggleRow(frame, "WorkPlaneLock", "Lock Work Plane",
+		self._state.settings.workPlaneLocked, 12, function(val)
+			if val then
+				-- Capture the plane's current Y at the moment of locking so
+				-- it stays where the user can see it (no jump).
+				local currentY = self._state.workPlaneCurrentY or 0
+				self._state:SetSetting("workPlaneFixedY", currentY)
+			end
+			self._state:SetSetting("workPlaneLocked", val)
+		end)
+
+	local yCtrl = self:_addTextInputRow(frame, "WorkPlaneY", "Y Position",
+		string.format("%.1f", self._state.workPlaneCurrentY or 0),
+		13,
+		function(raw) -- validate
+			return tonumber(raw)
+		end,
+		function(val) -- onCommit
+			self._state:SetSetting("workPlaneFixedY", val)
+			-- Typing a Y value implies "I want the plane HERE" — auto-lock.
+			self._state:SetSetting("workPlaneLocked", true)
+		end)
+
+	local offsetCtrl = self:_addSliderRow(frame, "WPYOffset", "Height Below Cam",
+		5, 100, self._state.settings.workPlaneYOffset, 14, function(val)
+			self._state:SetSetting("workPlaneYOffset", math.round(val))
+		end)
+
+	-- Cascade-disable: dependent rows follow the master toggle, and the
+	-- offset slider additionally disables when locked (it doesn't do
+	-- anything in locked mode).
+	local function refreshWorkPlaneRows()
+		local on = self._state.settings.workPlaneEnabled
+		local locked = self._state.settings.workPlaneLocked
+		lockCtrl:SetEnabled(on)
+		yCtrl:SetEnabled(on)
+		offsetCtrl:SetEnabled(on and not locked)
+	end
+	refreshWorkPlaneRows()
+	self._refreshWorkPlaneRows = refreshWorkPlaneRows
+
+	-- Live-update the Y textbox as the plane moves under the camera, and
+	-- keep the lock toggle visual in sync if it changes via the textbox
+	-- auto-lock path.
+	self._workPlaneCtrls = {
+		showCtrl = showCtrl,
+		lockCtrl = lockCtrl,
+		yCtrl = yCtrl,
+		offsetCtrl = offsetCtrl,
+	}
 
 	return frame
 end
@@ -2387,6 +4498,10 @@ function WidgetUI:_buildDrawPanel(parent): Frame
 	local statusLabel = self:_addLabel(frame, "DrawStatus", "Selected: 0/3 nodes", T.Fonts.Semi, T.Sizes.FontSizeNormal, 3)
 	self._drawStatusLabel = statusLabel
 
+	-- Material preset selector — picks the color+material for new triangles.
+	self:_addLabel(frame, "DrawMatLabel", "New triangle material:", T.Fonts.Default, T.Sizes.FontSizeSmall, 4)
+	self:_addPresetDropdown(frame, 5)
+
 	-- Auto-Triangulate button (not a hotkey!)
 	local autoBtn = Instance.new("TextButton", frame)
 	autoBtn.Name = "AutoTriBtn"
@@ -2397,7 +4512,7 @@ function WidgetUI:_buildDrawPanel(parent): Frame
 	autoBtn.FontFace = T.Fonts.Bold
 	autoBtn.TextSize = T.Sizes.FontSizeNormal
 	autoBtn.BorderSizePixel = 0
-	autoBtn.LayoutOrder = 4
+	autoBtn.LayoutOrder = 6
 	autoBtn.Parent = frame
 	Instance.new("UICorner", autoBtn).CornerRadius = T.Sizes.SmallCorner
 
@@ -2407,24 +4522,64 @@ function WidgetUI:_buildDrawPanel(parent): Frame
 		end
 	end)
 
-	local clearBtn = Instance.new("TextButton", frame)
-	clearBtn.Name = "ClearSelBtn"
-	clearBtn.Size = UDim2.new(1, 0, 0, 28)
-	clearBtn.BackgroundColor3 = T.Colors.ButtonNormal
-	clearBtn.TextColor3 = T.Colors.Text
-	clearBtn.Text = "Clear Selection"
-	clearBtn.FontFace = T.Fonts.Semi
-	clearBtn.TextSize = T.Sizes.FontSizeSmall
-	clearBtn.BorderSizePixel = 0
-	clearBtn.LayoutOrder = 5
-	clearBtn.Parent = frame
-	Instance.new("UICorner", clearBtn).CornerRadius = T.Sizes.SmallCorner
+	-- Alpha-shape filter strength for Auto-Triangulate. Lower = stricter,
+	-- follows non-convex shapes (curves, rings) more tightly. Higher = closer
+	-- to raw Delaunay (fills the convex hull). Explained inline so users
+	-- don't have to guess what "shape tightness" means.
+	self:_addLabel(frame, "AutoTriShapeHelp",
+		"Shape tightness controls how aggressively bridge triangles across empty space (e.g. inside a curve) get culled. Lower = tighter shape; higher = fills more.",
+		T.Fonts.Default, T.Sizes.FontSizeSmall, 7)
+	self:_addSliderRow(frame, "AutoTriShape", "Shape Tightness",
+		1.5, 8, self._state.settings.autoTriMaxEdgeFactor, 7,
+		function(val)
+			self._state:SetSetting("autoTriMaxEdgeFactor", math.round(val * 10) / 10)
+		end)
 
-	clearBtn.MouseButton1Click:Connect(function()
-		self._state:ClearDrawSelection()
+	-- (Removed in 0.8.1) The "Clear Selection" button used to live here for
+	-- the in-progress 3-vertex picker. It's redundant — clicking the same
+	-- node again toggles it off, and Escape now aborts the whole pick.
+
+	-- ----------------------------------------------------------------
+	-- Sub-Divide section
+	-- ----------------------------------------------------------------
+	self:_addLabel(frame, "SubDivHeader", "Sub-Divide", T.Fonts.Bold, T.Sizes.FontSizeNormal, 8)
+	self:_addLabel(frame, "SubDivHelp",
+		"Toggle on, hover a triangle to preview, click to split it into 4 smaller triangles. Neighboring triangles are re-fanned to share the new edge nodes.",
+		T.Fonts.Default, T.Sizes.FontSizeSmall, 9)
+
+	local subBtn = Instance.new("TextButton", frame)
+	subBtn.Name = "SubDivToggleBtn"
+	subBtn.Size = UDim2.new(1, 0, 0, 30)
+	subBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	subBtn.TextColor3 = T.Colors.Text
+	subBtn.Text = "Sub-Divide Mode: OFF"
+	subBtn.FontFace = T.Fonts.Bold
+	subBtn.TextSize = T.Sizes.FontSizeNormal
+	subBtn.BorderSizePixel = 0
+	subBtn.LayoutOrder = 10
+	Instance.new("UICorner", subBtn).CornerRadius = T.Sizes.SmallCorner
+	self._subDivToggleBtn = subBtn
+
+	subBtn.MouseButton1Click:Connect(function()
+		local target: any = if self._state.drawSubMode == "SubDivide" then "Triangulate" else "SubDivide"
+		self._state:SetDrawSubMode(target)
 	end)
 
 	return frame
+end
+
+function WidgetUI:_refreshSubDivToggle()
+	if not self._subDivToggleBtn then return end
+	local T = self._theme
+	if self._state.drawSubMode == "SubDivide" then
+		self._subDivToggleBtn.BackgroundColor3 = T.Colors.Accent
+		self._subDivToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+		self._subDivToggleBtn.Text = "Sub-Divide Mode: ON"
+	else
+		self._subDivToggleBtn.BackgroundColor3 = T.Colors.ButtonNormal
+		self._subDivToggleBtn.TextColor3 = T.Colors.Text
+		self._subDivToggleBtn.Text = "Sub-Divide Mode: OFF"
+	end
 end
 
 function WidgetUI:_buildPaintPanel(parent): Frame
@@ -2434,12 +4589,17 @@ function WidgetUI:_buildPaintPanel(parent): Frame
 	self:_addLabel(frame, "PaintTitle", "Paint Triangles", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
 	self:_addLabel(frame, "PaintHelp", "Click a triangle to apply color & material.", T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
 
+	-- Material preset selector (sets paintColor + paintMaterial in one click).
+	self:_addPresetDropdown(frame, 3)
+
+	self:_addLabel(frame, "CustomLabel", "Or customize:", T.Fonts.Default, T.Sizes.FontSizeSmall, 4)
+
 	-- Color preview + picker trigger
 	local colorRow = Instance.new("Frame", frame)
 	colorRow.Name = "ColorRow"
 	colorRow.Size = UDim2.new(1, 0, 0, 28)
 	colorRow.BackgroundTransparency = 1
-	colorRow.LayoutOrder = 3
+	colorRow.LayoutOrder = 5
 	colorRow.Parent = frame
 
 	local colorLabel = Instance.new("TextLabel", colorRow)
@@ -2462,12 +4622,18 @@ function WidgetUI:_buildPaintPanel(parent): Frame
 	Instance.new("UIStroke", colorPreview).Color = T.Colors.Border
 	self._colorPreview = colorPreview
 
+	-- Register so settingsChanged binding keeps it in sync (e.g. when a
+	-- preset is picked elsewhere).
+	table.insert(self._colorPreviewRefreshers, function()
+		colorPreview.BackgroundColor3 = self._state.settings.paintColor
+	end)
+
 	colorPreview.MouseButton1Click:Connect(function()
 		self:_showColorGrid(frame)
 	end)
 
 	-- Material dropdown
-	self:_addMaterialDropdown(frame, 4)
+	self:_addMaterialDropdown(frame, 6)
 
 	return frame
 end
@@ -2572,6 +4738,68 @@ function WidgetUI:_buildSculptPanel(parent): Frame
 	return frame
 end
 
+function WidgetUI:_buildDeletePanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "DeletePanel", 6)
+
+	self:_addLabel(frame, "DeleteTitle", "Delete Triangles", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "DeleteHelp",
+		"Hover a triangle to highlight it red. Click to delete. " ..
+		"Click and drag to delete multiple in one stroke. Each stroke is one undo step.",
+		T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	-- Live counter for the current drag stroke. Useful feedback during a
+	-- sweep so the user knows how many they've nuked. Resets on Button1Up.
+	local counter = self:_addLabel(frame, "DeleteCounter", "", T.Fonts.Semi, T.Sizes.FontSizeNormal, 3)
+	counter.TextColor3 = T.Colors.Negative
+	self._deleteCounterLabel = counter
+
+	-- "Delete Nodes" option. Off by default. When on:
+	--   * Delete-mode hover prefers nodes (they're smaller/more precise),
+	--     falling back to triangles if nothing's under the cursor — same
+	--     priority logic Select mode uses.
+	--   * Clicking a node deletes the node directly (cascading any
+	--     connected triangles, since DeleteNode already does that).
+	--   * Deleting a triangle additionally cleans up any of its 3 vertex
+	--     nodes that are no longer used by any other triangle ("orphan
+	--     nodes"), so tear-down doesn't leave stray dangling nodes.
+	self:_addToggleRow(frame, "DeleteNodesToggle", "Delete Nodes",
+		self._state.settings.deleteNodesEnabled, 4, function(val)
+			self._state:SetSetting("deleteNodesEnabled", val)
+		end)
+
+	self:_addLabel(frame, "DeleteNodesHelp",
+		"When on: clicks also delete nodes, and deleting a triangle " ..
+		"also removes any of its corner nodes left orphan.",
+		T.Fonts.Default, T.Sizes.FontSizeSmall, 5)
+
+	-- Caution banner so the destructive intent of this mode is unmistakable.
+	local warn = Instance.new("Frame", frame)
+	warn.Name = "CautionBanner"
+	warn.Size = UDim2.new(1, 0, 0, 36)
+	warn.BackgroundColor3 = T.Colors.Negative
+	warn.BackgroundTransparency = 0.85
+	warn.BorderSizePixel = 0
+	warn.LayoutOrder = 6
+	Instance.new("UICorner", warn).CornerRadius = T.Sizes.SmallCorner
+	local stroke = Instance.new("UIStroke", warn)
+	stroke.Color = T.Colors.Negative
+	stroke.Transparency = 0.4
+
+	local warnLabel = Instance.new("TextLabel", warn)
+	warnLabel.Size = UDim2.new(1, -16, 1, 0)
+	warnLabel.Position = UDim2.fromOffset(8, 0)
+	warnLabel.BackgroundTransparency = 1
+	warnLabel.TextColor3 = T.Colors.Text
+	warnLabel.Text = "Destructive mode — clicks delete what they hit."
+	warnLabel.FontFace = T.Fonts.Semi
+	warnLabel.TextSize = T.Sizes.FontSizeSmall
+	warnLabel.TextXAlignment = Enum.TextXAlignment.Left
+	warnLabel.TextWrapped = true
+
+	return frame
+end
+
 function WidgetUI:_buildSelectPanel(parent): Frame
 	local T = self._theme
 	local frame = self:_panelFrame(parent, "SelectPanel", 5)
@@ -2615,10 +4843,7 @@ function WidgetUI:_buildSelectPanel(parent): Frame
 	assignBtn.MouseButton1Click:Connect(function()
 		local name = tagBox.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
 		if #name == 0 then return end
-		for _, nodeId in self._state.selectedNodes do
-			self._nodeManager:AddTagToNode(nodeId, name)
-		end
-		self._nodeManager:RefreshTagList()
+		self._nodeManager:AddTagToNodes(self._state.selectedNodes, name)
 		tagBox.Text = ""
 	end)
 
@@ -2637,10 +4862,7 @@ function WidgetUI:_buildSelectPanel(parent): Frame
 	removeBtn.MouseButton1Click:Connect(function()
 		local name = tagBox.Text:gsub("%s+", "_"):gsub("[^%w_]", "")
 		if #name == 0 then return end
-		for _, nodeId in self._state.selectedNodes do
-			self._nodeManager:RemoveTagFromNode(nodeId, name)
-		end
-		self._nodeManager:RefreshTagList()
+		self._nodeManager:RemoveTagFromNodes(self._state.selectedNodes, name)
 		tagBox.Text = ""
 	end)
 
@@ -2667,22 +4889,93 @@ function WidgetUI:_buildSelectPanel(parent): Frame
 end
 
 ------------------------------------------------------------------------
--- Color Grid (simple palette picker)
+-- Palette + material catalogs (used by both paint settings and presets)
 ------------------------------------------------------------------------
-function WidgetUI:_showColorGrid(parent)
+local PALETTE = {
+	Color3.fromRGB(74, 124, 63),   -- grass green
+	Color3.fromRGB(34, 85, 28),    -- dark green
+	Color3.fromRGB(120, 160, 90),  -- light green
+	Color3.fromRGB(85, 65, 40),    -- dirt brown
+	Color3.fromRGB(140, 110, 70),  -- sand
+	Color3.fromRGB(200, 180, 140), -- light sand
+	Color3.fromRGB(100, 100, 100), -- gray rock
+	Color3.fromRGB(60, 60, 65),    -- dark rock
+	Color3.fromRGB(160, 160, 160), -- light rock
+	Color3.fromRGB(50, 90, 140),   -- water blue
+	Color3.fromRGB(70, 130, 180),  -- light blue
+	Color3.fromRGB(200, 200, 210), -- snow
+	Color3.fromRGB(240, 230, 200), -- pale
+	Color3.fromRGB(180, 60, 40),   -- red clay
+	Color3.fromRGB(60, 40, 30),    -- dark earth
+	Color3.fromRGB(150, 130, 100), -- limestone
+	Color3.fromRGB(80, 70, 60),    -- slate
+	Color3.fromRGB(110, 90, 70),   -- mud
+	Color3.fromRGB(40, 60, 40),    -- deep forest
+	Color3.fromRGB(170, 140, 90),  -- mesa
+}
+
+local MATERIALS = {
+	Enum.Material.Grass, Enum.Material.Sand, Enum.Material.Rock,
+	Enum.Material.Ground, Enum.Material.Mud, Enum.Material.Slate,
+	Enum.Material.Concrete, Enum.Material.Brick, Enum.Material.Cobblestone,
+	Enum.Material.Snow, Enum.Material.Ice, Enum.Material.Glacier,
+	Enum.Material.SmoothPlastic, Enum.Material.Pavement, Enum.Material.Limestone,
+	Enum.Material.Basalt, Enum.Material.Asphalt, Enum.Material.Salt,
+	Enum.Material.CrackedLava, Enum.Material.LeafyGrass, Enum.Material.Water,
+}
+
+------------------------------------------------------------------------
+-- Material thumbnail (small ViewportFrame with a wedge inside, used in
+-- preset dropdowns and the preset manager).
+------------------------------------------------------------------------
+function WidgetUI:_buildMaterialThumbnail(parent, color: Color3, material: Enum.Material, sizePx: number): ViewportFrame
+	local vf = Instance.new("ViewportFrame")
+	vf.Name = "Thumbnail"
+	vf.Size = UDim2.fromOffset(sizePx, sizePx)
+	vf.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
+	vf.BorderSizePixel = 0
+	vf.LightDirection = Vector3.new(-0.4, -1, -0.3).Unit
+	vf.Ambient = Color3.fromRGB(120, 120, 120)
+	vf.LightColor = Color3.fromRGB(255, 250, 240)
+	Instance.new("UICorner", vf).CornerRadius = UDim.new(0, 3)
+
+	local cam = Instance.new("Camera")
+	cam.CFrame = CFrame.lookAt(Vector3.new(2.4, 1.8, 2.6), Vector3.new(0, 0.3, 0))
+	vf.CurrentCamera = cam
+	cam.Parent = vf
+
+	local wedge = Instance.new("WedgePart")
+	wedge.Anchored = true
+	wedge.Size = Vector3.new(2.2, 1.6, 2.2)
+	wedge.Color = color
+	wedge.Material = material
+	wedge.TopSurface = Enum.SurfaceType.Smooth
+	wedge.BottomSurface = Enum.SurfaceType.Smooth
+	wedge.Parent = vf
+
+	if parent then vf.Parent = parent end
+	return vf
+end
+
+------------------------------------------------------------------------
+-- Generic color grid: drops a palette grid into `container`. Closes if
+-- one already exists (toggle). Calls `callback(color)` on selection.
+------------------------------------------------------------------------
+function WidgetUI:_showColorGridForCallback(container: Instance, layoutOrder: number, callback)
 	local T = self._theme
 
-	if parent:FindFirstChild("ColorGrid") then
-		parent:FindFirstChild("ColorGrid"):Destroy()
+	if container:FindFirstChild("ColorGrid") then
+		container:FindFirstChild("ColorGrid"):Destroy()
 		return
 	end
 
-	local grid = Instance.new("Frame", parent)
+	local grid = Instance.new("Frame", container)
 	grid.Name = "ColorGrid"
 	grid.Size = UDim2.new(1, 0, 0, 120)
 	grid.BackgroundColor3 = T.Colors.Surface
 	grid.BorderSizePixel = 0
-	grid.LayoutOrder = 10
+	grid.LayoutOrder = layoutOrder
+	grid.ZIndex = 10
 	Instance.new("UICorner", grid).CornerRadius = T.Sizes.SmallCorner
 	Instance.new("UIStroke", grid).Color = T.Colors.Border
 
@@ -2694,49 +4987,82 @@ function WidgetUI:_showColorGrid(parent)
 	gridPad.PaddingTop = UDim.new(0, 4)
 	gridPad.PaddingLeft = UDim.new(0, 4)
 
-	local colors = {
-		Color3.fromRGB(74, 124, 63),   -- grass green
-		Color3.fromRGB(34, 85, 28),    -- dark green
-		Color3.fromRGB(120, 160, 90),  -- light green
-		Color3.fromRGB(85, 65, 40),    -- dirt brown
-		Color3.fromRGB(140, 110, 70),  -- sand
-		Color3.fromRGB(200, 180, 140), -- light sand
-		Color3.fromRGB(100, 100, 100), -- gray rock
-		Color3.fromRGB(60, 60, 65),    -- dark rock
-		Color3.fromRGB(160, 160, 160), -- light rock
-		Color3.fromRGB(50, 90, 140),   -- water blue
-		Color3.fromRGB(70, 130, 180),  -- light blue
-		Color3.fromRGB(200, 200, 210), -- snow
-		Color3.fromRGB(240, 230, 200), -- pale
-		Color3.fromRGB(180, 60, 40),   -- red clay
-		Color3.fromRGB(60, 40, 30),    -- dark earth
-		Color3.fromRGB(150, 130, 100), -- limestone
-		Color3.fromRGB(80, 70, 60),    -- slate
-		Color3.fromRGB(110, 90, 70),   -- mud
-		Color3.fromRGB(40, 60, 40),    -- deep forest
-		Color3.fromRGB(170, 140, 90),  -- mesa
-	}
-
-	for i, color in colors do
+	for i, color in PALETTE do
 		local swatch = Instance.new("TextButton", grid)
 		swatch.Name = "Color_" .. i
 		swatch.BackgroundColor3 = color
 		swatch.Text = ""
 		swatch.BorderSizePixel = 0
+		swatch.ZIndex = 11
 		Instance.new("UICorner", swatch).CornerRadius = T.Sizes.SmallCorner
 
 		swatch.MouseButton1Click:Connect(function()
-			self._state:SetSetting("paintColor", color)
-			if self._colorPreview then
-				self._colorPreview.BackgroundColor3 = color
-			end
+			callback(color)
 			grid:Destroy()
 		end)
 	end
 end
 
 ------------------------------------------------------------------------
--- Material Dropdown
+-- Generic material list: drops a scrolling list of materials into
+-- `container`. Calls `callback(material)` on selection.
+------------------------------------------------------------------------
+function WidgetUI:_showMaterialListForCallback(container: Instance, layoutOrder: number, callback)
+	local T = self._theme
+
+	if container:FindFirstChild("MaterialList") then
+		container:FindFirstChild("MaterialList"):Destroy()
+		return
+	end
+
+	local list = Instance.new("ScrollingFrame", container)
+	list.Name = "MaterialList"
+	list.Size = UDim2.new(1, 0, 0, 150)
+	list.BackgroundColor3 = T.Colors.Surface
+	list.BorderSizePixel = 0
+	list.ScrollBarThickness = 4
+	list.CanvasSize = UDim2.fromOffset(0, 0)
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.LayoutOrder = layoutOrder
+	list.ZIndex = 10
+	Instance.new("UICorner", list).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", list).Color = T.Colors.Border
+
+	local listLayout = Instance.new("UIListLayout", list)
+	listLayout.Padding = UDim.new(0, 1)
+
+	for _, mat in MATERIALS do
+		local matBtn = Instance.new("TextButton", list)
+		matBtn.Size = UDim2.new(1, 0, 0, 22)
+		matBtn.BackgroundColor3 = T.Colors.Surface
+		matBtn.TextColor3 = T.Colors.Text
+		matBtn.Text = "  " .. mat.Name
+		matBtn.FontFace = T.Fonts.Default
+		matBtn.TextSize = T.Sizes.FontSizeSmall
+		matBtn.TextXAlignment = Enum.TextXAlignment.Left
+		matBtn.BorderSizePixel = 0
+		matBtn.ZIndex = 11
+
+		matBtn.MouseButton1Click:Connect(function()
+			callback(mat)
+			list:Destroy()
+		end)
+	end
+end
+
+------------------------------------------------------------------------
+-- Color Grid (paint-settings shorthand). Used by the Paint panel's
+-- color preview button.
+------------------------------------------------------------------------
+function WidgetUI:_showColorGrid(parent)
+	self:_showColorGridForCallback(parent, 999, function(color)
+		self._state:SetSetting("paintColor", color)
+	end)
+end
+
+------------------------------------------------------------------------
+-- Material Dropdown (paint-settings shorthand). Tracks itself in
+-- _materialDropdownRefreshers so it stays in sync when settings change.
 ------------------------------------------------------------------------
 function WidgetUI:_addMaterialDropdown(parent, layoutOrder)
 	local T = self._theme
@@ -2770,56 +5096,903 @@ function WidgetUI:_addMaterialDropdown(parent, layoutOrder)
 	Instance.new("UIStroke", dropdown).Color = T.Colors.Border
 	self._materialDropdown = dropdown
 
-	local materials = {
-		Enum.Material.Grass, Enum.Material.Sand, Enum.Material.Rock,
-		Enum.Material.Ground, Enum.Material.Mud, Enum.Material.Slate,
-		Enum.Material.Concrete, Enum.Material.Brick, Enum.Material.Cobblestone,
-		Enum.Material.Snow, Enum.Material.Ice, Enum.Material.Glacier,
-		Enum.Material.SmoothPlastic, Enum.Material.Pavement, Enum.Material.Limestone,
-		Enum.Material.Basalt, Enum.Material.Asphalt, Enum.Material.Salt,
-		Enum.Material.CrackedLava, Enum.Material.LeafyGrass,
-	}
-
 	dropdown.MouseButton1Click:Connect(function()
-		if parent:FindFirstChild("MaterialList") then
-			parent:FindFirstChild("MaterialList"):Destroy()
+		self:_showMaterialListForCallback(parent, layoutOrder + 1, function(mat)
+			self._state:SetSetting("paintMaterial", mat)
+		end)
+	end)
+
+	-- Register for the paintMaterial->UI sync.
+	table.insert(self._materialDropdownRefreshers, function()
+		dropdown.Text = self._state.settings.paintMaterial.Name
+	end)
+end
+
+------------------------------------------------------------------------
+-- Preset dropdown row (used in Paint and Draw panels)
+-- Shows the matching preset's thumbnail and name, or "Custom" if the
+-- current paint settings don't match any preset. Click opens the list.
+------------------------------------------------------------------------
+function WidgetUI:_addPresetDropdown(parent, layoutOrder: number)
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = "PresetRow"
+	row.Size = UDim2.new(1, 0, 0, 36)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = layoutOrder
+
+	local label = Instance.new("TextLabel", row)
+	label.Size = UDim2.new(0.3, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = T.Colors.Text
+	label.Text = "Preset"
+	label.FontFace = T.Fonts.Semi
+	label.TextSize = T.Sizes.FontSizeNormal
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local btn = Instance.new("TextButton", row)
+	btn.Name = "PresetDropdown"
+	btn.Size = UDim2.new(0.7, -4, 1, -4)
+	btn.Position = UDim2.new(0.3, 4, 0, 2)
+	btn.BackgroundColor3 = T.Colors.Surface
+	btn.Text = ""
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = true
+	Instance.new("UICorner", btn).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", btn).Color = T.Colors.Border
+
+	-- Inner layout: thumbnail | name | chevron
+	local pad = Instance.new("UIPadding", btn)
+	pad.PaddingLeft = UDim.new(0, 4)
+	pad.PaddingRight = UDim.new(0, 6)
+
+	local thumbHolder = Instance.new("Frame", btn)
+	thumbHolder.Name = "ThumbHolder"
+	thumbHolder.Size = UDim2.fromOffset(28, 28)
+	thumbHolder.Position = UDim2.fromOffset(0, 2)
+	thumbHolder.BackgroundTransparency = 1
+
+	local nameLbl = Instance.new("TextLabel", btn)
+	nameLbl.Name = "Name"
+	nameLbl.Size = UDim2.new(1, -52, 1, 0)
+	nameLbl.Position = UDim2.fromOffset(34, 0)
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.TextColor3 = T.Colors.Text
+	nameLbl.FontFace = T.Fonts.Semi
+	nameLbl.TextSize = T.Sizes.FontSizeNormal
+	nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+	nameLbl.Text = "Custom"
+
+	local chevron = Instance.new("TextLabel", btn)
+	chevron.Name = "Chevron"
+	chevron.Size = UDim2.fromOffset(14, 28)
+	chevron.Position = UDim2.new(1, -16, 0, 2)
+	chevron.BackgroundTransparency = 1
+	chevron.TextColor3 = T.Colors.TextDim
+	chevron.FontFace = T.Fonts.Bold
+	chevron.TextSize = T.Sizes.FontSizeSmall
+	chevron.Text = "v"
+
+	local function rebuildThumbnail()
+		thumbHolder:ClearAllChildren()
+		local color = self._state.settings.paintColor
+		local mat = self._state.settings.paintMaterial
+		self:_buildMaterialThumbnail(thumbHolder, color, mat, 28)
+	end
+
+	local function refresh()
+		if not row.Parent then return end
+		local presets = self._state.materialPresets
+		if not presets then
+			nameLbl.Text = "Custom"
+			rebuildThumbnail()
 			return
 		end
+		local match = presets:FindByAppearance(
+			self._state.settings.paintColor,
+			self._state.settings.paintMaterial
+		)
+		nameLbl.Text = if match then match.name else "Custom"
+		rebuildThumbnail()
+	end
 
-		local list = Instance.new("ScrollingFrame", parent)
-		list.Name = "MaterialList"
-		list.Size = UDim2.new(1, 0, 0, 150)
-		list.BackgroundColor3 = T.Colors.Surface
-		list.BorderSizePixel = 0
-		list.ScrollBarThickness = 4
-		list.CanvasSize = UDim2.fromOffset(0, 0)
-		list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-		list.LayoutOrder = layoutOrder + 1
-		list.ZIndex = 10
-		Instance.new("UICorner", list).CornerRadius = T.Sizes.SmallCorner
-		Instance.new("UIStroke", list).Color = T.Colors.Border
+	refresh()
 
-		local listLayout = Instance.new("UIListLayout", list)
-		listLayout.Padding = UDim.new(0, 1)
+	btn.MouseButton1Click:Connect(function()
+		self:_showPresetListForRow(row, layoutOrder + 1)
+	end)
 
-		for _, mat in materials do
-			local matBtn = Instance.new("TextButton", list)
-			matBtn.Size = UDim2.new(1, 0, 0, 22)
-			matBtn.BackgroundColor3 = T.Colors.Surface
-			matBtn.TextColor3 = T.Colors.Text
-			matBtn.Text = "  " .. mat.Name
-			matBtn.FontFace = T.Fonts.Default
-			matBtn.TextSize = T.Sizes.FontSizeSmall
-			matBtn.TextXAlignment = Enum.TextXAlignment.Left
-			matBtn.BorderSizePixel = 0
-			matBtn.ZIndex = 11
+	table.insert(self._presetDropdownRefreshers, refresh)
+end
 
-			matBtn.MouseButton1Click:Connect(function()
-				self._state:SetSetting("paintMaterial", mat)
-				dropdown.Text = mat.Name
-				list:Destroy()
+------------------------------------------------------------------------
+-- Preset list (the dropdown that opens under a preset row)
+------------------------------------------------------------------------
+function WidgetUI:_showPresetListForRow(row: GuiObject, layoutOrder: number)
+	local T = self._theme
+	local parent = row.Parent
+	if not parent then return end
+
+	if parent:FindFirstChild("PresetList") then
+		parent:FindFirstChild("PresetList"):Destroy()
+		return
+	end
+
+	local presets = self._state.materialPresets
+	if not presets then return end
+
+	local list = Instance.new("ScrollingFrame", parent)
+	list.Name = "PresetList"
+	list.Size = UDim2.new(1, 0, 0, 180)
+	list.BackgroundColor3 = T.Colors.Surface
+	list.BorderSizePixel = 0
+	list.ScrollBarThickness = 4
+	list.CanvasSize = UDim2.fromOffset(0, 0)
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.LayoutOrder = layoutOrder
+	list.ZIndex = 10
+	Instance.new("UICorner", list).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", list).Color = T.Colors.Border
+
+	local listLayout = Instance.new("UIListLayout", list)
+	listLayout.Padding = UDim.new(0, 2)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local order = 0
+	for _, preset in presets:GetAll() do
+		order += 1
+		local item = Instance.new("TextButton", list)
+		item.Name = "Preset_" .. preset.id
+		item.Size = UDim2.new(1, 0, 0, 32)
+		item.BackgroundColor3 = T.Colors.Surface
+		item.Text = ""
+		item.BorderSizePixel = 0
+		item.LayoutOrder = order
+		item.ZIndex = 11
+		item.AutoButtonColor = true
+
+		local thumb = self:_buildMaterialThumbnail(item, preset.color, preset.material, 26)
+		thumb.Position = UDim2.fromOffset(3, 3)
+		thumb.ZIndex = 12
+
+		local nameLbl = Instance.new("TextLabel", item)
+		nameLbl.Size = UDim2.new(1, -36, 1, 0)
+		nameLbl.Position = UDim2.fromOffset(34, 0)
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.TextColor3 = T.Colors.Text
+		nameLbl.FontFace = T.Fonts.Semi
+		nameLbl.TextSize = T.Sizes.FontSizeNormal
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.Text = preset.name
+		nameLbl.ZIndex = 12
+
+		item.MouseButton1Click:Connect(function()
+			self._state:SetSetting("paintColor", preset.color)
+			self._state:SetSetting("paintMaterial", preset.material)
+			list:Destroy()
+		end)
+	end
+
+	-- Footer: jump to the Presets manager tab.
+	local sep = Instance.new("Frame", list)
+	sep.Name = "Separator"
+	sep.Size = UDim2.new(1, -8, 0, 1)
+	sep.Position = UDim2.fromOffset(4, 0)
+	sep.BackgroundColor3 = T.Colors.Border
+	sep.BorderSizePixel = 0
+	sep.LayoutOrder = order + 1
+	sep.ZIndex = 11
+
+	order += 2
+	local manageBtn = Instance.new("TextButton", list)
+	manageBtn.Name = "ManageBtn"
+	manageBtn.Size = UDim2.new(1, 0, 0, 26)
+	manageBtn.BackgroundColor3 = T.Colors.Surface
+	manageBtn.TextColor3 = T.Colors.Accent
+	manageBtn.Text = "+ Manage Presets"
+	manageBtn.FontFace = T.Fonts.Bold
+	manageBtn.TextSize = T.Sizes.FontSizeSmall
+	manageBtn.BorderSizePixel = 0
+	manageBtn.LayoutOrder = order
+	manageBtn.ZIndex = 11
+
+	manageBtn.MouseButton1Click:Connect(function()
+		list:Destroy()
+		self._state:SetMode("Presets")
+	end)
+end
+
+------------------------------------------------------------------------
+-- Presets panel (the 6th tab) — full CRUD UI
+------------------------------------------------------------------------
+function WidgetUI:_buildPresetsPanel(parent): Frame
+	local T = self._theme
+	local frame = self:_panelFrame(parent, "PresetsPanel", 6)
+
+	self:_addLabel(frame, "PresetsTitle", "Material Presets", T.Fonts.Bold, T.Sizes.FontSizeLarge, 1)
+	self:_addLabel(frame, "PresetsHelp",
+		"Reusable color+material pairs. Pick one in the Draw or Paint panel " ..
+		"to instantly set the next triangle's appearance.",
+		T.Fonts.Default, T.Sizes.FontSizeSmall, 2)
+
+	local addBtn = Instance.new("TextButton", frame)
+	addBtn.Name = "AddPresetBtn"
+	addBtn.Size = UDim2.new(1, 0, 0, 30)
+	addBtn.BackgroundColor3 = T.Colors.Positive
+	addBtn.TextColor3 = Color3.new(1, 1, 1)
+	addBtn.Text = "+ New Preset"
+	addBtn.FontFace = T.Fonts.Bold
+	addBtn.TextSize = T.Sizes.FontSizeNormal
+	addBtn.BorderSizePixel = 0
+	addBtn.LayoutOrder = 3
+	Instance.new("UICorner", addBtn).CornerRadius = T.Sizes.SmallCorner
+
+	addBtn.MouseButton1Click:Connect(function()
+		local presets = self._state.materialPresets
+		if not presets then return end
+		local n = #presets:GetAll() + 1
+		local newId = presets:Add(
+			"Preset " .. n,
+			self._state.settings.paintColor,
+			self._state.settings.paintMaterial
+		)
+		-- presets:Add() fires `changed` synchronously *before* returning, so
+		-- the manager has already refreshed by the time we get here and the
+		-- new row exists in the list. Spotlight it directly: scroll-into-view,
+		-- focus its name box, and flash its outline. Otherwise the new row
+		-- appears off-screen at the bottom of the list and the click feels
+		-- like a no-op.
+		self:_spotlightPresetRow(newId)
+	end)
+
+	-- Export / Import row
+	local transferRow = Instance.new("Frame", frame)
+	transferRow.Name = "TransferRow"
+	transferRow.Size = UDim2.new(1, 0, 0, 28)
+	transferRow.BackgroundTransparency = 1
+	transferRow.LayoutOrder = 4
+
+	local transferLayout = Instance.new("UIListLayout", transferRow)
+	transferLayout.FillDirection = Enum.FillDirection.Horizontal
+	transferLayout.Padding = UDim.new(0, 4)
+	transferLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local exportBtn = Instance.new("TextButton", transferRow)
+	exportBtn.Name = "ExportBtn"
+	exportBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	exportBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	exportBtn.TextColor3 = T.Colors.Text
+	exportBtn.Text = "Export"
+	exportBtn.FontFace = T.Fonts.Semi
+	exportBtn.TextSize = T.Sizes.FontSizeSmall
+	exportBtn.BorderSizePixel = 0
+	exportBtn.LayoutOrder = 1
+	Instance.new("UICorner", exportBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local importBtn = Instance.new("TextButton", transferRow)
+	importBtn.Name = "ImportBtn"
+	importBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	importBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	importBtn.TextColor3 = T.Colors.Text
+	importBtn.Text = "Import"
+	importBtn.FontFace = T.Fonts.Semi
+	importBtn.TextSize = T.Sizes.FontSizeSmall
+	importBtn.BorderSizePixel = 0
+	importBtn.LayoutOrder = 2
+	Instance.new("UICorner", importBtn).CornerRadius = T.Sizes.SmallCorner
+
+	-- Inline transfer panels (LayoutOrder 5). Each is its own frame, only
+	-- one is visible at a time. Build lazily on first open so they aren't
+	-- cluttering the layout when unused.
+	exportBtn.MouseButton1Click:Connect(function()
+		self:_toggleExportFrame(frame, 5)
+	end)
+	importBtn.MouseButton1Click:Connect(function()
+		self:_toggleImportFrame(frame, 5)
+	end)
+
+	local listContainer = Instance.new("Frame", frame)
+	listContainer.Name = "ListContainer"
+	listContainer.Size = UDim2.new(1, 0, 0, 0)
+	listContainer.AutomaticSize = Enum.AutomaticSize.Y
+	listContainer.BackgroundTransparency = 1
+	listContainer.LayoutOrder = 6
+
+	local listLayout = Instance.new("UIListLayout", listContainer)
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	self._presetManagerList = listContainer
+
+	-- Initial populate (and re-populate any time presets change).
+	self:_refreshPresetManager()
+
+	return frame
+end
+
+------------------------------------------------------------------------
+-- Export / Import inline panels
+------------------------------------------------------------------------
+function WidgetUI:_destroyTransferFrames(parent: Instance)
+	local existing = parent:FindFirstChild("ExportFrame")
+	if existing then existing:Destroy() end
+	existing = parent:FindFirstChild("ImportFrame")
+	if existing then existing:Destroy() end
+end
+
+function WidgetUI:_toggleExportFrame(parent: Instance, layoutOrder: number)
+	if parent:FindFirstChild("ExportFrame") then
+		parent:FindFirstChild("ExportFrame"):Destroy()
+		return
+	end
+	-- Hide import frame if it's open — only one transfer panel at a time.
+	local imp = parent:FindFirstChild("ImportFrame")
+	if imp then imp:Destroy() end
+
+	self:_buildExportFrame(parent, layoutOrder)
+end
+
+function WidgetUI:_toggleImportFrame(parent: Instance, layoutOrder: number)
+	if parent:FindFirstChild("ImportFrame") then
+		parent:FindFirstChild("ImportFrame"):Destroy()
+		return
+	end
+	local exp = parent:FindFirstChild("ExportFrame")
+	if exp then exp:Destroy() end
+
+	self:_buildImportFrame(parent, layoutOrder)
+end
+
+function WidgetUI:_buildExportFrame(parent, layoutOrder: number)
+	local T = self._theme
+	local presets = self._state.materialPresets
+	if not presets then return end
+
+	local frame = Instance.new("Frame", parent)
+	frame.Name = "ExportFrame"
+	frame.Size = UDim2.new(1, 0, 0, 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
+	frame.BackgroundColor3 = T.Colors.Surface
+	frame.BorderSizePixel = 0
+	frame.LayoutOrder = layoutOrder
+	Instance.new("UICorner", frame).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", frame).Color = T.Colors.Border
+
+	local pad = Instance.new("UIPadding", frame)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+
+	local layout = Instance.new("UIListLayout", frame)
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local title = Instance.new("TextLabel", frame)
+	title.Size = UDim2.new(1, 0, 0, 18)
+	title.BackgroundTransparency = 1
+	title.TextColor3 = T.Colors.Text
+	title.Text = "Export presets"
+	title.FontFace = T.Fonts.Bold
+	title.TextSize = T.Sizes.FontSizeNormal
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.LayoutOrder = 1
+
+	local hint = Instance.new("TextLabel", frame)
+	hint.Size = UDim2.new(1, 0, 0, 32)
+	hint.AutomaticSize = Enum.AutomaticSize.Y
+	hint.BackgroundTransparency = 1
+	hint.TextColor3 = T.Colors.TextDim
+	hint.Text = "Copy this JSON and share it. Your friend can paste it into the Import box."
+	hint.FontFace = T.Fonts.Default
+	hint.TextSize = T.Sizes.FontSizeSmall
+	hint.TextXAlignment = Enum.TextXAlignment.Left
+	hint.TextWrapped = true
+	hint.LayoutOrder = 2
+
+	local jsonText = presets:ExportToJSON()
+
+	local box = Instance.new("TextBox", frame)
+	box.Name = "ExportBox"
+	box.Size = UDim2.new(1, 0, 0, 160)
+	box.BackgroundColor3 = T.Colors.Background
+	box.TextColor3 = T.Colors.Text
+	box.Text = jsonText
+	box.FontFace = T.Fonts.Default  -- monospace would be nicer; theme doesn't define one
+	box.TextSize = T.Sizes.FontSizeSmall
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.TextYAlignment = Enum.TextYAlignment.Top
+	box.TextWrapped = true
+	box.MultiLine = true
+	box.ClearTextOnFocus = false
+	box.BorderSizePixel = 0
+	box.LayoutOrder = 3
+	Instance.new("UICorner", box).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", box).Color = T.Colors.Border
+
+	local boxPad = Instance.new("UIPadding", box)
+	boxPad.PaddingTop = UDim.new(0, 4)
+	boxPad.PaddingBottom = UDim.new(0, 4)
+	boxPad.PaddingLeft = UDim.new(0, 6)
+	boxPad.PaddingRight = UDim.new(0, 6)
+
+	local btnRow = Instance.new("Frame", frame)
+	btnRow.Size = UDim2.new(1, 0, 0, 28)
+	btnRow.BackgroundTransparency = 1
+	btnRow.LayoutOrder = 4
+
+	local rowLayout = Instance.new("UIListLayout", btnRow)
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.Padding = UDim.new(0, 4)
+
+	local copyBtn = Instance.new("TextButton", btnRow)
+	copyBtn.Name = "CopyBtn"
+	copyBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	copyBtn.BackgroundColor3 = T.Colors.Accent
+	copyBtn.TextColor3 = Color3.new(1, 1, 1)
+	copyBtn.Text = "Copy to Clipboard"
+	copyBtn.FontFace = T.Fonts.Bold
+	copyBtn.TextSize = T.Sizes.FontSizeSmall
+	copyBtn.BorderSizePixel = 0
+	Instance.new("UICorner", copyBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local closeBtn = Instance.new("TextButton", btnRow)
+	closeBtn.Name = "CloseBtn"
+	closeBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	closeBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	closeBtn.TextColor3 = T.Colors.Text
+	closeBtn.Text = "Close"
+	closeBtn.FontFace = T.Fonts.Semi
+	closeBtn.TextSize = T.Sizes.FontSizeSmall
+	closeBtn.BorderSizePixel = 0
+	Instance.new("UICorner", closeBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local status = Instance.new("TextLabel", frame)
+	status.Size = UDim2.new(1, 0, 0, 16)
+	status.BackgroundTransparency = 1
+	status.TextColor3 = T.Colors.TextDim
+	status.Text = ""
+	status.FontFace = T.Fonts.Default
+	status.TextSize = T.Sizes.FontSizeSmall
+	status.TextXAlignment = Enum.TextXAlignment.Left
+	status.LayoutOrder = 5
+
+	-- Studio-only clipboard API. Some builds expose `setclipboard` globally;
+	-- StudioService:CopyToClipboard is the official path. Try both.
+	local function copyToClipboard(text: string): (boolean, string?)
+		local ok, err = pcall(function()
+			local StudioService = game:GetService("StudioService") :: any
+			if StudioService and StudioService.CopyToClipboard then
+				StudioService:CopyToClipboard(text)
+				return
+			end
+			local sc = (rawget(getfenv(0), "setclipboard") :: any)
+			if sc then
+				sc(text)
+				return
+			end
+			error("No clipboard API available", 0)
+		end)
+		return ok, if ok then nil else tostring(err)
+	end
+
+	copyBtn.MouseButton1Click:Connect(function()
+		local ok, err = copyToClipboard(box.Text)
+		if ok then
+			status.Text = "Copied to clipboard."
+			status.TextColor3 = T.Colors.Positive
+		else
+			status.Text = "Couldn't auto-copy. Click the box, Ctrl+A, Ctrl+C. (" .. (err or "?") .. ")"
+			status.TextColor3 = T.Colors.Negative
+			-- Best we can do as a fallback: focus the box for the user.
+			box:CaptureFocus()
+		end
+	end)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		frame:Destroy()
+	end)
+end
+
+function WidgetUI:_buildImportFrame(parent, layoutOrder: number)
+	local T = self._theme
+	local presets = self._state.materialPresets
+	if not presets then return end
+
+	local frame = Instance.new("Frame", parent)
+	frame.Name = "ImportFrame"
+	frame.Size = UDim2.new(1, 0, 0, 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
+	frame.BackgroundColor3 = T.Colors.Surface
+	frame.BorderSizePixel = 0
+	frame.LayoutOrder = layoutOrder
+	Instance.new("UICorner", frame).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", frame).Color = T.Colors.Border
+
+	local pad = Instance.new("UIPadding", frame)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+
+	local layout = Instance.new("UIListLayout", frame)
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local title = Instance.new("TextLabel", frame)
+	title.Size = UDim2.new(1, 0, 0, 18)
+	title.BackgroundTransparency = 1
+	title.TextColor3 = T.Colors.Text
+	title.Text = "Import presets"
+	title.FontFace = T.Fonts.Bold
+	title.TextSize = T.Sizes.FontSizeNormal
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.LayoutOrder = 1
+
+	local hint = Instance.new("TextLabel", frame)
+	hint.Size = UDim2.new(1, 0, 0, 32)
+	hint.AutomaticSize = Enum.AutomaticSize.Y
+	hint.BackgroundTransparency = 1
+	hint.TextColor3 = T.Colors.TextDim
+	hint.Text = "Paste preset JSON below. 'Add' merges into your library; 'Replace All' wipes it first."
+	hint.FontFace = T.Fonts.Default
+	hint.TextSize = T.Sizes.FontSizeSmall
+	hint.TextXAlignment = Enum.TextXAlignment.Left
+	hint.TextWrapped = true
+	hint.LayoutOrder = 2
+
+	local box = Instance.new("TextBox", frame)
+	box.Name = "ImportBox"
+	box.Size = UDim2.new(1, 0, 0, 160)
+	box.BackgroundColor3 = T.Colors.Background
+	box.TextColor3 = T.Colors.Text
+	box.Text = ""
+	box.PlaceholderText = '[ { "name": "Grass", "color": [74, 124, 63], "material": "Grass" } ]'
+	box.PlaceholderColor3 = T.Colors.TextDim
+	box.FontFace = T.Fonts.Default
+	box.TextSize = T.Sizes.FontSizeSmall
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.TextYAlignment = Enum.TextYAlignment.Top
+	box.TextWrapped = true
+	box.MultiLine = true
+	box.ClearTextOnFocus = false
+	box.BorderSizePixel = 0
+	box.LayoutOrder = 3
+	Instance.new("UICorner", box).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", box).Color = T.Colors.Border
+
+	local boxPad = Instance.new("UIPadding", box)
+	boxPad.PaddingTop = UDim.new(0, 4)
+	boxPad.PaddingBottom = UDim.new(0, 4)
+	boxPad.PaddingLeft = UDim.new(0, 6)
+	boxPad.PaddingRight = UDim.new(0, 6)
+
+	local status = Instance.new("TextLabel", frame)
+	status.Size = UDim2.new(1, 0, 0, 16)
+	status.AutomaticSize = Enum.AutomaticSize.Y
+	status.BackgroundTransparency = 1
+	status.TextColor3 = T.Colors.TextDim
+	status.Text = ""
+	status.FontFace = T.Fonts.Default
+	status.TextSize = T.Sizes.FontSizeSmall
+	status.TextXAlignment = Enum.TextXAlignment.Left
+	status.TextWrapped = true
+	status.LayoutOrder = 4
+
+	local btnRow = Instance.new("Frame", frame)
+	btnRow.Size = UDim2.new(1, 0, 0, 28)
+	btnRow.BackgroundTransparency = 1
+	btnRow.LayoutOrder = 5
+
+	local rowLayout = Instance.new("UIListLayout", btnRow)
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.Padding = UDim.new(0, 4)
+
+	local addBtn = Instance.new("TextButton", btnRow)
+	addBtn.Name = "AddBtn"
+	addBtn.Size = UDim2.new(0.4, -2, 1, 0)
+	addBtn.BackgroundColor3 = T.Colors.Positive
+	addBtn.TextColor3 = Color3.new(1, 1, 1)
+	addBtn.Text = "Add"
+	addBtn.FontFace = T.Fonts.Bold
+	addBtn.TextSize = T.Sizes.FontSizeSmall
+	addBtn.BorderSizePixel = 0
+	Instance.new("UICorner", addBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local replaceBtn = Instance.new("TextButton", btnRow)
+	replaceBtn.Name = "ReplaceBtn"
+	replaceBtn.Size = UDim2.new(0.4, -2, 1, 0)
+	replaceBtn.BackgroundColor3 = T.Colors.Negative
+	replaceBtn.TextColor3 = Color3.new(1, 1, 1)
+	replaceBtn.Text = "Replace All"
+	replaceBtn.FontFace = T.Fonts.Bold
+	replaceBtn.TextSize = T.Sizes.FontSizeSmall
+	replaceBtn.BorderSizePixel = 0
+	Instance.new("UICorner", replaceBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local cancelBtn = Instance.new("TextButton", btnRow)
+	cancelBtn.Name = "CancelBtn"
+	cancelBtn.Size = UDim2.new(0.2, -2, 1, 0)
+	cancelBtn.BackgroundColor3 = T.Colors.ButtonNormal
+	cancelBtn.TextColor3 = T.Colors.Text
+	cancelBtn.Text = "Cancel"
+	cancelBtn.FontFace = T.Fonts.Semi
+	cancelBtn.TextSize = T.Sizes.FontSizeSmall
+	cancelBtn.BorderSizePixel = 0
+	Instance.new("UICorner", cancelBtn).CornerRadius = T.Sizes.SmallCorner
+
+	local function tryImport(replace: boolean)
+		local count, err = presets:ImportFromJSON(box.Text, replace)
+		if err then
+			status.Text = "Import failed: " .. err
+			status.TextColor3 = T.Colors.Negative
+			return
+		end
+		status.Text = string.format(
+			"Imported %d preset%s%s.",
+			count,
+			if count == 1 then "" else "s",
+			if replace then " (replaced existing library)" else ""
+		)
+		status.TextColor3 = T.Colors.Positive
+		box.Text = ""
+	end
+
+	-- Replace All wipes the entire preset library — one misclick can torch
+	-- a lot of work. Two-step confirm: first click flips the button into
+	-- a hot "Confirm" state for 3s, second click commits. If the user
+	-- moves on (or hits Add/Cancel/anywhere else), it auto-resets.
+	local replaceArmed = false
+	local replaceArmToken = 0
+	local origReplaceText = replaceBtn.Text
+	local origReplaceColor = replaceBtn.BackgroundColor3
+
+	local function disarmReplace()
+		replaceArmed = false
+		replaceArmToken += 1
+		replaceBtn.Text = origReplaceText
+		replaceBtn.BackgroundColor3 = origReplaceColor
+	end
+
+	addBtn.MouseButton1Click:Connect(function()
+		disarmReplace()
+		tryImport(false)
+	end)
+
+	replaceBtn.MouseButton1Click:Connect(function()
+		if replaceArmed then
+			disarmReplace()
+			tryImport(true)
+			return
+		end
+		replaceArmed = true
+		replaceArmToken += 1
+		local myToken = replaceArmToken
+		replaceBtn.Text = "Confirm replace?"
+		-- Slightly darker red so the second state reads as "really sure?"
+		replaceBtn.BackgroundColor3 = Color3.fromRGB(
+			math.clamp(math.round(origReplaceColor.R * 255 * 0.75), 0, 255),
+			math.clamp(math.round(origReplaceColor.G * 255 * 0.75), 0, 255),
+			math.clamp(math.round(origReplaceColor.B * 255 * 0.75), 0, 255)
+		)
+		task.delay(3, function()
+			-- Token guards against a stale timer disarming a freshly-armed
+			-- button (user clicks twice within 3s -> second click resets
+			-- the timer; old timer's disarm should be a no-op).
+			if myToken == replaceArmToken and replaceArmed then
+				disarmReplace()
+			end
+		end)
+	end)
+
+	cancelBtn.MouseButton1Click:Connect(function() frame:Destroy() end)
+end
+
+function WidgetUI:_refreshPresetManager()
+	local container = self._presetManagerList
+	if not container or not container.Parent then return end
+
+	-- Clear existing rows except the UIListLayout.
+	for _, child in container:GetChildren() do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+
+	local presets = self._state.materialPresets
+	if not presets then return end
+
+	local order = 0
+	for _, preset in presets:GetAll() do
+		order += 1
+		-- Multiply by 10 so popup pickers (color grid / material list) have
+		-- room to slot in just after their row via LayoutOrder = row + 1.
+		self:_buildPresetEditorRow(container, preset, order * 10)
+	end
+
+	if order == 0 then
+		local empty = Instance.new("TextLabel", container)
+		empty.Size = UDim2.new(1, 0, 0, 40)
+		empty.BackgroundTransparency = 1
+		empty.TextColor3 = self._theme.Colors.TextDim
+		empty.FontFace = self._theme.Fonts.Default
+		empty.TextSize = self._theme.Sizes.FontSizeSmall
+		empty.Text = "No presets yet. Click + New Preset above to add one."
+		empty.LayoutOrder = 1
+	end
+end
+
+------------------------------------------------------------------------
+-- Spotlight a preset row by id: scroll the mode panel so the row is on
+-- screen, focus the row's name TextBox so the user can rename right away,
+-- and briefly flash its outline. Deferred a frame so the UIListLayout
+-- has settled into final positions.
+------------------------------------------------------------------------
+function WidgetUI:_spotlightPresetRow(presetId: string)
+	task.defer(function()
+		local container = self._presetManagerList
+		if not container or not container.Parent then return end
+		local row = container:FindFirstChild("Row_" .. presetId)
+		if not row or not row:IsA("GuiObject") then return end
+
+		-- Scroll the mode panel so the new row is visible (with some headroom
+		-- so the user can see the row above it for context).
+		local panel = self._modePanel
+		if panel then
+			local rowAbsY = row.AbsolutePosition.Y
+			local panelAbsY = panel.AbsolutePosition.Y
+			local relY = rowAbsY - panelAbsY + panel.CanvasPosition.Y
+			panel.CanvasPosition = Vector2.new(0, math.max(0, relY - 60))
+		end
+
+		-- Focus the name TextBox and select-all so typing immediately
+		-- replaces the placeholder name.
+		local nameBox = row:FindFirstChild("Name")
+		if nameBox and nameBox:IsA("TextBox") then
+			pcall(function()
+				nameBox:CaptureFocus()
+				nameBox.SelectionStart = 1
+				nameBox.CursorPosition = #nameBox.Text + 1
 			end)
 		end
+
+		-- Outline flash: thicker accent stroke for ~1.2s, then back to the
+		-- default border. Find the row's stroke (we created exactly one).
+		local stroke = row:FindFirstChildWhichIsA("UIStroke")
+		if stroke then
+			local origColor = stroke.Color
+			local origThickness = stroke.Thickness
+			stroke.Color = self._theme.Colors.Accent
+			stroke.Thickness = 2
+			task.delay(1.2, function()
+				if stroke.Parent then
+					stroke.Color = origColor
+					stroke.Thickness = origThickness
+				end
+			end)
+		end
+	end)
+end
+
+function WidgetUI:_buildPresetEditorRow(parent, preset, order: number)
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = "Row_" .. preset.id
+	row.Size = UDim2.new(1, 0, 0, 64)
+	row.BackgroundColor3 = T.Colors.Surface
+	row.BorderSizePixel = 0
+	row.LayoutOrder = order
+	Instance.new("UICorner", row).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", row).Color = T.Colors.Border
+
+	-- Thumbnail (left)
+	local thumbHolder = Instance.new("Frame", row)
+	thumbHolder.Name = "ThumbHolder"
+	thumbHolder.Size = UDim2.fromOffset(48, 48)
+	thumbHolder.Position = UDim2.fromOffset(8, 8)
+	thumbHolder.BackgroundTransparency = 1
+
+	self:_buildMaterialThumbnail(thumbHolder, preset.color, preset.material, 48)
+
+	-- Name (top right)
+	local nameBox = Instance.new("TextBox", row)
+	nameBox.Name = "Name"
+	nameBox.Size = UDim2.new(1, -180, 0, 24)
+	nameBox.Position = UDim2.new(0, 64, 0, 6)
+	nameBox.BackgroundColor3 = T.Colors.Background
+	nameBox.TextColor3 = T.Colors.Text
+	nameBox.PlaceholderText = "Preset name"
+	nameBox.PlaceholderColor3 = T.Colors.TextDim
+	nameBox.Text = preset.name
+	nameBox.FontFace = T.Fonts.Semi
+	nameBox.TextSize = T.Sizes.FontSizeNormal
+	nameBox.TextXAlignment = Enum.TextXAlignment.Left
+	nameBox.ClearTextOnFocus = false
+	nameBox.BorderSizePixel = 0
+	Instance.new("UICorner", nameBox).CornerRadius = T.Sizes.SmallCorner
+
+	local namePad = Instance.new("UIPadding", nameBox)
+	namePad.PaddingLeft = UDim.new(0, 6)
+	namePad.PaddingRight = UDim.new(0, 6)
+
+	nameBox.FocusLost:Connect(function()
+		local presets = self._state.materialPresets
+		if not presets then return end
+		local trimmed = nameBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+		if #trimmed == 0 then
+			nameBox.Text = preset.name
+			return
+		end
+		presets:Update(preset.id, { name = trimmed })
+	end)
+
+	-- Color swatch (bottom-left under name)
+	local colorBtn = Instance.new("TextButton", row)
+	colorBtn.Name = "ColorBtn"
+	colorBtn.Size = UDim2.fromOffset(28, 24)
+	colorBtn.Position = UDim2.new(0, 64, 0, 34)
+	colorBtn.BackgroundColor3 = preset.color
+	colorBtn.Text = ""
+	colorBtn.BorderSizePixel = 0
+	Instance.new("UICorner", colorBtn).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", colorBtn).Color = T.Colors.Border
+
+	-- Material dropdown (right of color, takes the rest of the row width up
+	-- to the delete button area).
+	local matBtn = Instance.new("TextButton", row)
+	matBtn.Name = "MatBtn"
+	matBtn.Size = UDim2.new(1, -176, 0, 24)
+	matBtn.Position = UDim2.new(0, 100, 0, 34)
+	matBtn.BackgroundColor3 = T.Colors.Background
+	matBtn.TextColor3 = T.Colors.Text
+	matBtn.Text = "  " .. preset.material.Name
+	matBtn.FontFace = T.Fonts.Default
+	matBtn.TextSize = T.Sizes.FontSizeSmall
+	matBtn.TextXAlignment = Enum.TextXAlignment.Left
+	matBtn.BorderSizePixel = 0
+	Instance.new("UICorner", matBtn).CornerRadius = T.Sizes.SmallCorner
+	Instance.new("UIStroke", matBtn).Color = T.Colors.Border
+
+	-- Delete button (top right, small)
+	local delBtn = Instance.new("TextButton", row)
+	delBtn.Name = "DeleteBtn"
+	delBtn.Size = UDim2.fromOffset(60, 24)
+	delBtn.Position = UDim2.new(1, -68, 0, 6)
+	delBtn.BackgroundColor3 = T.Colors.Negative
+	delBtn.TextColor3 = Color3.new(1, 1, 1)
+	delBtn.Text = "Delete"
+	delBtn.FontFace = T.Fonts.Bold
+	delBtn.TextSize = T.Sizes.FontSizeSmall
+	delBtn.BorderSizePixel = 0
+	Instance.new("UICorner", delBtn).CornerRadius = T.Sizes.SmallCorner
+
+	delBtn.MouseButton1Click:Connect(function()
+		local presets = self._state.materialPresets
+		if not presets then return end
+		presets:Remove(preset.id)
+	end)
+
+	-- Color picker (drops into the manager's list container, sandwiched
+	-- between rows via a layout order that places it directly after this row).
+	colorBtn.MouseButton1Click:Connect(function()
+		local container = parent  -- the ListContainer of the Presets panel
+		self:_showColorGridForCallback(container, order + 1, function(c)
+			local presets = self._state.materialPresets
+			if not presets then return end
+			presets:Update(preset.id, { color = c })
+		end)
+	end)
+
+	-- Material picker — same pattern.
+	matBtn.MouseButton1Click:Connect(function()
+		local container = parent
+		self:_showMaterialListForCallback(container, order + 1, function(mat)
+			local presets = self._state.materialPresets
+			if not presets then return end
+			presets:Update(preset.id, { material = mat })
+		end)
 	end)
 end
 
@@ -2903,7 +6076,19 @@ function WidgetUI:_addLabel(parent, name, text, font, size, order): TextLabel
 	return lbl
 end
 
-function WidgetUI:_addSliderRow(parent, name, label, min, max, default, order, callback)
+-- Returned by row helpers so external code can:
+--   * SetEnabled(bool)  — grey out and gate input (used to cascade-disable
+--                         dependent options when a parent toggle is off)
+--   * SetValue(value)   — push an external value into the row (used when
+--                         settings change via another control)
+type RowController = {
+	SetEnabled: (self: any, enabled: boolean) -> (),
+	SetValue: (self: any, value: any) -> (),
+}
+
+local DISABLED_ALPHA = 0.55
+
+function WidgetUI:_addSliderRow(parent, name, label, min, max, default, order, callback): RowController
 	local T = self._theme
 
 	local row = Instance.new("Frame", parent)
@@ -2957,33 +6142,41 @@ function WidgetUI:_addSliderRow(parent, name, label, min, max, default, order, c
 	handle.ZIndex = 5
 	Instance.new("UICorner", handle).CornerRadius = UDim.new(0.5, 0)
 
+	local enabled = true
 	local dragging = false
+
+	local function setVisualFromValue(val)
+		local rel = math.clamp((val - min) / (max - min), 0, 1)
+		fill.Size = UDim2.new(rel, 0, 1, 0)
+		handle.Position = UDim2.new(rel, -6, 0.5, -6)
+		valLabel.Text = tostring(math.round(val * 10) / 10)
+	end
+
 	handle.MouseButton1Down:Connect(function()
+		if not enabled then return end
 		dragging = true
 	end)
 
 	handle.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		if not enabled or not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			local abs = sliderBg.AbsolutePosition
 			local sizeX = sliderBg.AbsoluteSize.X
 			local relX = math.clamp((input.Position.X - abs.X) / sizeX, 0, 1)
 			local val = min + relX * (max - min)
-			fill.Size = UDim2.new(relX, 0, 1, 0)
-			handle.Position = UDim2.new(relX, -6, 0.5, -6)
-			valLabel.Text = tostring(math.round(val * 10) / 10)
+			setVisualFromValue(val)
 			callback(val)
 		end
 	end)
 
 	sliderBg.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		if not enabled or not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			local abs = sliderBg.AbsolutePosition
 			local sizeX = sliderBg.AbsoluteSize.X
 			local relX = math.clamp((input.Position.X - abs.X) / sizeX, 0, 1)
 			local val = min + relX * (max - min)
-			fill.Size = UDim2.new(relX, 0, 1, 0)
-			handle.Position = UDim2.new(relX, -6, 0.5, -6)
-			valLabel.Text = tostring(math.round(val * 10) / 10)
+			setVisualFromValue(val)
 			callback(val)
 		end
 	end)
@@ -2992,9 +6185,26 @@ function WidgetUI:_addSliderRow(parent, name, label, min, max, default, order, c
 	handle.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 	end)
+
+	local controller = {}
+	function controller:SetEnabled(v: boolean)
+		enabled = v
+		if not v then dragging = false end
+		local trans = if v then 0 else DISABLED_ALPHA
+		lbl.TextTransparency = trans
+		valLabel.TextTransparency = trans
+		sliderBg.BackgroundTransparency = trans
+		fill.BackgroundTransparency = trans
+		handle.BackgroundTransparency = trans
+		handle.AutoButtonColor = v
+	end
+	function controller:SetValue(val: number)
+		setVisualFromValue(val)
+	end
+	return controller
 end
 
-function WidgetUI:_addToggleRow(parent, name, label, default, order, callback)
+function WidgetUI:_addToggleRow(parent, name, label, default, order, callback): RowController
 	local T = self._theme
 
 	local row = Instance.new("Frame", parent)
@@ -3024,12 +6234,135 @@ function WidgetUI:_addToggleRow(parent, name, label, default, order, callback)
 	Instance.new("UICorner", btn).CornerRadius = UDim.new(0.5, 0)
 
 	local state = default
-	btn.MouseButton1Click:Connect(function()
-		state = not state
+	local enabled = true
+
+	local function applyVisual()
 		btn.BackgroundColor3 = if state then T.Colors.Positive else T.Colors.Border
 		btn.Text = if state then "ON" else "OFF"
+	end
+
+	btn.MouseButton1Click:Connect(function()
+		if not enabled then return end
+		state = not state
+		applyVisual()
 		callback(state)
 	end)
+
+	local controller = {}
+	function controller:SetEnabled(v: boolean)
+		enabled = v
+		local trans = if v then 0 else DISABLED_ALPHA
+		lbl.TextTransparency = trans
+		btn.TextTransparency = trans
+		btn.BackgroundTransparency = trans
+		btn.AutoButtonColor = v
+	end
+	function controller:SetValue(v: boolean)
+		if state ~= v then
+			state = v
+			applyVisual()
+		end
+	end
+	return controller
+end
+
+------------------------------------------------------------------------
+-- Editable text input row. Used for things like the work plane Y position
+-- where we want both a live-updating display AND user editability.
+--
+-- The callback receives the parsed value (after passing the optional
+-- validate fn). Commit fires on Enter or focus loss with valid input.
+-- SetValue updates the visible text but only if the box isn't currently
+-- focused, so we don't overwrite what the user is typing.
+------------------------------------------------------------------------
+function WidgetUI:_addTextInputRow(parent, name, label, default, order, validate, onCommit): RowController
+	local T = self._theme
+
+	local row = Instance.new("Frame", parent)
+	row.Name = name
+	row.Size = UDim2.new(1, 0, 0, 28)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = order
+
+	local lbl = Instance.new("TextLabel", row)
+	lbl.Size = UDim2.new(0.5, -4, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = T.Colors.Text
+	lbl.Text = label
+	lbl.FontFace = T.Fonts.Semi
+	lbl.TextSize = T.Sizes.FontSizeNormal
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+	local boxFrame = Instance.new("Frame", row)
+	boxFrame.Size = UDim2.new(0.5, 0, 0, 22)
+	boxFrame.Position = UDim2.new(0.5, 0, 0.5, -11)
+	boxFrame.BackgroundColor3 = T.Colors.Surface
+	boxFrame.BorderSizePixel = 0
+	Instance.new("UICorner", boxFrame).CornerRadius = T.Sizes.SmallCorner
+	local stroke = Instance.new("UIStroke", boxFrame)
+	stroke.Color = T.Colors.Border
+
+	local box = Instance.new("TextBox", boxFrame)
+	box.Size = UDim2.new(1, -8, 1, 0)
+	box.Position = UDim2.fromOffset(4, 0)
+	box.BackgroundTransparency = 1
+	box.TextColor3 = T.Colors.Text
+	box.PlaceholderColor3 = T.Colors.TextDim
+	box.FontFace = T.Fonts.Default
+	box.TextSize = T.Sizes.FontSizeSmall
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.ClearTextOnFocus = false
+	box.Text = tostring(default)
+
+	local enabled = true
+	-- Last value pushed via SetValue (or the initial default). On rejection
+	-- we revert to this rather than the original default, so a "bad input"
+	-- snaps back to whatever the live value currently is.
+	local lastGoodText = tostring(default)
+
+	box.FocusLost:Connect(function(enterPressed)
+		if not enabled then return end
+		local raw = box.Text
+		stroke.Color = T.Colors.Border
+		-- No-op if the user didn't actually change anything. Without this,
+		-- focus-without-edit would still re-fire onCommit -> SetSetting ->
+		-- settingsChanged cascade, which on the work plane Y would race
+		-- with the live-Y broadcaster pushing back the same value.
+		if raw == lastGoodText then return end
+		local parsed = if validate then validate(raw) else tonumber(raw)
+		if parsed ~= nil then
+			onCommit(parsed)
+		else
+			box.Text = lastGoodText
+		end
+	end)
+
+	box.Focused:Connect(function()
+		if not enabled then box:ReleaseFocus() return end
+		stroke.Color = T.Colors.Accent
+	end)
+
+	local controller = {}
+	function controller:SetEnabled(v: boolean)
+		enabled = v
+		local trans = if v then 0 else DISABLED_ALPHA
+		lbl.TextTransparency = trans
+		box.TextTransparency = trans
+		boxFrame.BackgroundTransparency = trans
+		stroke.Transparency = trans
+		box.TextEditable = v
+		if not v then
+			box:ReleaseFocus()
+		end
+	end
+	function controller:SetValue(val: any)
+		local s = tostring(val)
+		lastGoodText = s
+		if not box:IsFocused() then
+			box.Text = s
+		end
+	end
+	return controller
 end
 
 ------------------------------------------------------------------------
@@ -3039,6 +6372,10 @@ function WidgetUI:_bindState()
 	table.insert(self._conns, self._state.modeChanged:Connect(function(mode)
 		self:_highlightActiveMode(mode)
 		self:_showModePanel(mode)
+	end))
+
+	table.insert(self._conns, self._state.drawSubModeChanged:Connect(function()
+		self:_refreshSubDivToggle()
 	end))
 
 	table.insert(self._conns, self._state.nodeAdded:Connect(function()
@@ -3071,6 +6408,86 @@ function WidgetUI:_bindState()
 			self._drawStatusLabel.Text = string.format("Selected: %d/3 nodes", #sel)
 		end
 	end))
+
+	table.insert(self._conns, self._state.settingsChanged:Connect(function(key)
+		if key == "paintColor" or key == "paintMaterial" then
+			-- Refresh paint UI surfaces
+			for _, refresh in self._colorPreviewRefreshers do refresh() end
+			for _, refresh in self._materialDropdownRefreshers do refresh() end
+			for _, refresh in self._presetDropdownRefreshers do refresh() end
+		elseif key == "workPlaneEnabled" or key == "workPlaneLocked" then
+			-- Refresh disable cascade and keep the lock toggle visual in
+			-- sync with the underlying setting (the textbox auto-lock path
+			-- changes workPlaneLocked without going through the toggle).
+			if self._refreshWorkPlaneRows then
+				self._refreshWorkPlaneRows()
+			end
+			if self._workPlaneCtrls then
+				self._workPlaneCtrls.lockCtrl:SetValue(self._state.settings.workPlaneLocked)
+				self._workPlaneCtrls.showCtrl:SetValue(self._state.settings.workPlaneEnabled)
+			end
+		elseif key == "workPlaneFixedY" then
+			-- When the user toggles lock or types a Y, push the new fixed
+			-- value into the textbox immediately (so it doesn't have to wait
+			-- for the next workPlaneYChanged tick from InputHandler).
+			if self._workPlaneCtrls then
+				self._workPlaneCtrls.yCtrl:SetValue(string.format("%.1f", self._state.settings.workPlaneFixedY))
+			end
+		elseif key == "workPlaneYOffset" then
+			-- Slider moves change the Y when unlocked; the slider's own
+			-- visual already reflects this, so nothing extra needed here.
+		end
+	end))
+
+	-- Live Y readout in the textbox. Throttled at the source; safe to
+	-- listen every tick.
+	table.insert(self._conns, self._state.workPlaneYChanged:Connect(function(y)
+		if self._workPlaneCtrls then
+			self._workPlaneCtrls.yCtrl:SetValue(string.format("%.1f", y))
+		end
+	end))
+
+	-- Delete-stroke live counter. Show "Deleted: N" while a drag is in
+	-- progress, and clear the label when the stroke ends (count reset to 0).
+	table.insert(self._conns, self._state.deleteStrokeChanged:Connect(function(n)
+		if not self._deleteCounterLabel then return end
+		if n > 0 then
+			self._deleteCounterLabel.Text = string.format("Deleted: %d", n)
+		else
+			self._deleteCounterLabel.Text = ""
+		end
+	end))
+
+	-- Material presets are wired up post-construction (Plugin.server sets
+	-- state.materialPresets after instantiation). Bind lazily on first use.
+	local function bindPresets()
+		if not self._state.materialPresets or self._presetsBound then return end
+		self._presetsBound = true
+		table.insert(self._conns, self._state.materialPresets.changed:Connect(function()
+			-- Any open preset dropdown (Paint / Draw panel) is now showing
+			-- a stale list — clicking a row could apply a deleted preset
+			-- or skip a newly-renamed one. Close them so the user re-opens
+			-- and gets fresh data. Search recursively because the dropdown
+			-- is parented to the row's container, which lives inside a
+			-- mode panel.
+			for _, panel in self._modePanels do
+				local d = panel:FindFirstChild("PresetList", true)
+				while d do
+					d:Destroy()
+					d = panel:FindFirstChild("PresetList", true)
+				end
+			end
+			for _, refresh in self._presetDropdownRefreshers do refresh() end
+			self:_refreshPresetManager()
+		end))
+		-- Initial sync now that presets exist.
+		for _, refresh in self._presetDropdownRefreshers do refresh() end
+		self:_refreshPresetManager()
+	end
+	bindPresets()
+	-- Defensive: if presets weren't attached to state yet at WidgetUI.new()
+	-- time, the caller can invoke ui:_tryBindPresets() once they are.
+	self._tryBindPresets = bindPresets
 
 	table.insert(self._conns, self._state.selectionChanged:Connect(function()
 		if self._selInfoLabel then

@@ -3,12 +3,18 @@ import os
 src_dir = r'F:\CODE STUFF\Paperclip\memories\TriangleTerrainPlugin\src'
 
 files = {}
-for name in ['Plugin.server', 'Signal', 'Theme', 'TerrainState', 'TriangleEngine',
+for name in ['Plugin.server', 'Version', 'Signal', 'Theme', 'TerrainState',
+             'TriangleEngine', 'SubdivisionEngine', 'MaterialPresets',
              'NodeManager', 'InputHandler', 'AutoTriangulate', 'WidgetUI']:
     ext = '.luau'
     fname = name + ext
     with open(os.path.join(src_dir, fname), 'r', encoding='utf-8') as f:
         files[name] = f.read()
+
+# Extract version for log output and a stamped backup filename.
+import re
+version_match = re.search(r'Version\.STRING\s*=\s*"([^"]+)"', files['Version'])
+version_str = version_match.group(1) if version_match else 'unknown'
 
 parts = []
 parts.append('<roblox version="4">')
@@ -21,7 +27,8 @@ parts.append('\t\t\t\t<string name="Name">TriangleTerrainPlugin</string>')
 parts.append('\t\t\t\t<ProtectedString name="Source"><![CDATA[' + files['Plugin.server'] + ']]></ProtectedString>')
 parts.append('\t\t\t</Properties>')
 
-modules = ['Signal', 'Theme', 'TerrainState', 'TriangleEngine', 'NodeManager',
+modules = ['Version', 'Signal', 'Theme', 'TerrainState', 'TriangleEngine',
+           'SubdivisionEngine', 'MaterialPresets', 'NodeManager',
            'InputHandler', 'AutoTriangulate', 'WidgetUI']
 
 for i, name in enumerate(modules):
@@ -44,10 +51,11 @@ out_file = os.path.join(plugins_path, 'TriangleTerrainPlugin.rbxmx')
 with open(out_file, 'w', encoding='utf-8') as f:
     f.write(output)
 
-print(f'Written {len(output)} bytes to {out_file}')
-print(f'Modules: {len(modules)}')
+print(f'Built TriangleTerrainPlugin v{version_str}')
+print(f'  -> {out_file}  ({len(output):,} bytes)')
+print(f'  Modules: {len(modules)}')
 
 backup = os.path.join(src_dir, '..', 'TriangleTerrainPlugin.rbxmx')
 with open(backup, 'w', encoding='utf-8') as f:
     f.write(output)
-print(f'Backup copy at {backup}')
+print(f'  Backup: {backup}')

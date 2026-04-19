@@ -5,11 +5,17 @@
 	node/triangle data, sculpt tools, and auto-triangulation.
 ]]
 
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
 local TerrainState    = require(script.TerrainState)
 local NodeManager     = require(script.NodeManager)
 local InputHandler    = require(script.InputHandler)
 local AutoTriangulate = require(script.AutoTriangulate)
 local WidgetUI        = require(script.WidgetUI)
+local MaterialPresets = require(script.MaterialPresets)
+local Version         = require(script.Version)
+
+local TITLE = "Triangle Terrain v" .. Version.STRING
 
 ------------------------------------------------------------------------
 -- Plugin toolbar
@@ -17,7 +23,7 @@ local WidgetUI        = require(script.WidgetUI)
 local toolbar = plugin:CreateToolbar("Triangle Terrain")
 local toggleBtn = toolbar:CreateButton(
 	"TriTerrainToggle",
-	"Open the Triangle Terrain editor",
+	"Open the Triangle Terrain editor (" .. TITLE .. ")",
 	"rbxassetid://6034818372",
 	"Triangle Terrain"
 )
@@ -34,14 +40,17 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 )
 
 local widget = plugin:CreateDockWidgetPluginGui("TriangleTerrain", widgetInfo)
-widget.Title = "Triangle Terrain"
+widget.Title = TITLE
 widget.Name = "TriangleTerrain"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+print(string.format("[TriTerrain] Loaded %s", TITLE))
 
 ------------------------------------------------------------------------
 -- Core systems
 ------------------------------------------------------------------------
 local state = TerrainState.new()
+state.materialPresets = MaterialPresets.new(plugin)
 local nodeManager = NodeManager.new(state)
 local mouse = plugin:GetMouse()
 local inputHandler = InputHandler.new(state, nodeManager, mouse)
@@ -66,7 +75,15 @@ local callbacks = {
 			return
 		end
 
-		local triangles = AutoTriangulate.triangulate(visibleNodes)
+		local triangles = AutoTriangulate.triangulate(
+			visibleNodes,
+			state.settings.autoTriMaxEdgeFactor
+		)
+
+		-- One outer recording so the whole batch is a single undo step.
+		-- CreateTriangle's own TryBeginRecording will return nil while ours
+		-- is in flight, so we don't get N separate undo entries.
+		local recording = ChangeHistoryService:TryBeginRecording("AutoTriangulate")
 
 		local created = 0
 		for _, tri in triangles do
@@ -74,16 +91,17 @@ local callbacks = {
 			if id then created += 1 end
 		end
 
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+
 		print(string.format("[TriTerrain] Auto-triangulated: %d triangles from %d nodes.", created, #visibleNodes))
 	end,
 
 	onDeleteSelected = function()
-		for _, nodeId in state.selectedNodes do
-			nodeManager:DeleteNode(nodeId)
-		end
-		for _, triId in state.selectedTriangles do
-			nodeManager:DeleteTriangle(triId)
-		end
+		-- Routed through NodeManager:DeleteMany so this matches the keyboard
+		-- delete path (single undo step covering both nodes and triangles).
+		nodeManager:DeleteMany(state.selectedNodes, state.selectedTriangles)
 		state:SelectNode(nil)
 	end,
 }
@@ -132,6 +150,22 @@ end
 ------------------------------------------------------------------------
 state.tagFilterChanged:Connect(function()
 	nodeManager:ApplyTagFilter()
+end)
+
+------------------------------------------------------------------------
+-- Undo/redo state reconciliation
+--
+-- Studio's ChangeHistoryService restores the workspace instances on Ctrl+Z,
+-- but our self._state.nodes / .triangles maps don't know that the
+-- previously-deleted parts came back (or that previously-restored parts
+-- went away again on redo). Resync after every undo/redo so hover, paint,
+-- delete and selection all act on what's actually in the scene.
+------------------------------------------------------------------------
+ChangeHistoryService.OnUndo:Connect(function()
+	nodeManager:ResyncFromWorkspace()
+end)
+ChangeHistoryService.OnRedo:Connect(function()
+	nodeManager:ResyncFromWorkspace()
 end)
 
 ------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 local Signal = require(script.Parent.Signal)
 
-export type Mode = "Place" | "Draw" | "Paint" | "Sculpt" | "Select"
+export type Mode = "Place" | "Draw" | "Paint" | "Sculpt" | "Select" | "Delete" | "Presets"
+export type DrawSubMode = "Triangulate" | "SubDivide"
 
 export type NodeData = {
 	id: string,
@@ -28,6 +29,7 @@ function TerrainState.new()
 	self.triangles = {} :: { [string]: TriData }
 
 	self.activeMode = "Place" :: Mode
+	self.drawSubMode = "Triangulate" :: DrawSubMode
 	self.activeTag = nil :: string?
 	self.tags = {} :: { string }
 
@@ -51,10 +53,36 @@ function TerrainState.new()
 		triangleThickness = 0.1,
 		workPlaneEnabled = false,
 		workPlaneYOffset = 20,
+		-- When locked, the plane stays at workPlaneFixedY and ignores the
+		-- camera-relative offset. When unlocked, it tracks the camera as
+		-- camPos.Y - workPlaneYOffset.
+		workPlaneLocked = false,
+		workPlaneFixedY = 0,
+		-- Delete-mode option. When true, Delete mode also targets nodes
+		-- directly, and deleting a triangle additionally cleans up any of
+		-- its 3 vertex nodes that are no longer used by any other triangle
+		-- ("orphan nodes"). Off by default — additive feature, conservative
+		-- default to avoid surprising the user.
+		deleteNodesEnabled = false,
+		-- Auto-Triangulate alpha-shape filter strength. The threshold for
+		-- "this triangle is a convex-hull bridge artifact" is
+		--   (longest edge) > autoTriMaxEdgeFactor * (median nearest-neighbor)
+		-- 3.0 is a sweet spot for typical irregular layouts (curves, rings).
+		-- Bump higher (5+) if you want raw Delaunay; drop to ~2 for very
+		-- conservative shape-following on dense point clouds. 0 disables
+		-- the filter entirely.
+		autoTriMaxEdgeFactor = 3.0,
 	}
+
+	-- Live Y of the work plane in the world. Updated by InputHandler each
+	-- frame the plane is visible. Not part of `settings` because it's a
+	-- *computed* value, not a user preference, so we don't want it firing
+	-- the broadly-listened settingsChanged signal every frame.
+	self.workPlaneCurrentY = 0
 
 	-- Signals
 	self.modeChanged = Signal.new()
+	self.drawSubModeChanged = Signal.new()
 	self.nodeAdded = Signal.new()
 	self.nodeRemoved = Signal.new()
 	self.nodeMoved = Signal.new()
@@ -67,9 +95,17 @@ function TerrainState.new()
 	self.tagsChanged = Signal.new()
 	self.settingsChanged = Signal.new()
 	self.stateLoaded = Signal.new()
+	self.workPlaneYChanged = Signal.new()
+	self.deleteStrokeChanged = Signal.new()
+	self.deleteStrokeCount = 0
 
 	self._nextNodeId = 1
 	self._nextTriId = 1
+
+	-- Material preset library (set externally by Plugin.server.luau because
+	-- it needs the `plugin` handle for SetSetting/GetSetting). UI code reads
+	-- from here. May be nil during very early construction.
+	self.materialPresets = nil
 
 	return self
 end
@@ -80,8 +116,26 @@ end
 function TerrainState:SetMode(mode: Mode)
 	if self.activeMode == mode then return end
 	self.activeMode = mode
-	self.drawSelection = {}
+	-- Switching modes also clears any in-progress 3-vertex Draw pick. Must
+	-- fire drawSelectionChanged so the Draw panel's "selected nodes" visual
+	-- doesn't lie about a partial pick the user can no longer complete.
+	if #self.drawSelection > 0 then
+		table.clear(self.drawSelection)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
 	self.modeChanged:Fire(mode)
+end
+
+function TerrainState:SetDrawSubMode(mode: DrawSubMode)
+	if self.drawSubMode == mode then return end
+	self.drawSubMode = mode
+	-- Switching sub-mode also clears any partial draw selection so the user
+	-- doesn't end up with stale 1-or-2-node picks when toggling.
+	if #self.drawSelection > 0 then
+		table.clear(self.drawSelection)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
+	self.drawSubModeChanged:Fire(mode)
 end
 
 ------------------------------------------------------------------------
@@ -107,6 +161,23 @@ function TerrainState:UnregisterNode(id: string)
 	if not self.nodes[id] then return end
 	self.nodes[id] = nil
 	self.nodeRemoved:Fire(id)
+
+	-- Prune the id from any selection/pick lists so dead ids don't pile up.
+	-- Without this:
+	--   * selectedNodes count ("3 nodes selected") lies after deletes
+	--   * Delete Selected silently no-ops on dead ids
+	--   * drawSelection in Draw mode keeps a stale partial pick that
+	--     CreateTriangle silently rejects (frustrating "click does nothing")
+	local sIdx = table.find(self.selectedNodes, id)
+	if sIdx then
+		table.remove(self.selectedNodes, sIdx)
+		self.selectionChanged:Fire()
+	end
+	local dIdx = table.find(self.drawSelection, id)
+	if dIdx then
+		table.remove(self.drawSelection, dIdx)
+		self.drawSelectionChanged:Fire(self.drawSelection)
+	end
 end
 
 function TerrainState:UpdateNodePosition(id: string, position: Vector3)
@@ -147,6 +218,14 @@ function TerrainState:UnregisterTriangle(id: string)
 	if not self.triangles[id] then return end
 	self.triangles[id] = nil
 	self.triangleRemoved:Fire(id)
+
+	-- Same prune-on-removal contract as UnregisterNode — keeps
+	-- selectedTriangles honest after any cascade delete.
+	local sIdx = table.find(self.selectedTriangles, id)
+	if sIdx then
+		table.remove(self.selectedTriangles, sIdx)
+		self.selectionChanged:Fire()
+	end
 end
 
 function TerrainState:UpdateTriangleAppearance(id: string, color: Color3?, material: Enum.Material?)
@@ -235,6 +314,28 @@ end
 function TerrainState:SetSetting(key: string, value: any)
 	self.settings[key] = value
 	self.settingsChanged:Fire(key, value)
+end
+
+------------------------------------------------------------------------
+-- Work plane live-Y broadcast. Throttles to 0.05-stud changes to avoid
+-- per-frame spam (Heartbeat fires ~60 Hz; without this, listeners would
+-- update 60 times/sec while the camera moves vertically).
+------------------------------------------------------------------------
+function TerrainState:SetWorkPlaneCurrentY(y: number)
+	if math.abs((self.workPlaneCurrentY or 0) - y) < 0.05 then return end
+	self.workPlaneCurrentY = y
+	self.workPlaneYChanged:Fire(y)
+end
+
+------------------------------------------------------------------------
+-- Delete-mode stroke counter. Fired by InputHandler when an in-progress
+-- delete drag adds a triangle, and again with 0 when the stroke ends.
+-- The Delete panel listens to this to show "Deleted: N" mid-stroke.
+------------------------------------------------------------------------
+function TerrainState:SetDeleteStrokeCount(n: number)
+	if self.deleteStrokeCount == n then return end
+	self.deleteStrokeCount = n
+	self.deleteStrokeChanged:Fire(n)
 end
 
 ------------------------------------------------------------------------

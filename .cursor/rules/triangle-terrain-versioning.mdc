@@ -1,0 +1,25 @@
+---
+description: Triangle Terrain Plugin — bump version & rebuild on every meaningful change
+globs:
+  - memories/TriangleTerrainPlugin/src/**
+  - memories/TriangleTerrainPlugin/build_rbxmx.py
+---
+
+# Triangle Terrain Plugin: Version Bump Required
+
+When you modify ANY file under `memories/TriangleTerrainPlugin/src/`, you MUST update `src/Version.luau` BEFORE running `build_rbxmx.py`. The version string is shown in the plugin's dock widget title so the user can immediately see which build is loaded.
+
+## Bump rules (semver)
+
+- **PATCH** (0.0.x): bug fixes, internal refactors, doc/comment changes, no user-visible behavior change
+- **MINOR** (0.x.0): new feature, new mode, new UI section, expanded capability, new module
+- **MAJOR** (x.0.0): breaking change to data format, removed features, large rewrites
+
+## Workflow
+
+1. Make your code changes.
+2. Edit `src/Version.luau`: bump `Version.STRING` and add a one-line entry to the in-file `History` block describing what shipped.
+3. Run `python build_rbxmx.py` to write the updated `.rbxmx` to the user's Plugins folder.
+4. Tell the user the new version (e.g. "Built v0.4.0 — added X").
+
+If multiple changes are batched in one task, do ONE bump for the combined work — pick the highest applicable level (MINOR > PATCH).
